@@ -23,7 +23,9 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 
 import java.time.Duration;
+
 import java.util.Collections;
+
 import java.util.Properties;
 
 public class Consumer extends ShutdownableThread {
@@ -59,8 +61,10 @@ public class Consumer extends ShutdownableThread {
         return null;
     }
 
-    @Override
+    
+   @Override
     public boolean isInterruptible() {
         return false;
+   
     }
 }
