@@ -31,7 +31,7 @@ import java.util.Properties;
 public class Consumer extends ShutdownableThread {
     private final KafkaConsumer<Integer, String> consumer;
     private final String topic;
-
+    private final String topic1;
     public Consumer(String topic) {
         super("KafkaConsumerExample", false);
         Properties props = new Properties();
