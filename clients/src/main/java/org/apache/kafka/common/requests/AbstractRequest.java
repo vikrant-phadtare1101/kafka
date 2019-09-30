@@ -20,7 +20,9 @@ import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.network.NetworkSend;
 import org.apache.kafka.common.network.Send;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.protocol.Message;
 import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
@@ -93,15 +95,47 @@ public abstract class AbstractRequest extends AbstractRequestResponse {
     }
 
     public Send toSend(String destination, RequestHeader header) {
-        return new NetworkSend(destination, serialize(header));
+        return new NetworkSend(destination, serializeWithHeader(header));
     }
 
     /**
      * Use with care, typically {@link #toSend(String, RequestHeader)} should be used instead.
      */
-    public ByteBuffer serialize(RequestHeader header) {
-        return serialize(header.toStruct(), toStruct());
+    public final ByteBuffer serializeWithHeader(RequestHeader header) {
+        Message data = data();
+        Struct headerStruct = header.toStruct();
+        if (data == null)
+            return serialize(headerStruct, toStruct());
+
+        ByteBuffer buffer = ByteBuffer.allocate(headerStruct.sizeOf() + data.size(version));
+        headerStruct.writeTo(buffer);
+        data.write(new ByteBufferAccessor(buffer), version);
+        buffer.rewind();
+        return buffer;
     }
+
+    // Visible for testing
+    ByteBuffer serializeBody() {
+        Message data = data();
+        ByteBuffer buffer;
+        if (data == null) {
+            Struct bodyStruct = toStruct();
+            buffer = ByteBuffer.allocate(bodyStruct.sizeOf());
+            bodyStruct.writeTo(buffer);
+        } else {
+            buffer = ByteBuffer.allocate(data.size(version));
+            data.write(new ByteBufferAccessor(buffer), version);
+        }
+        buffer.rewind();
+        return buffer;
+    }
+
+    // Visible for testing
+    int sizeInBytes() {
+        return data().size(version);
+    }
+
+    protected abstract Message data();
 
     protected abstract Struct toStruct();
 
@@ -233,6 +267,12 @@ public abstract class AbstractRequest extends AbstractRequestResponse {
                 return new ElectLeadersRequest(struct, apiVersion);
             case INCREMENTAL_ALTER_CONFIGS:
                 return new IncrementalAlterConfigsRequest(struct, apiVersion);
+            case ALTER_PARTITION_REASSIGNMENTS:
+                return new AlterPartitionReassignmentsRequest(struct, apiVersion);
+            case LIST_PARTITION_REASSIGNMENTS:
+                return new ListPartitionReassignmentsRequest(struct, apiVersion);
+            case OFFSET_DELETE:
+                return new OffsetDeleteRequest(struct, apiVersion);
             default:
                 throw new AssertionError(String.format("ApiKey %s is not currently handled in `parseRequest`, the " +
                         "code should be updated to do so.", apiKey));

@@ -19,6 +19,7 @@ package org.apache.kafka.common.requests;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.protocol.Message;
 import org.apache.kafka.common.protocol.types.Field;
 import org.apache.kafka.common.protocol.types.Schema;
 import org.apache.kafka.common.protocol.types.Struct;
@@ -70,7 +71,7 @@ public class ListOffsetResponse extends AbstractResponse {
     // partition level fields
     // This key is only used by ListOffsetResponse v0
     @Deprecated
-    private static final Field.Array OFFSETS = new Field.Array("offsets'", INT64, "A list of offsets.");
+    private static final Field.Array OFFSETS = new Field.Array("offsets", INT64, "A list of offsets.");
     private static final Field.Int64 TIMESTAMP = new Field.Int64("timestamp",
             "The timestamp associated with the returned offset");
     private static final Field.Int64 OFFSET = new Field.Int64("offset",
@@ -282,6 +283,11 @@ public class ListOffsetResponse extends AbstractResponse {
         struct.set(TOPICS, topicArray.toArray());
 
         return struct;
+    }
+
+    @Override
+    protected Message data() {
+        return null;
     }
 
     @Override

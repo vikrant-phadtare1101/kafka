@@ -49,7 +49,7 @@ class ThrottledChannelExpirationTest {
                                                  listenerName: ListenerName = ListenerName.forSecurityProtocol(SecurityProtocol.PLAINTEXT)): (T, RequestChannel.Request) = {
 
     val request = builder.build()
-    val buffer = request.serialize(new RequestHeader(builder.apiKey, request.version, "", 0))
+    val buffer = request.serializeWithHeader(new RequestHeader(builder.apiKey, request.version, "", 0))
     val requestChannelMetrics: RequestChannel.Metrics = EasyMock.createNiceMock(classOf[RequestChannel.Metrics])
 
     // read the header from the buffer first so that the body can be read next from the Request constructor
@@ -68,13 +68,13 @@ class ThrottledChannelExpirationTest {
   }
 
   @Before
-  def beforeMethod() {
+  def beforeMethod(): Unit = {
     numCallbacksForStartThrottling = 0
     numCallbacksForEndThrottling = 0
   }
 
   @Test
-  def testCallbackInvocationAfterExpiration() {
+  def testCallbackInvocationAfterExpiration(): Unit = {
     val clientMetrics = new ClientQuotaManager(ClientQuotaManagerConfig(), metrics, QuotaType.Produce, time, "")
 
     val delayQueue = new DelayQueue[ThrottledChannel]()
@@ -107,7 +107,7 @@ class ThrottledChannelExpirationTest {
   }
 
   @Test
-  def testThrottledChannelDelay() {
+  def testThrottledChannelDelay(): Unit = {
     val t1: ThrottledChannel = new ThrottledChannel(request, time, 10, callback)
     val t2: ThrottledChannel = new ThrottledChannel(request, time, 20, callback)
     val t3: ThrottledChannel = new ThrottledChannel(request, time, 20, callback)

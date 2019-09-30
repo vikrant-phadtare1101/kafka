@@ -20,6 +20,7 @@ package org.apache.kafka.common.requests;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.protocol.Message;
 import org.apache.kafka.common.protocol.types.ArrayOf;
 import org.apache.kafka.common.protocol.types.Field;
 import org.apache.kafka.common.protocol.types.Schema;
@@ -122,6 +123,11 @@ public class AlterReplicaLogDirsResponse extends AbstractResponse {
     }
 
     @Override
+    protected Message data() {
+        return null;
+    }
+
+    @Override
     public int throttleTimeMs() {
         return throttleTimeMs;
     }
@@ -132,7 +138,7 @@ public class AlterReplicaLogDirsResponse extends AbstractResponse {
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-        return errorCounts(responses);
+        return errorCounts(responses.values());
     }
 
     public static AlterReplicaLogDirsResponse parse(ByteBuffer buffer, short version) {
