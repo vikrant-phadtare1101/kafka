@@ -76,13 +76,11 @@ public abstract class AbstractRequest extends AbstractRequestResponse {
     }
 
     private final short version;
-    public final ApiKeys api;
 
     public AbstractRequest(ApiKeys api, short version) {
         if (!api.isVersionSupported(version))
             throw new UnsupportedVersionException("The " + api + " protocol does not support version " + version);
         this.version = version;
-        this.api = api;
     }
 
     /**
@@ -229,10 +227,8 @@ public abstract class AbstractRequest extends AbstractRequestResponse {
                 return new DescribeDelegationTokenRequest(struct, apiVersion);
             case DELETE_GROUPS:
                 return new DeleteGroupsRequest(struct, apiVersion);
-            case ELECT_LEADERS:
-                return new ElectLeadersRequest(struct, apiVersion);
-            case INCREMENTAL_ALTER_CONFIGS:
-                return new IncrementalAlterConfigsRequest(struct, apiVersion);
+            case ELECT_PREFERRED_LEADERS:
+                return new ElectPreferredLeadersRequest(struct, apiVersion);
             default:
                 throw new AssertionError(String.format("ApiKey %s is not currently handled in `parseRequest`, the " +
                         "code should be updated to do so.", apiKey));

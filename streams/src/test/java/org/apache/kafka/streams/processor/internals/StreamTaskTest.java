@@ -89,6 +89,8 @@ import static org.junit.Assert.fail;
 
 public class StreamTaskTest {
 
+    private static final File BASE_DIR = TestUtils.tempDirectory();
+
     private final Serializer<Integer> intSerializer = Serdes.Integer().serializer();
     private final Serializer<byte[]> bytesSerializer = Serdes.ByteArray().serializer();
     private final Deserializer<Integer> intDeserializer = Serdes.Integer().deserializer();
@@ -140,7 +142,6 @@ public class StreamTaskTest {
     private final StreamsMetricsImpl streamsMetrics = new MockStreamsMetrics(metrics);
     private final TaskId taskId00 = new TaskId(0, 0);
     private final MockTime time = new MockTime();
-    private final File baseDir = TestUtils.tempDirectory();
     private StateDirectory stateDirectory;
     private StreamTask task;
     private long punctuatedAt;
@@ -175,10 +176,11 @@ public class StreamTaskTest {
                                      Collections.emptySet());
     }
 
-    private StreamsConfig createConfig(final boolean enableEoS) {
+    // Exposed to make it easier to create StreamTask config from other tests.
+    static StreamsConfig createConfig(final boolean enableEoS) {
         final String canonicalPath;
         try {
-            canonicalPath = baseDir.getCanonicalPath();
+            canonicalPath = BASE_DIR.getCanonicalPath();
         } catch (final IOException e) {
             throw new RuntimeException(e);
         }
@@ -210,7 +212,7 @@ public class StreamTaskTest {
                 }
             }
         } finally {
-            Utils.delete(baseDir);
+            Utils.delete(BASE_DIR);
         }
     }
 
@@ -246,6 +248,7 @@ public class StreamTaskTest {
                         throw new TimeoutException("test");
                     }
                 },
+                null,
                 null
             );
             fail("Expected an exception");
@@ -300,6 +303,7 @@ public class StreamTaskTest {
                     }
                 }
             },
+            null,
             null
         );
         testTask.initializeTopology();
@@ -849,7 +853,8 @@ public class StreamTaskTest {
                 public void flush() {
                     flushed.set(true);
                 }
-            });
+            },
+            metrics.sensor("dummy"));
         streamTask.flushState();
         assertTrue(flushed.get());
     }
@@ -861,7 +866,7 @@ public class StreamTaskTest {
         task.initializeTopology();
         task.commit();
         final OffsetCheckpoint checkpoint = new OffsetCheckpoint(
-            new File(stateDirectory.directoryForTask(taskId00), ProcessorStateManager.CHECKPOINT_FILE_NAME)
+            new File(stateDirectory.directoryForTask(taskId00), StateManagerUtil.CHECKPOINT_FILE_NAME)
         );
 
         assertThat(checkpoint.read(), equalTo(Collections.singletonMap(changelogPartition, offset)));
@@ -875,7 +880,7 @@ public class StreamTaskTest {
         task.commit();
         final File checkpointFile = new File(
             stateDirectory.directoryForTask(taskId00),
-            ProcessorStateManager.CHECKPOINT_FILE_NAME
+            StateManagerUtil.CHECKPOINT_FILE_NAME
         );
 
         assertFalse(checkpointFile.exists());
@@ -1424,7 +1429,8 @@ public class StreamTaskTest {
             stateDirectory,
             null,
             time,
-            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer));
+            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer),
+            metrics.sensor("dummy"));
         task.initializeStateStores();
         task.initializeTopology();
 
@@ -1477,6 +1483,8 @@ public class StreamTaskTest {
     }
 
     private StreamTask createStatefulTask(final StreamsConfig config, final boolean logged) {
+        final StateStore stateStore = new MockKeyValueStore(storeName, logged);
+
         final ProcessorTopology topology = ProcessorTopologyFactories.with(
             asList(source1, source2),
             mkMap(mkEntry(topic1, source1), mkEntry(topic2, source2)),
@@ -1494,7 +1502,8 @@ public class StreamTaskTest {
             stateDirectory,
             null,
             time,
-            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer));
+            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer),
+            metrics.sensor("dummy"));
     }
 
     private StreamTask createStatefulTaskThatThrowsExceptionOnClose() {
@@ -1515,7 +1524,8 @@ public class StreamTaskTest {
             stateDirectory,
             null,
             time,
-            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer));
+            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer),
+            metrics.sensor("dummy"));
     }
 
     private StreamTask createStatelessTask(final StreamsConfig streamsConfig) {
@@ -1540,7 +1550,8 @@ public class StreamTaskTest {
             stateDirectory,
             null,
             time,
-            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer));
+            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer),
+            metrics.sensor("dummy"));
     }
 
     // this task will throw exception when processing (on partition2), flushing, suspending and closing
@@ -1566,7 +1577,8 @@ public class StreamTaskTest {
             stateDirectory,
             null,
             time,
-            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer)) {
+            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer),
+            metrics.sensor("dummy")) {
             @Override
             protected void flushState() {
                 throw new RuntimeException("KABOOM!");

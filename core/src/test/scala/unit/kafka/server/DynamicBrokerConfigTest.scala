@@ -28,12 +28,12 @@ import org.apache.kafka.common.config.{ConfigException, SslConfigs}
 import org.easymock.EasyMock
 import org.junit.Assert._
 import org.junit.Test
-import org.scalatest.Assertions.intercept
+import org.scalatest.junit.JUnitSuite
 
 import scala.collection.JavaConverters._
 import scala.collection.Set
 
-class DynamicBrokerConfigTest {
+class DynamicBrokerConfigTest extends JUnitSuite {
 
   @Test
   def testConfigUpdate(): Unit = {
@@ -186,12 +186,6 @@ class DynamicBrokerConfigTest {
     //test invalid address
     verifyConfigUpdate(KafkaConfig.MaxConnectionsPerIpOverridesProp, "hostName#:100", perBrokerConfig = true,
       expectFailure = true)
-
-    verifyConfigUpdate(KafkaConfig.MaxConnectionsProp, "100", perBrokerConfig = true, expectFailure = false)
-    verifyConfigUpdate(KafkaConfig.MaxConnectionsProp, "100", perBrokerConfig = false, expectFailure = false)
-    val listenerMaxConnectionsProp = s"listener.name.external.${KafkaConfig.MaxConnectionsProp}"
-    verifyConfigUpdate(listenerMaxConnectionsProp, "10", perBrokerConfig = true, expectFailure = false)
-    verifyConfigUpdate(listenerMaxConnectionsProp, "10", perBrokerConfig = false, expectFailure = false)
   }
 
   private def verifyConfigUpdate(name: String, value: Object, perBrokerConfig: Boolean, expectFailure: Boolean) {

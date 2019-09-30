@@ -22,6 +22,7 @@ package org.apache.kafka.streams.scala
 import java.util.Properties
 import java.util.regex.Pattern
 
+import org.scalatest.junit.JUnitSuite
 import org.junit.Assert._
 import org.junit._
 import org.junit.rules.TemporaryFolder
@@ -47,7 +48,7 @@ import org.junit.experimental.categories.Category
  * Hence the native Java API based version is more verbose.
  */
 @Category(Array(classOf[IntegrationTest]))
-class WordCountTest extends WordCountTestData {
+class WordCountTest extends JUnitSuite with WordCountTestData {
 
   private val privateCluster: EmbeddedKafkaCluster = new EmbeddedKafkaCluster(1)
 

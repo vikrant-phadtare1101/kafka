@@ -484,7 +484,7 @@ public class FileRecords extends AbstractRecords implements Closeable {
 
         @Override
         public int hashCode() {
-            int result = Long.hashCode(offset);
+            int result = (int) (offset ^ (offset >>> 32));
             result = 31 * result + position;
             result = 31 * result + size;
             return result;

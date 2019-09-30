@@ -132,12 +132,6 @@ class LogCleaner(initialConfig: CleanerConfig,
            new Gauge[Int] {
              def value: Int = cleaners.map(_.lastStats).map(_.elapsedSecs).max.toInt
            })
-  // a metric to track delay between the time when a log is required to be compacted
-  // as determined by max compaction lag and the time of last cleaner run.
-  newGauge("max-compaction-delay-secs",
-          new Gauge[Int] {
-          def value: Int = Math.max(0, (cleaners.map(_.lastPreCleanStats).map(_.maxCompactionDelayMs).max / 1000).toInt)
-          })
 
   /**
    * Start the background cleaning
@@ -291,7 +285,6 @@ class LogCleaner(initialConfig: CleanerConfig,
                               checkDone = checkDone)
 
     @volatile var lastStats: CleanerStats = new CleanerStats()
-    @volatile var lastPreCleanStats: PreCleanStats = new PreCleanStats()
 
     private def checkDone(topicPartition: TopicPartition) {
       if (!isRunning)
@@ -317,12 +310,10 @@ class LogCleaner(initialConfig: CleanerConfig,
       var currentLog: Option[Log] = None
 
       try {
-        val preCleanStats = new PreCleanStats()
-        val cleaned = cleanerManager.grabFilthiestCompactedLog(time, preCleanStats) match {
+        val cleaned = cleanerManager.grabFilthiestCompactedLog(time) match {
           case None =>
             false
           case Some(cleanable) =>
-            this.lastPreCleanStats = preCleanStats
             // there's a log, clean it
             currentLog = Some(cleanable.log)
             cleanLog(cleanable)
@@ -395,9 +386,6 @@ class LogCleaner(initialConfig: CleanerConfig,
         "\t%.1f%% size reduction (%.1f%% fewer messages)%n".format(100.0 * (1.0 - stats.bytesWritten.toDouble/stats.bytesRead),
                                                                    100.0 * (1.0 - stats.messagesWritten.toDouble/stats.messagesRead))
       info(message)
-      if (lastPreCleanStats.delayedPartitions > 0) {
-        info("\tCleanable partitions: %d, Delayed partitions: %d, max delay: %d".format(lastPreCleanStats.cleanablePartitions, lastPreCleanStats.delayedPartitions, lastPreCleanStats.maxCompactionDelayMs))
-      }
       if (stats.invalidMessagesRead > 0) {
         warn("\tFound %d invalid messages during compaction.".format(stats.invalidMessagesRead))
       }
@@ -766,14 +754,13 @@ private[log] class Cleaner(val id: Int,
     if (record.hasKey) {
       val key = record.key
       val foundOffset = map.get(key)
-      /* First,the message must have the latest offset for the key
-       * then there are two cases in which we can retain a message:
-       *   1) The message has value
-       *   2) The message doesn't has value but it can't be deleted now.
+      /* two cases in which we can get rid of a message:
+       *   1) if there exists a message with the same key but higher offset
+       *   2) if the message is a delete "tombstone" marker and enough time has passed
        */
-      val latestOffsetForKey = record.offset() >= foundOffset
-      val isRetainedValue = record.hasValue || retainDeletes
-      latestOffsetForKey && isRetainedValue
+      val redundant = foundOffset >= 0 && record.offset < foundOffset
+      val obsoleteDelete = !retainDeletes && !record.hasValue
+      !redundant && !obsoleteDelete
     } else {
       stats.invalidMessage()
       false
@@ -968,25 +955,6 @@ private[log] class Cleaner(val id: Int,
 }
 
 /**
-  * A simple struct for collecting pre-clean stats
-  */
-private class PreCleanStats() {
-  var maxCompactionDelayMs = 0L
-  var delayedPartitions = 0
-  var cleanablePartitions = 0
-
-  def updateMaxCompactionDelay(delayMs: Long): Unit = {
-    maxCompactionDelayMs = Math.max(maxCompactionDelayMs, delayMs)
-    if (delayMs > 0) {
-      delayedPartitions += 1
-    }
-  }
-  def recordCleanablePartitions(numOfCleanables: Int): Unit = {
-    cleanablePartitions = numOfCleanables
-  }
-}
-
-/**
  * A simple struct for collecting stats about log cleaning
  */
 private class CleanerStats(time: Time = Time.SYSTEM) {
@@ -1039,11 +1007,9 @@ private class CleanerStats(time: Time = Time.SYSTEM) {
 }
 
 /**
-  * Helper class for a log, its topic/partition, the first cleanable position, the first uncleanable dirty position,
-  * and whether it needs compaction immediately.
-  */
-private case class LogToClean(topicPartition: TopicPartition, log: Log, firstDirtyOffset: Long,
-                              uncleanableOffset: Long, needCompactionNow: Boolean = false) extends Ordered[LogToClean] {
+ * Helper class for a log, its topic/partition, the first cleanable position, and the first uncleanable dirty position
+ */
+private case class LogToClean(topicPartition: TopicPartition, log: Log, firstDirtyOffset: Long, uncleanableOffset: Long) extends Ordered[LogToClean] {
   val cleanBytes = log.logSegments(-1, firstDirtyOffset).map(_.size.toLong).sum
   val (firstUncleanableOffset, cleanableBytes) = LogCleaner.calculateCleanableBytes(log, firstDirtyOffset, uncleanableOffset)
   val totalBytes = cleanBytes + cleanableBytes
@@ -1061,7 +1027,7 @@ private[log] class CleanedTransactionMetadata {
   private val ongoingCommittedTxns = mutable.Set.empty[Long]
   private val ongoingAbortedTxns = mutable.Map.empty[Long, AbortedTransactionMetadata]
   // Minheap of aborted transactions sorted by the transaction first offset
-  private val abortedTransactions = mutable.PriorityQueue.empty[AbortedTxn](new Ordering[AbortedTxn] {
+  private var abortedTransactions = mutable.PriorityQueue.empty[AbortedTxn](new Ordering[AbortedTxn] {
     override def compare(x: AbortedTxn, y: AbortedTxn): Int = x.firstOffset compare y.firstOffset
   }.reverse)
 

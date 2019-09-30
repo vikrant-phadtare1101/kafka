@@ -26,7 +26,7 @@ import org.apache.kafka.common.requests.AbstractRequest
 import org.apache.kafka.common.security.JaasContext
 import org.apache.kafka.common.utils.{LogContext, Time}
 import org.apache.kafka.clients.{ApiVersions, ClientResponse, ManualMetadataUpdater, NetworkClient}
-import org.apache.kafka.common.{Node, Reconfigurable}
+import org.apache.kafka.common.Node
 import org.apache.kafka.common.requests.AbstractRequest.Builder
 
 import scala.collection.JavaConverters._
@@ -51,7 +51,7 @@ class ReplicaFetcherBlockingSend(sourceBroker: BrokerEndPoint,
   private val sourceNode = new Node(sourceBroker.id, sourceBroker.host, sourceBroker.port)
   private val socketTimeout: Int = brokerConfig.replicaSocketTimeoutMs
 
-  private val (networkClient, reconfigurableChannelBuilder) = {
+  private val networkClient = {
     val channelBuilder = ChannelBuilders.clientChannelBuilder(
       brokerConfig.interBrokerSecurityProtocol,
       JaasContext.Type.SERVER,
@@ -61,12 +61,6 @@ class ReplicaFetcherBlockingSend(sourceBroker: BrokerEndPoint,
       time,
       brokerConfig.saslInterBrokerHandshakeRequestEnable
     )
-    val reconfigurableChannelBuilder = channelBuilder match {
-      case reconfigurable: Reconfigurable =>
-        brokerConfig.addReconfigurable(reconfigurable)
-        Some(reconfigurable)
-      case _ => None
-    }
     val selector = new Selector(
       NetworkReceive.UNLIMITED,
       brokerConfig.connectionsMaxIdleMs,
@@ -78,7 +72,7 @@ class ReplicaFetcherBlockingSend(sourceBroker: BrokerEndPoint,
       channelBuilder,
       logContext
     )
-    val networkClient = new NetworkClient(
+    new NetworkClient(
       selector,
       new ManualMetadataUpdater(),
       clientId,
@@ -94,7 +88,6 @@ class ReplicaFetcherBlockingSend(sourceBroker: BrokerEndPoint,
       new ApiVersions,
       logContext
     )
-    (networkClient, reconfigurableChannelBuilder)
   }
 
   override def sendRequest(requestBuilder: Builder[_ <: AbstractRequest]): ClientResponse = {
@@ -115,7 +108,6 @@ class ReplicaFetcherBlockingSend(sourceBroker: BrokerEndPoint,
   }
 
   override def initiateClose(): Unit = {
-    reconfigurableChannelBuilder.foreach(brokerConfig.removeReconfigurable)
     networkClient.initiateClose()
   }
 

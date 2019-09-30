@@ -75,9 +75,6 @@ class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJ
 
     val actualClicksPerRegion: java.util.List[KeyValue[String, Long]] =
       produceNConsume(userClicksTopic, userRegionsTopic, outputTopic)
-
-    Assert.assertTrue("Expected to process some data", !actualClicksPerRegion.isEmpty)
-
     streams.close()
   }
 
@@ -118,9 +115,6 @@ class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJ
 
     val actualClicksPerRegion: java.util.List[KeyValue[String, Long]] =
       produceNConsume(userClicksTopic, userRegionsTopic, outputTopic)
-
-    Assert.assertTrue("Expected to process some data", !actualClicksPerRegion.isEmpty)
-
     streams.close()
   }
 
@@ -169,7 +163,7 @@ class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJ
       .groupByKey(Grouped.`with`[String, JLong](Serdes.String, Serdes.JavaLong))
       .reduce {
         new Reducer[JLong] {
-          def apply(v1: JLong, v2: JLong): JLong = v1 + v2
+          def apply(v1: JLong, v2: JLong) = v1 + v2
         }
       }
 

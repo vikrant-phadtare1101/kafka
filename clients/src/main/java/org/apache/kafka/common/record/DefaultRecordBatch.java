@@ -33,7 +33,6 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.Objects;
 
 import static org.apache.kafka.common.record.Records.LOG_OVERHEAD;
 
@@ -387,7 +386,7 @@ public class DefaultRecordBatch extends AbstractRecordBatch implements MutableRe
             return false;
 
         DefaultRecordBatch that = (DefaultRecordBatch) o;
-        return Objects.equals(buffer, that.buffer);
+        return buffer != null ? buffer.equals(that.buffer) : that.buffer == null;
     }
 
     @Override

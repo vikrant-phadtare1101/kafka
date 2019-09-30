@@ -55,7 +55,6 @@ import static org.hamcrest.core.IsInstanceOf.instanceOf;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -638,8 +637,8 @@ public class InternalTopologyBuilderTest {
         final InternalTopologyBuilder.TopicsInfo topicsInfo = builder.topicGroups().values().iterator().next();
         final InternalTopicConfig topicConfig = topicsInfo.repartitionSourceTopics.get("appId-foo");
         final Map<String, String> properties = topicConfig.getProperties(Collections.emptyMap(), 10000);
-        assertEquals(3, properties.size());
-        assertEquals(String.valueOf(-1), properties.get(TopicConfig.RETENTION_MS_CONFIG));
+        assertEquals(5, properties.size());
+        assertEquals(String.valueOf(Long.MAX_VALUE), properties.get(TopicConfig.RETENTION_MS_CONFIG));
         assertEquals(TopicConfig.CLEANUP_POLICY_DELETE, properties.get(TopicConfig.CLEANUP_POLICY_CONFIG));
         assertEquals("appId-foo", topicConfig.name());
         assertTrue(topicConfig instanceof RepartitionTopicConfig);
@@ -779,20 +778,32 @@ public class InternalTopologyBuilderTest {
 
     @Test
     public void shouldThrowIfNameIsNull() {
-        final Exception e = assertThrows(NullPointerException.class, () -> new InternalTopologyBuilder.Source(null, Collections.emptySet(), null));
-        assertEquals("name cannot be null", e.getMessage());
+        try {
+            new InternalTopologyBuilder.Source(null, Collections.emptySet(), null);
+            fail("Should have thrown NullPointerException");
+        } catch (final NullPointerException expected) {
+            assertEquals("name cannot be null", expected.getMessage());
+        }
     }
 
     @Test
     public void shouldThrowIfTopicAndPatternAreNull() {
-        final Exception e = assertThrows(IllegalArgumentException.class, () -> new InternalTopologyBuilder.Source("name", null, null));
-        assertEquals("Either topics or pattern must be not-null, but both are null.", e.getMessage());
+        try {
+            new InternalTopologyBuilder.Source("name", null, null);
+            fail("Should have thrown IllegalArgumentException");
+        } catch (final IllegalArgumentException expected) {
+            assertEquals("Either topics or pattern must be not-null, but both are null.", expected.getMessage());
+        }
     }
 
     @Test
     public void shouldThrowIfBothTopicAndPatternAreNotNull() {
-        final Exception e = assertThrows(IllegalArgumentException.class, () -> new InternalTopologyBuilder.Source("name", Collections.emptySet(), Pattern.compile("")));
-        assertEquals("Either topics or pattern must be null, but both are not null.", e.getMessage());
+        try {
+            new InternalTopologyBuilder.Source("name", Collections.emptySet(), Pattern.compile(""));
+            fail("Should have thrown IllegalArgumentException");
+        } catch (final IllegalArgumentException expected) {
+            assertEquals("Either topics or pattern must be null, but both are not null.", expected.getMessage());
+        }
     }
 
     @Test

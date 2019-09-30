@@ -39,8 +39,7 @@ import scala.math.ceil
  * @param maxIndexSize The maximum index size in bytes.
  */
 abstract class AbstractIndex[K, V](@volatile var file: File, val baseOffset: Long,
-                                   val maxIndexSize: Int = -1, val writable: Boolean) extends Closeable {
-  import AbstractIndex._
+                                   val maxIndexSize: Int = -1, val writable: Boolean) extends Closeable with Logging {
 
   // Length of the index file
   @volatile
@@ -136,7 +135,7 @@ abstract class AbstractIndex[K, V](@volatile var file: File, val baseOffset: Lon
         idx.position(roundDownToExactMultiple(idx.limit(), entrySize))
       idx
     } finally {
-      CoreUtils.swallow(raf.close(), AbstractIndex)
+      CoreUtils.swallow(raf.close(), this)
     }
   }
 
@@ -194,7 +193,7 @@ abstract class AbstractIndex[K, V](@volatile var file: File, val baseOffset: Lon
             s"and limit is ${mmap.limit()}")
           true
         } finally {
-          CoreUtils.swallow(raf.close(), AbstractIndex)
+          CoreUtils.swallow(raf.close(), this)
         }
       }
     }
@@ -319,6 +318,9 @@ abstract class AbstractIndex[K, V](@volatile var file: File, val baseOffset: Lon
    * Forcefully free the buffer's mmap.
    */
   protected[log] def forceUnmap() {
+    if (mmap == null) {
+        return
+    }
     try MappedByteBuffers.unmap(file.getAbsolutePath, mmap)
     finally mmap = null // Accessing unmapped mmap crashes JVM by SEGV so we null it out to be safe
   }
@@ -400,7 +402,7 @@ abstract class AbstractIndex[K, V](@volatile var file: File, val baseOffset: Lon
     if(compareIndexEntry(parseEntry(idx, 0), target, searchEntity) > 0)
       return (-1, 0)
 
-    binarySearch(0, firstHotEntry)
+    return binarySearch(0, firstHotEntry)
   }
 
   private def compareIndexEntry(indexEntry: IndexEntry, target: Long, searchEntity: IndexSearchEntity): Int = {
@@ -424,10 +426,6 @@ abstract class AbstractIndex[K, V](@volatile var file: File, val baseOffset: Lon
       Some(relativeOffset.toInt)
   }
 
-}
-
-object AbstractIndex extends Logging {
-  override val loggerName: String = classOf[AbstractIndex[_, _]].getName
 }
 
 object IndexSearchType extends Enumeration {

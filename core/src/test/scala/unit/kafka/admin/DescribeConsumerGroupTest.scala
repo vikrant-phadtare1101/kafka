@@ -22,7 +22,7 @@ import joptsimple.OptionException
 import kafka.utils.TestUtils
 import org.apache.kafka.clients.consumer.{ConsumerConfig, RoundRobinAssignor}
 import org.apache.kafka.common.TopicPartition
-import org.apache.kafka.common.errors.TimeoutException
+import org.apache.kafka.common.errors.{TimeoutException}
 import org.junit.Assert._
 import org.junit.Test
 
@@ -46,7 +46,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
       val cgcArgs = Array("--bootstrap-server", brokerList, "--describe", "--group", missingGroup) ++ describeType
       val service = getConsumerGroupService(cgcArgs)
 
-      val output = TestUtils.grabConsoleOutput(service.describeGroups())
+      val output = TestUtils.grabConsoleOutput(service.describeGroup())
       assertTrue(s"Expected error was not detected for describe option '${describeType.mkString(" ")}'",
           output.contains(s"Consumer group '$missingGroup' does not exist."))
     }
@@ -61,52 +61,49 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
 
   @Test
   def testDescribeOffsetsOfNonExistingGroup() {
-    val group = "missing.group"
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     // run one consumer in the group consuming from a single-partition topic
     addConsumerGroupExecutor(numConsumers = 1)
     // note the group to be queried is a different (non-existing) group
-    val cgcArgs = Array("--bootstrap-server", brokerList, "--describe", "--group", group)
+    val cgcArgs = Array("--bootstrap-server", brokerList, "--describe", "--group", "missing.group")
     val service = getConsumerGroupService(cgcArgs)
 
-    val (state, assignments) = service.collectGroupOffsets(group)
+    val (state, assignments) = service.collectGroupOffsets()
     assertTrue(s"Expected the state to be 'Dead', with no members in the group '$group'.",
         state.contains("Dead") && assignments.contains(List()))
   }
 
   @Test
   def testDescribeMembersOfNonExistingGroup() {
-    val group = "missing.group"
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     // run one consumer in the group consuming from a single-partition topic
     addConsumerGroupExecutor(numConsumers = 1)
     // note the group to be queried is a different (non-existing) group
-    val cgcArgs = Array("--bootstrap-server", brokerList, "--describe", "--group", group)
+    val cgcArgs = Array("--bootstrap-server", brokerList, "--describe", "--group", "missing.group")
     val service = getConsumerGroupService(cgcArgs)
 
-    val (state, assignments) = service.collectGroupMembers(group, false)
+    val (state, assignments) = service.collectGroupMembers(false)
     assertTrue(s"Expected the state to be 'Dead', with no members in the group '$group'.",
         state.contains("Dead") && assignments.contains(List()))
 
-    val (state2, assignments2) = service.collectGroupMembers(group, true)
+    val (state2, assignments2) = service.collectGroupMembers(true)
     assertTrue(s"Expected the state to be 'Dead', with no members in the group '$group' (verbose option).",
         state2.contains("Dead") && assignments2.contains(List()))
   }
 
   @Test
   def testDescribeStateOfNonExistingGroup() {
-    val group = "missing.group"
     TestUtils.createOffsetsTopic(zkClient, servers)
 
     // run one consumer in the group consuming from a single-partition topic
     addConsumerGroupExecutor(numConsumers = 1)
     // note the group to be queried is a different (non-existing) group
-    val cgcArgs = Array("--bootstrap-server", brokerList, "--describe", "--group", group)
+    val cgcArgs = Array("--bootstrap-server", brokerList, "--describe", "--group", "missing.group")
     val service = getConsumerGroupService(cgcArgs)
 
-    val state = service.collectGroupState(group)
+    val state = service.collectGroupState()
     assertTrue(s"Expected the state to be 'Dead', with no members in the group '$group'.",
         state.state == "Dead" && state.numMembers == 0 &&
         state.coordinator != null && servers.map(_.config.brokerId).toList.contains(state.coordinator.id)
@@ -125,57 +122,8 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
       val service = getConsumerGroupService(cgcArgs)
 
       TestUtils.waitUntilTrue(() => {
-        val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroups())
+        val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroup())
         output.trim.split("\n").length == 2 && error.isEmpty
-      }, s"Expected a data row and no error in describe results with describe type ${describeType.mkString(" ")}.", maxRetries = 3)
-    }
-  }
-
-  @Test
-  def testDescribeExistingGroups() {
-    TestUtils.createOffsetsTopic(zkClient, servers)
-
-    // Create N single-threaded consumer groups from a single-partition topic
-    val groups = (for (describeType <- describeTypes) yield {
-      val group = this.group + describeType.mkString("")
-      addConsumerGroupExecutor(numConsumers = 1, group = group)
-      Array("--group", group)
-    }).flatten
-
-    val expectedNumLines = describeTypes.length * 2
-
-    for (describeType <- describeTypes) {
-      val cgcArgs = Array("--bootstrap-server", brokerList, "--describe") ++ groups ++ describeType
-      val service = getConsumerGroupService(cgcArgs)
-
-      TestUtils.waitUntilTrue(() => {
-        val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroups())
-        val numLines = output.trim.split("\n").filterNot(line => line.isEmpty).length
-        (numLines == expectedNumLines) && error.isEmpty
-      }, s"Expected a data row and no error in describe results with describe type ${describeType.mkString(" ")}.", maxRetries = 3)
-    }
-  }
-
-  @Test
-  def testDescribeAllExistingGroups() {
-    TestUtils.createOffsetsTopic(zkClient, servers)
-
-    // Create N single-threaded consumer groups from a single-partition topic
-    for (describeType <- describeTypes) {
-      val group = this.group + describeType.mkString("")
-      addConsumerGroupExecutor(numConsumers = 1, group = group)
-    }
-
-    val expectedNumLines = describeTypes.length * 2
-
-    for (describeType <- describeTypes) {
-      val cgcArgs = Array("--bootstrap-server", brokerList, "--describe", "--all-groups") ++ describeType
-      val service = getConsumerGroupService(cgcArgs)
-
-      TestUtils.waitUntilTrue(() => {
-        val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroups())
-        val numLines = output.trim.split("\n").filterNot(line => line.isEmpty).length
-        (numLines == expectedNumLines) && error.isEmpty
       }, s"Expected a data row and no error in describe results with describe type ${describeType.mkString(" ")}.", maxRetries = 3)
     }
   }
@@ -191,7 +139,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     TestUtils.waitUntilTrue(() => {
-      val (state, assignments) = service.collectGroupOffsets(group)
+      val (state, assignments) = service.collectGroupOffsets()
       state.contains("Stable") &&
         assignments.isDefined &&
         assignments.get.count(_.group == group) == 1 &&
@@ -211,7 +159,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     TestUtils.waitUntilTrue(() => {
-      val (state, assignments) = service.collectGroupMembers(group, false)
+      val (state, assignments) = service.collectGroupMembers(false)
       state.contains("Stable") &&
         (assignments match {
           case Some(memberAssignments) =>
@@ -224,7 +172,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
         })
     }, s"Expected a 'Stable' group status, rows and valid member information for group $group.", maxRetries = 3)
 
-    val (_, assignments) = service.collectGroupMembers(group, true)
+    val (_, assignments) = service.collectGroupMembers(true)
     assignments match {
       case None =>
         fail(s"Expected partition assignments for members of group $group")
@@ -245,7 +193,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     TestUtils.waitUntilTrue(() => {
-      val state = service.collectGroupState(group)
+      val state = service.collectGroupState()
       state.state == "Stable" &&
         state.numMembers == 1 &&
         state.assignmentStrategy == "range" &&
@@ -264,7 +212,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     TestUtils.waitUntilTrue(() => {
-      val state = service.collectGroupState(group)
+      val state = service.collectGroupState()
       state.state == "Stable" &&
         state.numMembers == 1 &&
         state.assignmentStrategy == "roundrobin" &&
@@ -285,14 +233,14 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
       val service = getConsumerGroupService(cgcArgs)
 
       TestUtils.waitUntilTrue(() => {
-        val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroups())
+        val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroup())
         output.trim.split("\n").length == 2 && error.isEmpty
       }, s"Expected describe group results with one data row for describe type '${describeType.mkString(" ")}'", maxRetries = 3)
 
       // stop the consumer so the group has no active member anymore
       executor.shutdown()
       TestUtils.waitUntilTrue(() => {
-        TestUtils.grabConsoleError(service.describeGroups()).contains(s"Consumer group '$group' has no active members.")
+        TestUtils.grabConsoleError(service.describeGroup()).contains(s"Consumer group '$group' has no active members.")
       }, s"Expected no active member in describe group results with describe type ${describeType.mkString(" ")}", maxRetries = 3)
     }
   }
@@ -308,14 +256,14 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     TestUtils.waitUntilTrue(() => {
-      val (state, assignments) = service.collectGroupOffsets(group)
+      val (state, assignments) = service.collectGroupOffsets()
       state.contains("Stable") && assignments.exists(_.exists(_.group == group))
     }, "Expected the group to initially become stable, and to find group in assignments after initial offset commit.", maxRetries = 3)
 
     // stop the consumer so the group has no active member anymore
     executor.shutdown()
 
-    val (result, succeeded) = TestUtils.computeUntilTrue(service.collectGroupOffsets(group)) {
+    val (result, succeeded) = TestUtils.computeUntilTrue(service.collectGroupOffsets()) {
       case (state, assignments) =>
         val testGroupAssignments = assignments.toSeq.flatMap(_.filter(_.group == group))
         def assignment = testGroupAssignments.head
@@ -341,7 +289,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     TestUtils.waitUntilTrue(() => {
-      val (state, assignments) = service.collectGroupMembers(group, false)
+      val (state, assignments) = service.collectGroupMembers(false)
       state.contains("Stable") && assignments.exists(_.exists(_.group == group))
     }, "Expected the group to initially become stable, and to find group in assignments after initial offset commit.", maxRetries = 3)
 
@@ -349,7 +297,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     executor.shutdown()
 
     TestUtils.waitUntilTrue(() => {
-      val (state, assignments) = service.collectGroupMembers(group, false)
+      val (state, assignments) = service.collectGroupMembers(false)
       state.contains("Empty") && assignments.isDefined && assignments.get.isEmpty
     }, s"Expected no member in describe group members results for group '$group'", maxRetries = 3)
   }
@@ -365,7 +313,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     TestUtils.waitUntilTrue(() => {
-      val state = service.collectGroupState(group)
+      val state = service.collectGroupState()
       state.state == "Stable" &&
         state.numMembers == 1 &&
         state.coordinator != null &&
@@ -376,7 +324,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     executor.shutdown()
 
     TestUtils.waitUntilTrue(() => {
-      val state = service.collectGroupState(group)
+      val state = service.collectGroupState()
       state.state == "Empty" && state.numMembers == 0 && state.assignmentStrategy == ""
     }, s"Expected the group '$group' to become empty after the only member leaving.", maxRetries = 3)
   }
@@ -393,7 +341,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
       val service = getConsumerGroupService(cgcArgs)
 
       TestUtils.waitUntilTrue(() => {
-        val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroups())
+        val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroup())
         val expectedNumRows = if (describeTypeMembers.contains(describeType)) 3 else 2
         error.isEmpty && output.trim.split("\n").size == expectedNumRows
       }, s"Expected a single data row in describe group result with describe type '${describeType.mkString(" ")}'", maxRetries = 3)
@@ -411,7 +359,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     TestUtils.waitUntilTrue(() => {
-      val (state, assignments) = service.collectGroupOffsets(group)
+      val (state, assignments) = service.collectGroupOffsets()
       state.contains("Stable") &&
         assignments.isDefined &&
         assignments.get.count(_.group == group) == 1 &&
@@ -430,7 +378,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     TestUtils.waitUntilTrue(() => {
-      val (state, assignments) = service.collectGroupMembers(group, false)
+      val (state, assignments) = service.collectGroupMembers(false)
       state.contains("Stable") &&
         assignments.isDefined &&
         assignments.get.count(_.group == group) == 2 &&
@@ -439,7 +387,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
         assignments.get.count(_.assignment.nonEmpty) == 0
     }, "Expected rows for consumers with no assigned partitions in describe group results", maxRetries = 3)
 
-    val (state, assignments) = service.collectGroupMembers(group, true)
+    val (state, assignments) = service.collectGroupMembers(true)
     assertTrue("Expected additional columns in verbose version of describe members",
         state.contains("Stable") && assignments.get.count(_.assignment.nonEmpty) > 0)
   }
@@ -455,7 +403,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     TestUtils.waitUntilTrue(() => {
-      val state = service.collectGroupState(group)
+      val state = service.collectGroupState()
       state.state == "Stable" && state.numMembers == 2
     }, "Expected two consumers in describe group results", maxRetries = 3)
   }
@@ -474,7 +422,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
       val service = getConsumerGroupService(cgcArgs)
 
       TestUtils.waitUntilTrue(() => {
-        val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroups())
+        val (output, error) = TestUtils.grabConsoleOutputAndError(service.describeGroup())
         val expectedNumRows = if (describeTypeState.contains(describeType)) 2 else 3
         error.isEmpty && output.trim.split("\n").size == expectedNumRows
       }, s"Expected a single data row in describe group result with describe type '${describeType.mkString(" ")}'", maxRetries = 3)
@@ -494,7 +442,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     TestUtils.waitUntilTrue(() => {
-      val (state, assignments) = service.collectGroupOffsets(group)
+      val (state, assignments) = service.collectGroupOffsets()
       state.contains("Stable") &&
         assignments.isDefined &&
         assignments.get.count(_.group == group) == 2 &&
@@ -516,7 +464,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     TestUtils.waitUntilTrue(() => {
-      val (state, assignments) = service.collectGroupMembers(group, false)
+      val (state, assignments) = service.collectGroupMembers(false)
       state.contains("Stable") &&
         assignments.isDefined &&
         assignments.get.count(_.group == group) == 2 &&
@@ -524,7 +472,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
         assignments.get.count{ x => x.group == group && x.numPartitions == 0 } == 0
     }, "Expected two rows (one row per consumer) in describe group members results.", maxRetries = 3)
 
-    val (state, assignments) = service.collectGroupMembers(group, true)
+    val (state, assignments) = service.collectGroupMembers(true)
     assertTrue("Expected additional columns in verbose version of describe members",
         state.contains("Stable") && assignments.get.count(_.assignment.isEmpty) == 0)
   }
@@ -542,7 +490,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     TestUtils.waitUntilTrue(() => {
-      val state = service.collectGroupState(group)
+      val state = service.collectGroupState()
       state.state == "Stable" && state.group == group && state.numMembers == 2
     }, "Expected a stable group with two members in describe group state result.", maxRetries = 3)
   }
@@ -560,7 +508,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     TestUtils.waitUntilTrue(() => {
-      val (state, assignments) = service.collectGroupOffsets(group)
+      val (state, assignments) = service.collectGroupOffsets()
       state.contains("Empty") && assignments.isDefined && assignments.get.count(_.group == group) == 2
     }, "Expected a stable group with two members in describe group state result.", maxRetries = 3)
   }
@@ -579,7 +527,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     try {
-      TestUtils.grabConsoleOutputAndError(service.describeGroups())
+      TestUtils.grabConsoleOutputAndError(service.describeGroup())
       fail(s"The consumer group command should have failed due to low initialization timeout (describe type: ${describeType.mkString(" ")})")
     } catch {
       case e: ExecutionException => assert(e.getCause.isInstanceOf[TimeoutException]) // OK
@@ -599,7 +547,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     try {
-      service.collectGroupOffsets(group)
+      service.collectGroupOffsets()
       fail("The consumer group command should fail due to low initialization timeout")
     } catch {
       case e : ExecutionException => assert(e.getCause.isInstanceOf[TimeoutException]) // OK
@@ -619,12 +567,12 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     try {
-      service.collectGroupMembers(group, false)
+      service.collectGroupMembers(false)
       fail("The consumer group command should fail due to low initialization timeout")
     } catch {
       case e: ExecutionException => assert(e.getCause.isInstanceOf[TimeoutException])// OK
         try {
-          service.collectGroupMembers(group, true)
+          service.collectGroupMembers(true)
           fail("The consumer group command should fail due to low initialization timeout (verbose)")
         } catch {
           case e: ExecutionException => assert(e.getCause.isInstanceOf[TimeoutException]) // OK
@@ -645,7 +593,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     try {
-      service.collectGroupState(group)
+      service.collectGroupState()
       fail("The consumer group command should fail due to low initialization timeout")
     } catch {
       case e: ExecutionException => assert(e.getCause.isInstanceOf[TimeoutException]) // OK
@@ -673,7 +621,7 @@ class DescribeConsumerGroupTest extends ConsumerGroupCommandTest {
     val service = getConsumerGroupService(cgcArgs)
 
     TestUtils.waitUntilTrue(() => {
-      val (state, assignments) = service.collectGroupOffsets(group)
+      val (state, assignments) = service.collectGroupOffsets()
       state.contains("Stable") &&
         assignments.isDefined &&
         assignments.get.count(_.group == group) == 1 &&

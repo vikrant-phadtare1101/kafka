@@ -20,6 +20,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 
 import javax.ws.rs.core.HttpHeaders;
 import org.apache.kafka.connect.errors.AlreadyExistsException;
+import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.NotFoundException;
 import org.apache.kafka.connect.runtime.ConnectorConfig;
 import org.apache.kafka.connect.runtime.Herder;
@@ -28,7 +29,6 @@ import org.apache.kafka.connect.runtime.distributed.NotAssignedException;
 import org.apache.kafka.connect.runtime.distributed.NotLeaderException;
 import org.apache.kafka.connect.runtime.rest.RestClient;
 import org.apache.kafka.connect.runtime.rest.entities.ConnectorInfo;
-import org.apache.kafka.connect.runtime.rest.entities.ConnectorStateInfo;
 import org.apache.kafka.connect.runtime.rest.entities.ConnectorType;
 import org.apache.kafka.connect.runtime.rest.entities.CreateConnectorRequest;
 import org.apache.kafka.connect.runtime.rest.entities.TaskInfo;
@@ -48,10 +48,6 @@ import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.powermock.modules.junit4.PowerMockRunner;
 
 import javax.ws.rs.BadRequestException;
-import javax.ws.rs.core.MultivaluedHashMap;
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.UriInfo;
-
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -127,18 +123,12 @@ public class ConnectorsResourceTest {
     @Mock
     private Herder herder;
     private ConnectorsResource connectorsResource;
-    private UriInfo forward;
 
     @Before
     public void setUp() throws NoSuchMethodException {
         PowerMock.mockStatic(RestClient.class,
                 RestClient.class.getMethod("httpRequest", String.class, String.class, HttpHeaders.class, Object.class, TypeReference.class, WorkerConfig.class));
         connectorsResource = new ConnectorsResource(herder, null);
-        forward = EasyMock.mock(UriInfo.class);
-        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
-        queryParams.putSingle("forward", "true");
-        EasyMock.expect(forward.getQueryParameters()).andReturn(queryParams).anyTimes();
-        EasyMock.replay(forward);
     }
 
     private static final Map<String, String> getConnectorConfig(Map<String, String> mapToClone) {
@@ -149,11 +139,12 @@ public class ConnectorsResourceTest {
     @Test
     public void testListConnectors() throws Throwable {
         final Capture<Callback<Collection<String>>> cb = Capture.newInstance();
-        EasyMock.expect(herder.connectors()).andReturn(Arrays.asList(CONNECTOR2_NAME, CONNECTOR_NAME));
+        herder.connectors(EasyMock.capture(cb));
+        expectAndCallbackResult(cb, Arrays.asList(CONNECTOR2_NAME, CONNECTOR_NAME));
 
         PowerMock.replayAll();
 
-        Collection<String> connectors = (Collection<String>) connectorsResource.listConnectors(forward, NULL_HEADERS).getEntity();
+        Collection<String> connectors = connectorsResource.listConnectors(FORWARD, NULL_HEADERS);
         // Ordering isn't guaranteed, compare sets
         assertEquals(new HashSet<>(Arrays.asList(CONNECTOR_NAME, CONNECTOR2_NAME)), new HashSet<>(connectors));
 
@@ -161,106 +152,32 @@ public class ConnectorsResourceTest {
     }
 
     @Test
-    public void testExpandConnectorsStatus() throws Throwable {
-        EasyMock.expect(herder.connectors()).andReturn(Arrays.asList(CONNECTOR2_NAME, CONNECTOR_NAME));
-        ConnectorStateInfo connector = EasyMock.mock(ConnectorStateInfo.class);
-        ConnectorStateInfo connector2 = EasyMock.mock(ConnectorStateInfo.class);
-        EasyMock.expect(herder.connectorStatus(CONNECTOR2_NAME)).andReturn(connector2);
-        EasyMock.expect(herder.connectorStatus(CONNECTOR_NAME)).andReturn(connector);
-
-        forward = EasyMock.mock(UriInfo.class);
-        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
-        queryParams.putSingle("expand", "status");
-        EasyMock.expect(forward.getQueryParameters()).andReturn(queryParams).anyTimes();
-        EasyMock.replay(forward);
+    public void testListConnectorsNotLeader() throws Throwable {
+        final Capture<Callback<Collection<String>>> cb = Capture.newInstance();
+        herder.connectors(EasyMock.capture(cb));
+        expectAndCallbackNotLeaderException(cb);
+        // Should forward request
+        EasyMock.expect(RestClient.httpRequest(EasyMock.eq("http://leader:8083/connectors?forward=false"), EasyMock.eq("GET"),
+                EasyMock.isNull(), EasyMock.isNull(), EasyMock.anyObject(TypeReference.class), EasyMock.anyObject(WorkerConfig.class)))
+                .andReturn(new RestClient.HttpResponse<>(200, new HashMap<String, String>(), Arrays.asList(CONNECTOR2_NAME, CONNECTOR_NAME)));
 
         PowerMock.replayAll();
 
-        Map<String, Map<String, Object>> expanded = (Map<String, Map<String, Object>>) connectorsResource.listConnectors(forward, NULL_HEADERS).getEntity();
-        // Ordering isn't guaranteed, compare sets
-        assertEquals(new HashSet<>(Arrays.asList(CONNECTOR_NAME, CONNECTOR2_NAME)), expanded.keySet());
-        assertEquals(connector2, expanded.get(CONNECTOR2_NAME).get("status"));
-        assertEquals(connector, expanded.get(CONNECTOR_NAME).get("status"));
+        Collection<String> connectors = connectorsResource.listConnectors(FORWARD, NULL_HEADERS);
         PowerMock.verifyAll();
     }
 
-    @Test
-    public void testExpandConnectorsInfo() throws Throwable {
-        EasyMock.expect(herder.connectors()).andReturn(Arrays.asList(CONNECTOR2_NAME, CONNECTOR_NAME));
-        ConnectorInfo connector = EasyMock.mock(ConnectorInfo.class);
-        ConnectorInfo connector2 = EasyMock.mock(ConnectorInfo.class);
-        EasyMock.expect(herder.connectorInfo(CONNECTOR2_NAME)).andReturn(connector2);
-        EasyMock.expect(herder.connectorInfo(CONNECTOR_NAME)).andReturn(connector);
-
-        forward = EasyMock.mock(UriInfo.class);
-        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
-        queryParams.putSingle("expand", "info");
-        EasyMock.expect(forward.getQueryParameters()).andReturn(queryParams).anyTimes();
-        EasyMock.replay(forward);
+    @Test(expected = ConnectException.class)
+    public void testListConnectorsNotSynced() throws Throwable {
+        final Capture<Callback<Collection<String>>> cb = Capture.newInstance();
+        herder.connectors(EasyMock.capture(cb));
+        expectAndCallbackException(cb, new ConnectException("not synced"));
 
         PowerMock.replayAll();
 
-        Map<String, Map<String, Object>> expanded = (Map<String, Map<String, Object>>) connectorsResource.listConnectors(forward, NULL_HEADERS).getEntity();
-        // Ordering isn't guaranteed, compare sets
-        assertEquals(new HashSet<>(Arrays.asList(CONNECTOR_NAME, CONNECTOR2_NAME)), expanded.keySet());
-        assertEquals(connector2, expanded.get(CONNECTOR2_NAME).get("info"));
-        assertEquals(connector, expanded.get(CONNECTOR_NAME).get("info"));
-        PowerMock.verifyAll();
+        // throws
+        connectorsResource.listConnectors(FORWARD, NULL_HEADERS);
     }
-
-    @Test
-    public void testFullExpandConnectors() throws Throwable {
-        EasyMock.expect(herder.connectors()).andReturn(Arrays.asList(CONNECTOR2_NAME, CONNECTOR_NAME));
-        ConnectorInfo connectorInfo = EasyMock.mock(ConnectorInfo.class);
-        ConnectorInfo connectorInfo2 = EasyMock.mock(ConnectorInfo.class);
-        EasyMock.expect(herder.connectorInfo(CONNECTOR2_NAME)).andReturn(connectorInfo2);
-        EasyMock.expect(herder.connectorInfo(CONNECTOR_NAME)).andReturn(connectorInfo);
-        ConnectorStateInfo connector = EasyMock.mock(ConnectorStateInfo.class);
-        ConnectorStateInfo connector2 = EasyMock.mock(ConnectorStateInfo.class);
-        EasyMock.expect(herder.connectorStatus(CONNECTOR2_NAME)).andReturn(connector2);
-        EasyMock.expect(herder.connectorStatus(CONNECTOR_NAME)).andReturn(connector);
-
-        forward = EasyMock.mock(UriInfo.class);
-        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
-        queryParams.put("expand", Arrays.asList("info", "status"));
-        EasyMock.expect(forward.getQueryParameters()).andReturn(queryParams).anyTimes();
-        EasyMock.replay(forward);
-
-        PowerMock.replayAll();
-
-        Map<String, Map<String, Object>> expanded = (Map<String, Map<String, Object>>) connectorsResource.listConnectors(forward, NULL_HEADERS).getEntity();
-        // Ordering isn't guaranteed, compare sets
-        assertEquals(new HashSet<>(Arrays.asList(CONNECTOR_NAME, CONNECTOR2_NAME)), expanded.keySet());
-        assertEquals(connectorInfo2, expanded.get(CONNECTOR2_NAME).get("info"));
-        assertEquals(connectorInfo, expanded.get(CONNECTOR_NAME).get("info"));
-        assertEquals(connector2, expanded.get(CONNECTOR2_NAME).get("status"));
-        assertEquals(connector, expanded.get(CONNECTOR_NAME).get("status"));
-        PowerMock.verifyAll();
-    }
-
-    @Test
-    public void testExpandConnectorsWithConnectorNotFound() throws Throwable {
-        EasyMock.expect(herder.connectors()).andReturn(Arrays.asList(CONNECTOR2_NAME, CONNECTOR_NAME));
-        ConnectorStateInfo connector = EasyMock.mock(ConnectorStateInfo.class);
-        ConnectorStateInfo connector2 = EasyMock.mock(ConnectorStateInfo.class);
-        EasyMock.expect(herder.connectorStatus(CONNECTOR2_NAME)).andReturn(connector2);
-        EasyMock.expect(herder.connectorStatus(CONNECTOR_NAME)).andThrow(EasyMock.mock(NotFoundException.class));
-
-        forward = EasyMock.mock(UriInfo.class);
-        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
-        queryParams.putSingle("expand", "status");
-        EasyMock.expect(forward.getQueryParameters()).andReturn(queryParams).anyTimes();
-        EasyMock.replay(forward);
-
-        PowerMock.replayAll();
-
-        Map<String, Map<String, Object>> expanded = (Map<String, Map<String, Object>>) connectorsResource.listConnectors(forward, NULL_HEADERS).getEntity();
-        // Ordering isn't guaranteed, compare sets
-        assertEquals(Collections.singleton(CONNECTOR2_NAME), expanded.keySet());
-        assertEquals(connector2, expanded.get(CONNECTOR2_NAME).get("status"));
-        PowerMock.verifyAll();
-    }
-
 
     @Test
     public void testCreateConnector() throws Throwable {

@@ -34,7 +34,8 @@ public class StreamSinkNode<K, V> extends StreamsGraphNode {
                           final TopicNameExtractor<K, V> topicNameExtractor,
                           final ProducedInternal<K, V> producedInternal) {
 
-        super(nodeName);
+        super(nodeName,
+              false);
 
         this.topicNameExtractor = topicNameExtractor;
         this.producedInternal = producedInternal;

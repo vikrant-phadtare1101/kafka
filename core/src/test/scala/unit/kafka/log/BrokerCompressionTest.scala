@@ -19,6 +19,7 @@ package kafka.log
 
 import kafka.utils._
 import kafka.message._
+import org.scalatest.junit.JUnitSuite
 import org.junit._
 import org.junit.Assert._
 import org.junit.runner.RunWith
@@ -33,7 +34,7 @@ import kafka.server.{BrokerTopicStats, LogDirFailureChannel}
 import scala.collection.JavaConverters._
 
 @RunWith(value = classOf[Parameterized])
-class BrokerCompressionTest(messageCompression: String, brokerCompression: String) {
+class BrokerCompressionTest(messageCompression: String, brokerCompression: String) extends JUnitSuite {
 
   val tmpDir = TestUtils.tempDir()
   val logDir = TestUtils.randomPartitionLogDir(tmpDir)

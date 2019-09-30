@@ -36,7 +36,7 @@ public class RoundTripWorkloadSpec extends TaskSpec {
     private final int targetMessagesPerSec;
     private final PayloadGenerator valueGenerator;
     private final TopicsSpec activeTopics;
-    private final long maxMessages;
+    private final int maxMessages;
     private final Map<String, String> commonClientConf;
     private final Map<String, String> producerConf;
     private final Map<String, String> consumerConf;
@@ -54,7 +54,7 @@ public class RoundTripWorkloadSpec extends TaskSpec {
              @JsonProperty("targetMessagesPerSec") int targetMessagesPerSec,
              @JsonProperty("valueGenerator") PayloadGenerator valueGenerator,
              @JsonProperty("activeTopics") TopicsSpec activeTopics,
-             @JsonProperty("maxMessages") long maxMessages) {
+             @JsonProperty("maxMessages") int maxMessages) {
         super(startMs, durationMs);
         this.clientNode = clientNode == null ? "" : clientNode;
         this.bootstrapServers = bootstrapServers == null ? "" : bootstrapServers;
@@ -96,7 +96,7 @@ public class RoundTripWorkloadSpec extends TaskSpec {
     }
 
     @JsonProperty
-    public long maxMessages() {
+    public int maxMessages() {
         return maxMessages;
     }
 

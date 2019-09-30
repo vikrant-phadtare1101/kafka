@@ -20,33 +20,39 @@ import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.kstream.Windowed;
 import org.apache.kafka.streams.state.KeyValueIterator;
+import org.apache.kafka.streams.state.StateSerdes;
 import org.apache.kafka.streams.state.WindowStoreIterator;
 
-class WindowStoreIteratorWrapper {
+class WindowStoreIteratorWrapper<K, V> {
 
     private final KeyValueIterator<Bytes, byte[]> bytesIterator;
+    private final StateSerdes<K, V> serdes;
     private final long windowSize;
 
     WindowStoreIteratorWrapper(final KeyValueIterator<Bytes, byte[]> bytesIterator,
+                               final StateSerdes<K, V> serdes,
                                final long windowSize) {
         this.bytesIterator = bytesIterator;
+        this.serdes = serdes;
         this.windowSize = windowSize;
     }
 
-    public WindowStoreIterator<byte[]> valuesIterator() {
-        return new WrappedWindowStoreIterator(bytesIterator);
+    public WindowStoreIterator<V> valuesIterator() {
+        return new WrappedWindowStoreIterator<>(bytesIterator, serdes);
     }
 
-    public KeyValueIterator<Windowed<Bytes>, byte[]> keyValueIterator() {
-        return new WrappedKeyValueIterator(bytesIterator, windowSize);
+    public KeyValueIterator<Windowed<K>, V> keyValueIterator() {
+        return new WrappedKeyValueIterator<>(bytesIterator, serdes, windowSize);
     }
 
-    private static class WrappedWindowStoreIterator implements WindowStoreIterator<byte[]> {
+    private static class WrappedWindowStoreIterator<V> implements WindowStoreIterator<V> {
         final KeyValueIterator<Bytes, byte[]> bytesIterator;
+        final StateSerdes<?, V> serdes;
 
         WrappedWindowStoreIterator(
-            final KeyValueIterator<Bytes, byte[]> bytesIterator) {
+            final KeyValueIterator<Bytes, byte[]> bytesIterator, final StateSerdes<?, V> serdes) {
             this.bytesIterator = bytesIterator;
+            this.serdes = serdes;
         }
 
         @Override
@@ -60,10 +66,11 @@ class WindowStoreIteratorWrapper {
         }
 
         @Override
-        public KeyValue<Long, byte[]> next() {
+        public KeyValue<Long, V> next() {
             final KeyValue<Bytes, byte[]> next = bytesIterator.next();
             final long timestamp = WindowKeySchema.extractStoreTimestamp(next.key.get());
-            return KeyValue.pair(timestamp, next.value);
+            final V value = serdes.valueFrom(next.value);
+            return KeyValue.pair(timestamp, value);
         }
 
         @Override
@@ -77,20 +84,25 @@ class WindowStoreIteratorWrapper {
         }
     }
 
-    private static class WrappedKeyValueIterator implements KeyValueIterator<Windowed<Bytes>, byte[]> {
+    private static class WrappedKeyValueIterator<K, V> implements KeyValueIterator<Windowed<K>, V> {
         final KeyValueIterator<Bytes, byte[]> bytesIterator;
+        final StateSerdes<K, V> serdes;
         final long windowSize;
 
         WrappedKeyValueIterator(final KeyValueIterator<Bytes, byte[]> bytesIterator,
+                                final StateSerdes<K, V> serdes,
                                 final long windowSize) {
             this.bytesIterator = bytesIterator;
+            this.serdes = serdes;
             this.windowSize = windowSize;
         }
 
         @Override
-        public Windowed<Bytes> peekNextKey() {
+        public Windowed<K> peekNextKey() {
             final byte[] nextKey = bytesIterator.peekNextKey().get();
-            return WindowKeySchema.fromStoreBytesKey(nextKey, windowSize);
+            final long timestamp = WindowKeySchema.extractStoreTimestamp(nextKey);
+            final K key = WindowKeySchema.extractStoreKey(nextKey, serdes);
+            return new Windowed<>(key, WindowKeySchema.timeWindowForSize(timestamp, windowSize));
         }
 
         @Override
@@ -99,9 +111,16 @@ class WindowStoreIteratorWrapper {
         }
 
         @Override
-        public KeyValue<Windowed<Bytes>, byte[]> next() {
+        public KeyValue<Windowed<K>, V> next() {
             final KeyValue<Bytes, byte[]> next = bytesIterator.next();
-            return KeyValue.pair(WindowKeySchema.fromStoreBytesKey(next.key.get(), windowSize), next.value);
+            final long timestamp = WindowKeySchema.extractStoreTimestamp(next.key.get());
+            final K key = WindowKeySchema.extractStoreKey(next.key.get(), serdes);
+            final V value = serdes.valueFrom(next.value);
+            return KeyValue.pair(
+                new Windowed<>(key, WindowKeySchema.timeWindowForSize(timestamp, windowSize)),
+                value
+            );
+
         }
 
         @Override

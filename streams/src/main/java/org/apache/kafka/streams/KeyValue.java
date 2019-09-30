@@ -72,7 +72,8 @@ public class KeyValue<K, V> {
         }
 
         final KeyValue other = (KeyValue) obj;
-        return Objects.equals(key, other.key) && Objects.equals(value, other.value);
+        return (key == null ? other.key == null : key.equals(other.key))
+                && (value == null ? other.value == null : value.equals(other.value));
     }
 
     @Override

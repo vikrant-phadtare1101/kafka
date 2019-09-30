@@ -81,7 +81,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 
 @RunWith(Parameterized.class)
-@Category({IntegrationTest.class})
+@Category(IntegrationTest.class)
 public class SuppressionDurabilityIntegrationTest {
     @ClassRule
     public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(
@@ -98,10 +98,7 @@ public class SuppressionDurabilityIntegrationTest {
 
     @Parameters(name = "{index}: eosEnabled={0}")
     public static Collection<Object[]> parameters() {
-        return asList(
-            new Object[] {false},
-            new Object[] {true}
-        );
+        return asList(new Object[] {false}, new Object[] {true});
     }
 
     public SuppressionDurabilityIntegrationTest(final boolean eosEnabled) {
@@ -161,7 +158,7 @@ public class SuppressionDurabilityIntegrationTest {
         try {
             // start by putting some stuff in the buffer
             // note, we send all input records to partition 0
-            // to make sure that supppress doesn't erroneously send records to other partitions.
+            // to make sure that suppress doesn't erroneously send records to other partitions.
             produceSynchronouslyToPartitionZero(
                 input,
                 asList(
@@ -255,7 +252,7 @@ public class SuppressionDurabilityIntegrationTest {
         private final AtomicReference<Throwable> firstException = new AtomicReference<>();
         private final String topic;
 
-        public MetadataValidator(final String topic) {
+        MetadataValidator(final String topic) {
             this.topic = topic;
         }
 
@@ -295,7 +292,7 @@ public class SuppressionDurabilityIntegrationTest {
         }
     }
 
-    private void verifyOutput(final String topic, final List<KeyValueTimestamp<String, Long>> keyValueTimestamps) {
+    private static void verifyOutput(final String topic, final List<KeyValueTimestamp<String, Long>> keyValueTimestamps) {
         final Properties properties = mkProperties(
             mkMap(
                 mkEntry(ConsumerConfig.GROUP_ID_CONFIG, "test-group"),
@@ -307,7 +304,7 @@ public class SuppressionDurabilityIntegrationTest {
         IntegrationTestUtils.verifyKeyValueTimestamps(properties, topic, keyValueTimestamps);
     }
 
-    private void verifyOutput(final String topic, final Set<KeyValueTimestamp<String, Long>> keyValueTimestamps) {
+    private static void verifyOutput(final String topic, final Set<KeyValueTimestamp<String, Long>> keyValueTimestamps) {
         final Properties properties = mkProperties(
             mkMap(
                 mkEntry(ConsumerConfig.GROUP_ID_CONFIG, "test-group"),
@@ -323,7 +320,7 @@ public class SuppressionDurabilityIntegrationTest {
      * scaling to ensure that there are commits in between the various test events,
      * just to exercise that everything works properly in the presence of commits.
      */
-    private long scaledTime(final long unscaledTime) {
+    private static long scaledTime(final long unscaledTime) {
         return COMMIT_INTERVAL * 2 * unscaledTime;
     }
 

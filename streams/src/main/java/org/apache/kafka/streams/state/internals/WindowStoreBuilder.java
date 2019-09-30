@@ -38,7 +38,6 @@ public class WindowStoreBuilder<K, V> extends AbstractStoreBuilder<K, V, WindowS
     public WindowStore<K, V> build() {
         return new MeteredWindowStore<>(
             maybeWrapCaching(maybeWrapLogging(storeSupplier.get())),
-            storeSupplier.windowSize(),
             storeSupplier.metricsScope(),
             time,
             keySerde,
@@ -49,8 +48,10 @@ public class WindowStoreBuilder<K, V> extends AbstractStoreBuilder<K, V, WindowS
         if (!enableCaching) {
             return inner;
         }
-        return new CachingWindowStore(
+        return new CachingWindowStore<>(
             inner,
+            keySerde,
+            valueSerde,
             storeSupplier.windowSize(),
             storeSupplier.segmentIntervalMs());
     }

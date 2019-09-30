@@ -27,9 +27,7 @@ import org.apache.kafka.streams.processor.Punctuator;
 import org.apache.kafka.streams.processor.TaskId;
 import org.apache.kafka.streams.processor.To;
 import org.apache.kafka.streams.state.KeyValueStore;
-
-import org.apache.kafka.streams.state.StoreBuilder;
-import org.apache.kafka.streams.state.Stores;
+import org.apache.kafka.streams.state.internals.InMemoryKeyValueStore;
 import org.junit.Test;
 
 import java.io.File;
@@ -232,7 +230,6 @@ public class MockProcessorContextTest {
         assertFalse(context.committed());
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     public void shouldStoreAndReturnStateStores() {
         final AbstractProcessor<String, Long> processor = new AbstractProcessor<String, Long>() {
@@ -246,16 +243,10 @@ public class MockProcessorContextTest {
         };
 
         final MockProcessorContext context = new MockProcessorContext();
-
-        final StoreBuilder storeBuilder = Stores.keyValueStoreBuilder(
-                Stores.inMemoryKeyValueStore("my-state"),
-                Serdes.String(),
-                Serdes.Long()).withLoggingDisabled();
-
-        final KeyValueStore<String, Long> store = (KeyValueStore<String, Long>) storeBuilder.build();
+        final KeyValueStore<String, Long> store = new InMemoryKeyValueStore<>("my-state", Serdes.String(), Serdes.Long());
+        context.register(store, null);
 
         store.init(context, store);
-
         processor.init(context);
 
         processor.process("foo", 5L);

@@ -22,12 +22,13 @@ import org.apache.kafka.common.serialization.Serde;
  * The {@code Joined} class represents optional params that can be passed to
  * {@link KStream#join}, {@link KStream#leftJoin}, and  {@link KStream#outerJoin} operations.
  */
-public class Joined<K, V, VO> implements NamedOperation<Joined<K, V, VO>> {
+public class Joined<K, V, VO> {
 
-    protected final Serde<K> keySerde;
-    protected final Serde<V> valueSerde;
-    protected final Serde<VO> otherValueSerde;
-    protected final String name;
+    private final Serde<K> keySerde;
+    private final Serde<V> valueSerde;
+    private final Serde<VO> otherValueSerde;
+    private final String name;
+
 
     private Joined(final Serde<K> keySerde,
                    final Serde<V> valueSerde,
@@ -37,10 +38,6 @@ public class Joined<K, V, VO> implements NamedOperation<Joined<K, V, VO>> {
         this.valueSerde = valueSerde;
         this.otherValueSerde = otherValueSerde;
         this.name = name;
-    }
-
-    protected Joined(final Joined<K, V, VO> joined) {
-        this(joined.keySerde, joined.valueSerde, joined.otherValueSerde, joined.name);
     }
 
     /**
@@ -138,27 +135,8 @@ public class Joined<K, V, VO> implements NamedOperation<Joined<K, V, VO>> {
      * @param <V> value type
      * @param <VO> other value type
      * @return new {@code Joined} instance configured with the name
-     *
-     * @deprecated use {@link #as(String)} instead
      */
-    @Deprecated
     public static <K, V, VO> Joined<K, V, VO> named(final String name) {
-        return new Joined<>(null, null, null, name);
-    }
-
-    /**
-     * Create an instance of {@code Joined} with base name for all components of the join, this may
-     * include any repartition topics created to complete the join.
-     *
-     * @param name the name used as the base for naming components of the join including any
-     * repartition topics
-     * @param <K> key type
-     * @param <V> value type
-     * @param <VO> other value type
-     * @return new {@code Joined} instance configured with the name
-     *
-     */
-    public static <K, V, VO> Joined<K, V, VO> as(final String name) {
         return new Joined<>(null, null, null, name);
     }
 
@@ -204,7 +182,6 @@ public class Joined<K, V, VO> implements NamedOperation<Joined<K, V, VO>> {
      * repartition topics
      * @return new {@code Joined} instance configured with the {@code name}
      */
-    @Override
     public Joined<K, V, VO> withName(final String name) {
         return new Joined<>(keySerde, valueSerde, otherValueSerde, name);
     }
@@ -221,12 +198,7 @@ public class Joined<K, V, VO> implements NamedOperation<Joined<K, V, VO>> {
         return otherValueSerde;
     }
 
-    /**
-     * @deprecated this method will be removed in a in a future release
-     */
-    @Deprecated
     public String name() {
         return name;
     }
-
 }

@@ -37,9 +37,6 @@ import org.junit.Before;
 import org.junit.Test;
 import org.rocksdb.BlockBasedTableConfig;
 import org.rocksdb.BloomFilter;
-import org.rocksdb.Filter;
-import org.rocksdb.Cache;
-import org.rocksdb.LRUCache;
 import org.rocksdb.Options;
 
 import java.io.File;
@@ -54,9 +51,9 @@ import java.util.Set;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -70,6 +67,7 @@ public class RocksDBStoreTest {
 
     InternalMockProcessorContext context;
     RocksDBStore rocksDBStore;
+    private static BloomFilter filter;
 
     @Before
     public void setUp() {
@@ -89,6 +87,9 @@ public class RocksDBStoreTest {
 
     @After
     public void tearDown() {
+        if (filter != null) {
+            filter.close();
+        }
         rocksDBStore.close();
     }
 
@@ -490,14 +491,12 @@ public class RocksDBStoreTest {
     public static class TestingBloomFilterRocksDBConfigSetter implements RocksDBConfigSetter {
 
         static boolean bloomFiltersSet;
-        static Filter filter;
-        static Cache cache;
 
         @Override
         public void setConfig(final String storeName, final Options options, final Map<String, Object> configs) {
+
             final BlockBasedTableConfig tableConfig = new BlockBasedTableConfig();
-            cache = new LRUCache(50 * 1024 * 1024L);
-            tableConfig.setBlockCache(cache);
+            tableConfig.setBlockCacheSize(50 * 1024 * 1024L);
             tableConfig.setBlockSize(4096L);
             if (enableBloomFilters) {
                 filter = new BloomFilter();
@@ -510,14 +509,6 @@ public class RocksDBStoreTest {
             }
 
             options.setTableFormatConfig(tableConfig);
-        }
-
-        @Override
-        public void close(final String storeName, final Options options) {
-            if (filter != null) {
-                filter.close();
-            }
-            cache.close();
         }
     }
 

@@ -21,9 +21,9 @@ import kafka.utils.TestUtils
 import org.apache.kafka.common.metrics.Sensor
 import org.junit.Assert._
 import org.junit.Test
-import org.scalatest.Assertions.intercept
+import org.scalatest.junit.JUnitSuite
 
-class ServerMetricsTest {
+class ServerMetricsTest extends JUnitSuite {
 
   @Test
   def testMetricsConfig(): Unit = {

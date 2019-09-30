@@ -30,7 +30,7 @@ import org.junit.Test;
 import static org.hamcrest.core.IsEqual.equalTo;
 import static org.hamcrest.core.IsSame.sameInstance;
 import static org.hamcrest.core.IsNot.not;
-import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.Assert.assertThat;
 
 @SuppressWarnings("unchecked")
 public class TransformerSupplierAdapterTest extends EasyMockSupport {

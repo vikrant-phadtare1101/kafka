@@ -23,8 +23,6 @@ import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.errors.IllegalSaslStateException;
 import org.apache.kafka.common.errors.SaslAuthenticationException;
 import org.apache.kafka.common.errors.UnsupportedSaslMechanismException;
-import org.apache.kafka.common.message.SaslAuthenticateRequestData;
-import org.apache.kafka.common.message.SaslHandshakeRequestData;
 import org.apache.kafka.common.network.Authenticator;
 import org.apache.kafka.common.network.NetworkSend;
 import org.apache.kafka.common.network.ReauthenticationContext;
@@ -330,8 +328,7 @@ public class SaslClientAuthenticator implements Authenticator {
 
     // Visible to override for testing
     protected SaslHandshakeRequest createSaslHandshakeRequest(short version) {
-        return new SaslHandshakeRequest.Builder(
-                new SaslHandshakeRequestData().setMechanism(mechanism)).build(version);
+        return new SaslHandshakeRequest.Builder(mechanism).build(version);
     }
 
     // Visible to override for testing
@@ -374,9 +371,7 @@ public class SaslClientAuthenticator implements Authenticator {
             if (saslToken != null) {
                 ByteBuffer tokenBuf = ByteBuffer.wrap(saslToken);
                 if (saslAuthenticateVersion != DISABLE_KAFKA_SASL_AUTHENTICATE_HEADER) {
-                    SaslAuthenticateRequestData data = new SaslAuthenticateRequestData()
-                            .setAuthBytes(tokenBuf.array());
-                    SaslAuthenticateRequest request = new SaslAuthenticateRequest.Builder(data).build(saslAuthenticateVersion);
+                    SaslAuthenticateRequest request = new SaslAuthenticateRequest.Builder(tokenBuf).build(saslAuthenticateVersion);
                     tokenBuf = request.serialize(nextRequestHeader(ApiKeys.SASL_AUTHENTICATE, saslAuthenticateVersion));
                 }
                 send(new NetworkSend(node, tokenBuf));
@@ -448,7 +443,7 @@ public class SaslClientAuthenticator implements Authenticator {
                 long sessionLifetimeMs = response.sessionLifetimeMs();
                 if (sessionLifetimeMs > 0L)
                     reauthInfo.positiveSessionLifetimeMs = sessionLifetimeMs;
-                return Utils.copyArray(response.saslAuthBytes());
+                return Utils.readBytes(response.saslAuthBytes());
             } else
                 return null;
         }

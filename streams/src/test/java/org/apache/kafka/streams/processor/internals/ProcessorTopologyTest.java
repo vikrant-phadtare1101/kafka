@@ -666,7 +666,7 @@ public class ProcessorTopologyTest {
             this.numChildren = numChildren;
         }
 
-        @SuppressWarnings("deprecation") // need to test deprecated code until removed
+        @SuppressWarnings("deprecation")
         @Override
         public void process(final String key, final String value) {
             for (int i = 0; i != numChildren; ++i) {
@@ -686,7 +686,7 @@ public class ProcessorTopologyTest {
             this.numChildren = numChildren;
         }
 
-        @SuppressWarnings("deprecation") // need to test deprecated code until removed
+        @SuppressWarnings("deprecation")
         @Override
         public void process(final String key, final String value) {
             for (int i = 0; i != numChildren; ++i) {
@@ -731,7 +731,7 @@ public class ProcessorTopologyTest {
         private static final long DEFAULT_TIMESTAMP = 1000L;
 
         @Override
-        public long extract(final ConsumerRecord<Object, Object> record, final long previousTimestamp) {
+        public long extract(final ConsumerRecord<Object, Object> record, final long partitionTime) {
             if (record.value().toString().matches(".*@[0-9]+")) {
                 return Long.parseLong(record.value().toString().split("@")[1]);
             }

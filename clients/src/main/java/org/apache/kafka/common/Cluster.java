@@ -20,7 +20,6 @@ import org.apache.kafka.common.utils.Utils;
 
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -28,7 +27,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -183,21 +181,6 @@ public final class Cluster {
      */
     public Node nodeById(int id) {
         return this.nodesById.get(id);
-    }
-
-    /**
-     * Get the node by node id if the replica for the given partition is online
-     * @param partition
-     * @param id
-     * @return the node
-     */
-    public Optional<Node> nodeIfOnline(TopicPartition partition, int id) {
-        Node node = nodeById(id);
-        if (node != null && !Arrays.asList(partition(partition).offlineReplicas()).contains(node)) {
-            return Optional.of(node);
-        } else {
-            return Optional.empty();
-        }
     }
 
     /**

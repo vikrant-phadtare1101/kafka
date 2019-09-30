@@ -41,7 +41,8 @@ abstract class BaseJoinProcessorNode<K, V1, V2, VR> extends StreamsGraphNode {
                           final String thisJoinSideNodeName,
                           final String otherJoinSideNodeName) {
 
-        super(nodeName);
+        super(nodeName,
+              false);
 
         this.valueJoiner = valueJoiner;
         this.joinThisProcessorParameters = joinThisProcessorParameters;

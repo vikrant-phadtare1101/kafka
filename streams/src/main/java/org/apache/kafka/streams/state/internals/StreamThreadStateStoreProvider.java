@@ -21,9 +21,6 @@ import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.internals.StreamThread;
 import org.apache.kafka.streams.processor.internals.Task;
 import org.apache.kafka.streams.state.QueryableStoreType;
-import org.apache.kafka.streams.state.QueryableStoreTypes;
-import org.apache.kafka.streams.state.TimestampedKeyValueStore;
-import org.apache.kafka.streams.state.TimestampedWindowStore;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -39,6 +36,7 @@ public class StreamThreadStateStoreProvider implements StateStoreProvider {
     public StreamThreadStateStoreProvider(final StreamThread streamThread) {
         this.streamThread = streamThread;
     }
+
 
     @SuppressWarnings("unchecked")
     @Override
@@ -58,13 +56,7 @@ public class StreamThreadStateStoreProvider implements StateStoreProvider {
                     throw new InvalidStateStoreException("Cannot get state store " + storeName + " for task " + streamTask +
                             " because the store is not open. The state store may have migrated to another instances.");
                 }
-                if (store instanceof TimestampedKeyValueStore && queryableStoreType instanceof QueryableStoreTypes.KeyValueStoreType) {
-                    stores.add((T) new ReadOnlyKeyValueStoreFacade((TimestampedKeyValueStore<Object, Object>) store));
-                } else if (store instanceof TimestampedWindowStore && queryableStoreType instanceof QueryableStoreTypes.WindowStoreType) {
-                    stores.add((T) new ReadOnlyWindowStoreFacade((TimestampedWindowStore<Object, Object>) store));
-                } else {
-                    stores.add((T) store);
-                }
+                stores.add((T) store);
             }
         }
         return stores;

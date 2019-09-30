@@ -29,7 +29,6 @@ import java.io.IOException;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.Objects;
 import java.util.zip.Checksum;
 
 import static org.apache.kafka.common.record.RecordBatch.MAGIC_VALUE_V2;
@@ -267,8 +266,8 @@ public class DefaultRecord implements Record {
                 offset == that.offset &&
                 timestamp == that.timestamp &&
                 sequence == that.sequence &&
-                Objects.equals(key, that.key) &&
-                Objects.equals(value, that.value) &&
+                (key == null ? that.key == null : key.equals(that.key)) &&
+                (value == null ? that.value == null : value.equals(that.value)) &&
                 Arrays.equals(headers, that.headers);
     }
 
@@ -276,8 +275,8 @@ public class DefaultRecord implements Record {
     public int hashCode() {
         int result = sizeInBytes;
         result = 31 * result + (int) attributes;
-        result = 31 * result + Long.hashCode(offset);
-        result = 31 * result + Long.hashCode(timestamp);
+        result = 31 * result + (int) (offset ^ (offset >>> 32));
+        result = 31 * result + (int) (timestamp ^ (timestamp >>> 32));
         result = 31 * result + sequence;
         result = 31 * result + (key != null ? key.hashCode() : 0);
         result = 31 * result + (value != null ? value.hashCode() : 0);

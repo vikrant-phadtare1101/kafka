@@ -28,11 +28,8 @@ import org.apache.kafka.streams.state.StateSerdes;
 
 import java.util.List;
 
-public class ChangeLoggingKeyValueBytesStore
-    extends WrappedStateStore<KeyValueStore<Bytes, byte[]>, byte[], byte[]>
-    implements KeyValueStore<Bytes, byte[]> {
-
-    StoreChangeLogger<Bytes, byte[]> changeLogger;
+public class ChangeLoggingKeyValueBytesStore extends WrappedStateStore<KeyValueStore<Bytes, byte[]>> implements KeyValueStore<Bytes, byte[]> {
+    private StoreChangeLogger<Bytes, byte[]> changeLogger;
 
     ChangeLoggingKeyValueBytesStore(final KeyValueStore<Bytes, byte[]> inner) {
         super(inner);
@@ -43,16 +40,13 @@ public class ChangeLoggingKeyValueBytesStore
                      final StateStore root) {
         super.init(context, root);
         final String topic = ProcessorStateManager.storeChangelogTopic(context.applicationId(), name());
-        changeLogger = new StoreChangeLogger<>(
-            name(),
-            context,
-            new StateSerdes<>(topic, Serdes.Bytes(), Serdes.ByteArray()));
+        this.changeLogger = new StoreChangeLogger<>(name(), context, new StateSerdes<>(topic, Serdes.Bytes(), Serdes.ByteArray()));
 
         // if the inner store is an LRU cache, add the eviction listener to log removed record
         if (wrapped() instanceof MemoryLRUCache) {
-            ((MemoryLRUCache) wrapped()).setWhenEldestRemoved((key, value) -> {
+            ((MemoryLRUCache<Bytes, byte[]>) wrapped()).setWhenEldestRemoved((key, value) -> {
                 // pass null to indicate removal
-                log(key, null);
+                changeLogger.logChange(key, null);
             });
         }
     }
@@ -66,16 +60,15 @@ public class ChangeLoggingKeyValueBytesStore
     public void put(final Bytes key,
                     final byte[] value) {
         wrapped().put(key, value);
-        log(key, value);
+        changeLogger.logChange(key, value);
     }
 
     @Override
     public byte[] putIfAbsent(final Bytes key,
                               final byte[] value) {
-        final byte[] previous = wrapped().putIfAbsent(key, value);
+        final byte[] previous = get(key);
         if (previous == null) {
-            // then it was absent
-            log(key, value);
+            put(key, value);
         }
         return previous;
     }
@@ -84,14 +77,14 @@ public class ChangeLoggingKeyValueBytesStore
     public void putAll(final List<KeyValue<Bytes, byte[]>> entries) {
         wrapped().putAll(entries);
         for (final KeyValue<Bytes, byte[]> entry : entries) {
-            log(entry.key, entry.value);
+            changeLogger.logChange(entry.key, entry.value);
         }
     }
 
     @Override
     public byte[] delete(final Bytes key) {
         final byte[] oldValue = wrapped().delete(key);
-        log(key, null);
+        changeLogger.logChange(key, null);
         return oldValue;
     }
 
@@ -109,10 +102,5 @@ public class ChangeLoggingKeyValueBytesStore
     @Override
     public KeyValueIterator<Bytes, byte[]> all() {
         return wrapped().all();
-    }
-
-    void log(final Bytes key,
-             final byte[] value) {
-        changeLogger.logChange(key, value);
     }
 }

@@ -155,7 +155,12 @@ public class InternalTopicManager {
             if (!topicsNotReady.isEmpty()) {
                 log.info("Topics {} can not be made ready with {} retries left", topicsNotReady, retries);
 
-                Utils.sleep(retryBackOffMs);
+                try {
+                    Thread.sleep(retryBackOffMs);
+                } catch (final InterruptedException e) {
+                    // this is okay, we just wake up early
+                    Thread.currentThread().interrupt();
+                }
 
                 remainingRetries--;
             }

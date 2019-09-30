@@ -23,9 +23,8 @@ from kafkatest.services.kafka import KafkaService
 from kafkatest.services.streams import StreamsSmokeTestDriverService, StreamsSmokeTestJobRunnerService, \
     StreamsUpgradeTestJobRunnerService
 from kafkatest.services.zookeeper import ZookeeperService
-from kafkatest.tests.streams.utils import extract_generation_from_logs
 from kafkatest.version import LATEST_0_10_0, LATEST_0_10_1, LATEST_0_10_2, LATEST_0_11_0, LATEST_1_0, LATEST_1_1, \
-    LATEST_2_0, LATEST_2_1, LATEST_2_2, DEV_BRANCH, DEV_VERSION, KafkaVersion
+    LATEST_2_0, LATEST_2_1, DEV_BRANCH, DEV_VERSION, KafkaVersion
 
 # broker 0.10.0 is not compatible with newer Kafka Streams versions
 broker_upgrade_versions = [str(LATEST_0_10_1), str(LATEST_0_10_2), str(LATEST_0_11_0), str(LATEST_1_0), str(LATEST_1_1), str(LATEST_2_0), str(LATEST_2_1), str(DEV_BRANCH)]
@@ -35,9 +34,7 @@ metadata_2_versions = [str(LATEST_0_10_1), str(LATEST_0_10_2), str(LATEST_0_11_0
 # once 0.10.1.2 is available backward_compatible_metadata_2_versions
 # can be replaced with metadata_2_versions
 backward_compatible_metadata_2_versions = [str(LATEST_0_10_2), str(LATEST_0_11_0), str(LATEST_1_0), str(LATEST_1_1)]
-# If we add a new version below, we also need to add this version to `streams.py`:
-# -> class `StreamsUpgradeTestJobRunnerService`, method `start_cmd`, variable `KAFKA_STREAMS_VERSION`
-metadata_3_or_higher_versions = [str(LATEST_2_0), str(LATEST_2_1), str(LATEST_2_2), str(DEV_VERSION)]
+metadata_3_or_higher_versions = [str(LATEST_2_0), str(LATEST_2_1), str(DEV_VERSION)]
 
 """
 After each release one should first check that the released version has been uploaded to 
@@ -46,7 +43,7 @@ anyone can verify that by calling
 curl https://s3-us-west-2.amazonaws.com/kafka-packages/kafka_$scala_version-$version.tgz to download the jar
 and if it is not uploaded yet, ping the dev@kafka mailing list to request it being uploaded.
 
-This test needs to get updated, but this requires several steps,
+This test needs to get updated, but this requires several steps
 which are outlined here:
 
 1. Update all relevant versions in tests/kafkatest/version.py this will include adding a new version for the new
@@ -58,21 +55,20 @@ which are outlined here:
    during the system test run.
    
 3. Update the vagrant/bash.sh file to include all new versions, including the newly released version
-   and all point releases for existing releases. You only need to list the latest version in 
+   and all point releases for existing releases.  You only need to list the latest version in 
    this file.
    
 4. Then update all relevant versions in the tests/docker/Dockerfile
 
-5. Add a new upgrade-system-tests-XXXX module under streams. You can probably just copy the 
-   latest system test module from the last release. Just make sure to update the systout print
-   statement in StreamsUpgradeTest to the version for the release. After you add the new module
+5. Add a new "upgrade-system-tests-XXXX module under streams.  You can probably just copy the 
+   latest system test module from the last release.  Just make sure to update the systout print
+   statement in StreamsUpgradeTest to the version for the release.  After you add the new module
    you'll need to update settings.gradle file to include the name of the module you just created
-   for gradle to recognize the newly added module.
-
+   for gradle to recognize the newly added module
+   
 6. Then you'll need to update any version changes in gradle/dependencies.gradle
 
 """
-
 
 class StreamsUpgradeTest(Test):
     """
@@ -92,7 +88,6 @@ class StreamsUpgradeTest(Test):
         self.leader_counter = {}
 
     processed_msg = "processed [0-9]* records"
-    base_version_number = str(DEV_VERSION).split("-")[0]
 
     def perform_broker_upgrade(self, to_version):
         self.logger.info("First pass bounce - rolling broker upgrade")
@@ -149,7 +144,7 @@ class StreamsUpgradeTest(Test):
         self.kafka.start()
 
         # allow some time for topics to be created
-        wait_until(lambda: self.confirm_topics_on_all_brokers(set(self.topics.keys())),
+        wait_until(lambda: self.get_topics_count() >= (len(self.topics) * self.num_kafka_nodes),
                    timeout_sec=60,
                    err_msg="Broker did not create all topics in 60 seconds ")
 
@@ -164,7 +159,7 @@ class StreamsUpgradeTest(Test):
                 processor.start()
                 monitor.wait_until(self.processed_msg,
                                    timeout_sec=60,
-                                   err_msg="Never saw output '%s' on " % self.processed_msg + str(processor.node))
+                                   err_msg="Never saw output '%s' on" % self.processed_msg + str(processor.node))
 
             connected_message = "Discovered group coordinator"
             with processor.node.account.monitor_log(processor.LOG_FILE) as log_monitor:
@@ -372,8 +367,6 @@ class StreamsUpgradeTest(Test):
         if version.startswith("0") or version.startswith("1") \
           or version.startswith("2.0") or version.startswith("2.1"):
             return "Kafka version : " + version
-        elif "SNAPSHOT" in version:
-            return "Kafka version.*" + self.base_version_number + ".*SNAPSHOT"
         else:
             return "Kafka version: " + version
 
@@ -389,9 +382,9 @@ class StreamsUpgradeTest(Test):
                 log_monitor.wait_until(kafka_version_str,
                                        timeout_sec=60,
                                        err_msg="Could not detect Kafka Streams version " + version + " " + str(node1.account))
-                monitor.wait_until(self.processed_msg,
+                monitor.wait_until("processed [0-9]* records from topic",
                                    timeout_sec=60,
-                                   err_msg="Never saw output '%s' on " % self.processed_msg + str(node1.account))
+                                   err_msg="Never saw output 'processed 100 records from topic' on" + str(node1.account))
 
         # start second with <version>
         self.prepare_for(self.processor2, version)
@@ -402,13 +395,13 @@ class StreamsUpgradeTest(Test):
                     self.processor2.start()
                     log_monitor.wait_until(kafka_version_str,
                                            timeout_sec=60,
-                                           err_msg="Could not detect Kafka Streams version " + version + " on " + str(node2.account))
-                    first_monitor.wait_until(self.processed_msg,
+                                           err_msg="Could not detect Kafka Streams version " + version + " " + str(node2.account))
+                    first_monitor.wait_until("processed [0-9]* records from topic",
                                              timeout_sec=60,
-                                             err_msg="Never saw output '%s' on " % self.processed_msg + str(node1.account))
-                    second_monitor.wait_until(self.processed_msg,
+                                             err_msg="Never saw output 'processed 100 records from topic' on" + str(node1.account))
+                    second_monitor.wait_until("processed [0-9]* records from topic",
                                               timeout_sec=60,
-                                              err_msg="Never saw output '%s' on " % self.processed_msg + str(node2.account))
+                                              err_msg="Never saw output 'processed 100 records from topic' on" + str(node2.account))
 
         # start third with <version>
         self.prepare_for(self.processor3, version)
@@ -420,16 +413,16 @@ class StreamsUpgradeTest(Test):
                         self.processor3.start()
                         log_monitor.wait_until(kafka_version_str,
                                                timeout_sec=60,
-                                               err_msg="Could not detect Kafka Streams version " + version + " on " + str(node3.account))
-                        first_monitor.wait_until(self.processed_msg,
+                                               err_msg="Could not detect Kafka Streams version " + version + " " + str(node3.account))
+                        first_monitor.wait_until("processed [0-9]* records from topic",
                                                  timeout_sec=60,
-                                                 err_msg="Never saw output '%s' on " % self.processed_msg + str(node1.account))
-                        second_monitor.wait_until(self.processed_msg,
+                                                 err_msg="Never saw output 'processed 100 records from topic' on" + str(node1.account))
+                        second_monitor.wait_until("processed [0-9]* records from topic",
                                                   timeout_sec=60,
-                                                  err_msg="Never saw output '%s' on " % self.processed_msg + str(node2.account))
-                        third_monitor.wait_until(self.processed_msg,
-                                                 timeout_sec=60,
-                                                 err_msg="Never saw output '%s' on " % self.processed_msg + str(node3.account))
+                                                  err_msg="Never saw output 'processed 100 records from topic' on" + str(node2.account))
+                        third_monitor.wait_until("processed [0-9]* records from topic",
+                                                  timeout_sec=60,
+                                                  err_msg="Never saw output 'processed 100 records from topic' on" + str(node3.account))
 
     @staticmethod
     def prepare_for(processor, version):
@@ -459,12 +452,12 @@ class StreamsUpgradeTest(Test):
         with first_other_node.account.monitor_log(first_other_processor.STDOUT_FILE) as first_other_monitor:
             with second_other_node.account.monitor_log(second_other_processor.STDOUT_FILE) as second_other_monitor:
                 processor.stop()
-                first_other_monitor.wait_until(self.processed_msg,
+                first_other_monitor.wait_until("processed 100 records from topic",
                                                timeout_sec=60,
-                                               err_msg="Never saw output '%s' on " % self.processed_msg + str(first_other_node.account))
-                second_other_monitor.wait_until(self.processed_msg,
+                                               err_msg="Never saw output 'processed 100 records from topic' on" + str(first_other_node.account))
+                second_other_monitor.wait_until("processed 100 records from topic",
                                                 timeout_sec=60,
-                                                err_msg="Never saw output '%s' on " % self.processed_msg + str(second_other_node.account))
+                                                err_msg="Never saw output 'processed 100 records from topic' on" + str(second_other_node.account))
         node.account.ssh_capture("grep UPGRADE-TEST-CLIENT-CLOSED %s" % processor.STDOUT_FILE, allow_fail=False)
 
         if upgrade_from is None:  # upgrade disabled -- second round of rolling bounces
@@ -491,25 +484,24 @@ class StreamsUpgradeTest(Test):
 
                         log_monitor.wait_until(kafka_version_str,
                                                timeout_sec=60,
-                                               err_msg="Could not detect Kafka Streams version " + new_version + " on " + str(node.account))
-                        first_other_monitor.wait_until(self.processed_msg,
+                                               err_msg="Could not detect Kafka Streams version " + new_version + " " + str(node.account))
+                        first_other_monitor.wait_until("processed 100 records from topic",
                                                        timeout_sec=60,
-                                                       err_msg="Never saw output '%s' on " % self.processed_msg + str(first_other_node.account))
+                                                       err_msg="Never saw output 'processed 100 records from topic' on" + str(first_other_node.account))
                         found = list(first_other_node.account.ssh_capture(grep_metadata_error + first_other_processor.STDERR_FILE, allow_fail=True))
                         if len(found) > 0:
                             raise Exception("Kafka Streams failed with 'unable to decode subscription data: version=2'")
 
-                        second_other_monitor.wait_until(self.processed_msg,
+                        second_other_monitor.wait_until("processed 100 records from topic",
                                                         timeout_sec=60,
-                                                        err_msg="Never saw output '%s' on " % self.processed_msg + str(second_other_node.account))
+                                                        err_msg="Never saw output 'processed 100 records from topic' on" + str(second_other_node.account))
                         found = list(second_other_node.account.ssh_capture(grep_metadata_error + second_other_processor.STDERR_FILE, allow_fail=True))
                         if len(found) > 0:
                             raise Exception("Kafka Streams failed with 'unable to decode subscription data: version=2'")
 
-                        monitor.wait_until(self.processed_msg,
+                        monitor.wait_until("processed 100 records from topic",
                                            timeout_sec=60,
-                                           err_msg="Never saw output '%s' on " % self.processed_msg + str(node.account))
-
+                                           err_msg="Never saw output 'processed 100 records from topic' on" + str(node.account))
 
     def do_rolling_bounce(self, processor, counter, current_generation):
         first_other_processor = None
@@ -542,8 +534,7 @@ class StreamsUpgradeTest(Test):
                     self.old_processors.remove(processor)
                     self.upgraded_processors.append(processor)
 
-                    # checking for the dev version which should be the only SNAPSHOT
-                    log_monitor.wait_until("Kafka version.*" + self.base_version_number + ".*SNAPSHOT",
+                    log_monitor.wait_until("Kafka version: " + str(DEV_VERSION),
                                            timeout_sec=60,
                                            err_msg="Could not detect Kafka Streams version " + str(DEV_VERSION) + " in " + str(node.account))
                     log_monitor.offset = 5
@@ -599,9 +590,9 @@ class StreamsUpgradeTest(Test):
                     retries = 0
 
                     while retries < 10:
-                        processor_found = extract_generation_from_logs(processor)
-                        first_other_processor_found = extract_generation_from_logs(first_other_processor)
-                        second_other_processor_found = extract_generation_from_logs(second_other_processor)
+                        processor_found = self.extract_generation_from_logs(processor)
+                        first_other_processor_found = self.extract_generation_from_logs(first_other_processor)
+                        second_other_processor_found = self.extract_generation_from_logs(second_other_processor)
 
                         if len(processor_found) > 0 and len(first_other_processor_found) > 0 and len(second_other_processor_found) > 0:
                             self.logger.info("processor: " + str(processor_found))
@@ -633,6 +624,9 @@ class StreamsUpgradeTest(Test):
 
         return current_generation
 
+    def extract_generation_from_logs(self, processor):
+        return list(processor.node.account.ssh_capture("grep \"Successfully joined group with generation\" %s| awk \'{for(i=1;i<=NF;i++) {if ($i == \"generation\") beginning=i+1; if($i== \"(org.apache.kafka.clients.consumer.internals.AbstractCoordinator)\") ending=i }; for (j=beginning;j<ending;j++) printf $j; printf \"\\n\"}\'" % processor.LOG_FILE, allow_fail=True))
+
     def extract_highest_generation(self, found_generations):
         return int(found_generations[-1])
 
@@ -642,19 +636,10 @@ class StreamsUpgradeTest(Test):
             if len(found) > 0:
                 raise Exception("Kafka Streams failed with 'group member upgraded to metadata 4 too early'")
 
-    def confirm_topics_on_all_brokers(self, expected_topic_set):
+    def get_topics_count(self):
+        count = 0
         for node in self.kafka.nodes:
-            match_count = 0
-            # need to iterate over topic_list_generator as kafka.list_topics()
-            # returns a python generator so values are fetched lazily
-            # so we can't just compare directly we must iterate over what's returned
-            topic_list_generator = self.kafka.list_topics(node=node)
-            for topic in topic_list_generator:
-                if topic in expected_topic_set:
-                    match_count += 1
-
-            if len(expected_topic_set) != match_count:
-                return False
-
-        return True
-
+            topic_list = self.kafka.list_topics("placeholder", node)
+            for topic in topic_list:
+                count += 1
+        return count

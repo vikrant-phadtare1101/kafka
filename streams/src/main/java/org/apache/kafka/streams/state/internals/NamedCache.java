@@ -16,8 +16,6 @@
  */
 package org.apache.kafka.streams.state.internals;
 
-import java.util.NavigableMap;
-import java.util.concurrent.ConcurrentSkipListMap;
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.metrics.stats.Avg;
@@ -35,11 +33,13 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 
 class NamedCache {
     private static final Logger log = LoggerFactory.getLogger(NamedCache.class);
     private final String name;
-    private final NavigableMap<Bytes, LRUNode> cache = new ConcurrentSkipListMap<>();
+    private final TreeMap<Bytes, LRUNode> cache = new TreeMap<>();
     private final Set<Bytes> dirtyKeys = new LinkedHashSet<>();
     private ThreadCache.DirtyEntryFlushListener listener;
     private LRUNode tail;
@@ -266,12 +266,20 @@ class NamedCache {
         return cache.size();
     }
 
-    synchronized Iterator<Map.Entry<Bytes, LRUNode>> subMapIterator(final Bytes from, final Bytes to) {
-        return cache.subMap(from, true, to, true).entrySet().iterator();
+    synchronized Iterator<Bytes> keyRange(final Bytes from, final Bytes to) {
+        return keySetIterator(cache.navigableKeySet().subSet(from, true, to, true));
     }
 
-    synchronized Iterator<Map.Entry<Bytes, LRUNode>> allIterator() {
-        return cache.entrySet().iterator();
+    public boolean isEmpty() {
+        return cache.isEmpty();
+    }
+
+    private Iterator<Bytes> keySetIterator(final Set<Bytes> keySet) {
+        return new TreeSet<>(keySet).iterator();
+    }
+
+    synchronized Iterator<Bytes> allKeys() {
+        return keySetIterator(cache.navigableKeySet());
     }
 
     synchronized LRUCacheEntry first() {

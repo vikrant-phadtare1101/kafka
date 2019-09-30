@@ -45,14 +45,14 @@ import org.apache.kafka.common.utils.{LogContext, MockTime, Time}
 import org.apache.log4j.Level
 import org.junit.Assert._
 import org.junit._
-import org.scalatest.Assertions.fail
+import org.scalatest.junit.JUnitSuite
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.util.control.ControlThrowable
 
-class SocketServerTest {
+class SocketServerTest extends JUnitSuite {
   val props = TestUtils.createBrokerConfig(0, TestUtils.MockZkConnect, port = 0)
   props.put("listeners", "PLAINTEXT://localhost:0")
   props.put("num.network.threads", "1")
@@ -68,7 +68,8 @@ class SocketServerTest {
   val localAddress = InetAddress.getLoopbackAddress
 
   // Clean-up any metrics left around by previous tests
-  TestUtils.clearYammerMetrics()
+  for (metricName <- YammerMetrics.defaultRegistry.allMetrics.keySet.asScala)
+    YammerMetrics.defaultRegistry.removeMetric(metricName)
 
   val server = new SocketServer(config, metrics, Time.SYSTEM, credentialProvider)
   server.startup()

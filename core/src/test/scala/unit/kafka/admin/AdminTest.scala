@@ -30,7 +30,6 @@ import kafka.server.{ConfigType, KafkaConfig, KafkaServer}
 
 import scala.collection.{Map, immutable}
 import org.apache.kafka.common.security.JaasUtils
-import org.scalatest.Assertions.intercept
 
 import scala.collection.JavaConverters._
 

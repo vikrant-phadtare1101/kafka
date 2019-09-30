@@ -31,10 +31,8 @@ import org.apache.kafka.streams.kstream.Windows;
 import org.apache.kafka.streams.kstream.internals.graph.StreamsGraphNode;
 import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.Stores;
-import org.apache.kafka.streams.state.TimestampedWindowStore;
 import org.apache.kafka.streams.state.WindowBytesStoreSupplier;
 import org.apache.kafka.streams.state.WindowStore;
-import org.apache.kafka.streams.state.internals.RocksDbWindowBytesStoreSupplier;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -156,7 +154,7 @@ public class TimeWindowedKStreamImpl<K, V, W extends Window> extends AbstractStr
     }
 
     @SuppressWarnings("deprecation") // continuing to support Windows#maintainMs/segmentInterval in fallback mode
-    private <VR> StoreBuilder<TimestampedWindowStore<K, VR>> materialize(final MaterializedInternal<K, VR, WindowStore<Bytes, byte[]>> materialized) {
+    private <VR> StoreBuilder<WindowStore<K, VR>> materialize(final MaterializedInternal<K, VR, WindowStore<Bytes, byte[]>> materialized) {
         WindowBytesStoreSupplier supplier = (WindowBytesStoreSupplier) materialized.storeSupplier();
         if (supplier == null) {
             if (materialized.retention() != null) {
@@ -171,7 +169,7 @@ public class TimeWindowedKStreamImpl<K, V, W extends Window> extends AbstractStr
                                                            + " retention=[" + retentionPeriod + "]");
                 }
 
-                supplier = Stores.persistentTimestampedWindowStore(
+                supplier = Stores.persistentWindowStore(
                     materialized.storeName(),
                     Duration.ofMillis(retentionPeriod),
                     Duration.ofMillis(windows.size()),
@@ -192,16 +190,16 @@ public class TimeWindowedKStreamImpl<K, V, W extends Window> extends AbstractStr
                                                            + " retention=[" + windows.maintainMs() + "]");
                 }
 
-                supplier = new RocksDbWindowBytesStoreSupplier(
+                supplier = Stores.persistentWindowStore(
                     materialized.storeName(),
                     windows.maintainMs(),
-                    Math.max(windows.maintainMs() / (windows.segments - 1), 60_000L),
+                    windows.segments,
                     windows.size(),
-                    false,
-                    true);
+                    false
+                );
             }
         }
-        final StoreBuilder<TimestampedWindowStore<K, VR>> builder = Stores.timestampedWindowStoreBuilder(
+        final StoreBuilder<WindowStore<K, VR>> builder = Stores.windowStoreBuilder(
             supplier,
             materialized.keySerde(),
             materialized.valueSerde()

@@ -14,7 +14,6 @@
 
 package kafka.api
 
-import java.time.Duration
 import java.util.{Collections, HashMap, Properties}
 
 import kafka.api.QuotaTestClients._
@@ -33,7 +32,7 @@ import scala.collection.JavaConverters._
 
 abstract class BaseQuotaTest extends IntegrationTestHarness {
 
-  override val brokerCount = 2
+  override val serverCount = 2
 
   protected def producerClientId = "QuotasTestProducer-1"
   protected def consumerClientId = "QuotasTestConsumer-1"
@@ -70,7 +69,7 @@ abstract class BaseQuotaTest extends IntegrationTestHarness {
     super.setUp()
 
     val numPartitions = 1
-    val leaders = createTopic(topic1, numPartitions, brokerCount)
+    val leaders = createTopic(topic1, numPartitions, serverCount)
     leaderNode = if (leaders(0) == servers.head.config.brokerId) servers.head else servers(1)
     followerNode = if (leaders(0) != servers.head.config.brokerId) servers.head else servers(1)
     quotaTestClients = createQuotaTestClients(topic1, leaderNode)
@@ -141,7 +140,7 @@ abstract class BaseQuotaTest extends IntegrationTestHarness {
     val endTimeMs = System.currentTimeMillis + 10000
     var throttled = false
     while ((!throttled || quotaTestClients.exemptRequestMetric == null) && System.currentTimeMillis < endTimeMs) {
-      consumer.poll(Duration.ofMillis(100L))
+      consumer.poll(100)
       val throttleMetric = quotaTestClients.throttleMetric(QuotaType.Request, consumerClientId)
       throttled = throttleMetric != null && metricValue(throttleMetric) > 0
     }
@@ -198,7 +197,7 @@ abstract class QuotaTestClients(topic: String,
     var numConsumed = 0
     var throttled = false
     do {
-      numConsumed += consumer.poll(Duration.ofMillis(100L)).count
+      numConsumed += consumer.poll(100).count
       val metric = throttleMetric(QuotaType.Fetch, consumerClientId)
       throttled = metric != null && metricValue(metric) > 0
     }  while (numConsumed < maxRecords && !throttled)
@@ -207,7 +206,7 @@ abstract class QuotaTestClients(topic: String,
     if (throttled && numConsumed < maxRecords && waitForRequestCompletion) {
       val minRecords = numConsumed + 1
       while (numConsumed < minRecords)
-        numConsumed += consumer.poll(Duration.ofMillis(100L)).count
+        numConsumed += consumer.poll(100).count
     }
     numConsumed
   }

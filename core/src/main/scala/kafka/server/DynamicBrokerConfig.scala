@@ -23,7 +23,6 @@ import java.util.concurrent.locks.ReentrantReadWriteLock
 
 import kafka.cluster.EndPoint
 import kafka.log.{LogCleaner, LogConfig, LogManager}
-import kafka.network.SocketServer
 import kafka.server.DynamicBrokerConfig._
 import kafka.utils.{CoreUtils, Logging, PasswordEncoder}
 import kafka.zk.{AdminZkClient, KafkaZkClient}
@@ -82,11 +81,10 @@ object DynamicBrokerConfig {
     DynamicThreadPool.ReconfigurableConfigs ++
     Set(KafkaConfig.MetricReporterClassesProp) ++
     DynamicListenerConfig.ReconfigurableConfigs ++
-    SocketServer.ReconfigurableConfigs
+    DynamicConnectionQuota.ReconfigurableConfigs
 
-  private val ClusterLevelListenerConfigs = Set(KafkaConfig.MaxConnectionsProp)
   private val PerBrokerConfigs = DynamicSecurityConfigs  ++
-    DynamicListenerConfig.ReconfigurableConfigs -- ClusterLevelListenerConfigs
+    DynamicListenerConfig.ReconfigurableConfigs
   private val ListenerMechanismConfigs = Set(KafkaConfig.SaslJaasConfigProp)
 
   private val ReloadableFileConfigs = Set(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG, SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG)
@@ -137,13 +135,7 @@ object DynamicBrokerConfig {
 
   private def perBrokerConfigs(props: Properties): Set[String] = {
     val configNames = props.asScala.keySet
-    def perBrokerListenerConfig(name: String): Boolean = {
-      name match {
-        case ListenerConfigRegex(baseName) => !ClusterLevelListenerConfigs.contains(baseName)
-        case _ => false
-      }
-    }
-    configNames.intersect(PerBrokerConfigs) ++ configNames.filter(perBrokerListenerConfig)
+    configNames.intersect(PerBrokerConfigs) ++ configNames.filter(ListenerConfigRegex.findFirstIn(_).nonEmpty)
   }
 
   private def nonDynamicConfigs(props: Properties): Set[String] = {
@@ -232,7 +224,7 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
       addBrokerReconfigurable(kafkaServer.logManager.cleaner)
     addBrokerReconfigurable(new DynamicLogConfig(kafkaServer.logManager, kafkaServer))
     addBrokerReconfigurable(new DynamicListenerConfig(kafkaServer))
-    addBrokerReconfigurable(kafkaServer.socketServer)
+    addBrokerReconfigurable(new DynamicConnectionQuota(kafkaServer))
   }
 
   def addReconfigurable(reconfigurable: Reconfigurable): Unit = CoreUtils.inWriteLock(lock) {
@@ -797,10 +789,7 @@ object DynamicListenerConfig {
     KafkaConfig.SaslLoginRefreshWindowFactorProp,
     KafkaConfig.SaslLoginRefreshWindowJitterProp,
     KafkaConfig.SaslLoginRefreshMinPeriodSecondsProp,
-    KafkaConfig.SaslLoginRefreshBufferSecondsProp,
-
-    // Connection limit configs
-    KafkaConfig.MaxConnectionsProp
+    KafkaConfig.SaslLoginRefreshBufferSecondsProp
   )
 }
 
@@ -895,5 +884,24 @@ class DynamicListenerConfig(server: KafkaServer) extends BrokerReconfigurable wi
 
 }
 
+object DynamicConnectionQuota {
+  val ReconfigurableConfigs = Set(KafkaConfig.MaxConnectionsPerIpProp, KafkaConfig.MaxConnectionsPerIpOverridesProp)
+}
 
+class DynamicConnectionQuota(server: KafkaServer) extends BrokerReconfigurable {
+
+  override def reconfigurableConfigs: Set[String] = {
+    DynamicConnectionQuota.ReconfigurableConfigs
+  }
+
+  override def validateReconfiguration(newConfig: KafkaConfig): Unit = {
+  }
+
+  override def reconfigure(oldConfig: KafkaConfig, newConfig: KafkaConfig): Unit = {
+    server.socketServer.updateMaxConnectionsPerIpOverride(newConfig.maxConnectionsPerIpOverrides)
+
+    if (newConfig.maxConnectionsPerIp != oldConfig.maxConnectionsPerIp)
+      server.socketServer.updateMaxConnectionsPerIp(newConfig.maxConnectionsPerIp)
+  }
+}
 

@@ -50,24 +50,25 @@ import org.apache.kafka.streams.scala.kstream._
 import org.apache.kafka.streams.{StreamsBuilder => StreamsBuilderJ, _}
 import org.junit.Assert._
 import org.junit._
+import org.scalatest.junit.JUnitSuite
 
 import _root_.scala.collection.JavaConverters._
 
 /**
  * Test suite that verifies that the topology built by the Java and Scala APIs match.
  */
-class TopologyTest {
+class TopologyTest extends JUnitSuite {
 
-  private val inputTopic = "input-topic"
-  private val userClicksTopic = "user-clicks-topic"
-  private val userRegionsTopic = "user-regions-topic"
+  val inputTopic = "input-topic"
+  val userClicksTopic = "user-clicks-topic"
+  val userRegionsTopic = "user-regions-topic"
 
-  private val pattern = Pattern.compile("\\W+", Pattern.UNICODE_CHARACTER_CLASS)
+  val pattern = Pattern.compile("\\W+", Pattern.UNICODE_CHARACTER_CLASS)
 
-  @Test def shouldBuildIdenticalTopologyInJavaNScalaSimple(): Unit = {
+  @Test def shouldBuildIdenticalTopologyInJavaNScalaSimple() = {
 
     // build the Scala topology
-    def getTopologyScala: TopologyDescription = {
+    def getTopologyScala(): TopologyDescription = {
 
       import Serdes._
 
@@ -81,27 +82,27 @@ class TopologyTest {
     }
 
     // build the Java topology
-    def getTopologyJava: TopologyDescription = {
+    def getTopologyJava(): TopologyDescription = {
 
       val streamBuilder = new StreamsBuilderJ
       val textLines = streamBuilder.stream[String, String](inputTopic)
 
-      val _: KStreamJ[String, String] = textLines.flatMapValues(
+      val _: KStreamJ[String, String] = textLines.flatMapValues {
         new ValueMapper[String, java.lang.Iterable[String]] {
           def apply(s: String): java.lang.Iterable[String] = pattern.split(s.toLowerCase).toIterable.asJava
         }
-      )
+      }
       streamBuilder.build().describe()
     }
 
     // should match
-    assertEquals(getTopologyScala, getTopologyJava)
+    assertEquals(getTopologyScala(), getTopologyJava())
   }
 
-  @Test def shouldBuildIdenticalTopologyInJavaNScalaAggregate(): Unit = {
+  @Test def shouldBuildIdenticalTopologyInJavaNScalaAggregate() = {
 
     // build the Scala topology
-    def getTopologyScala: TopologyDescription = {
+    def getTopologyScala(): TopologyDescription = {
 
       import Serdes._
 
@@ -111,23 +112,23 @@ class TopologyTest {
       val _: KTable[String, Long] =
         textLines
           .flatMapValues(v => pattern.split(v.toLowerCase))
-          .groupBy((_, v) => v)
+          .groupBy((k, v) => v)
           .count()
 
       streamBuilder.build().describe()
     }
 
     // build the Java topology
-    def getTopologyJava: TopologyDescription = {
+    def getTopologyJava(): TopologyDescription = {
 
       val streamBuilder = new StreamsBuilderJ
       val textLines: KStreamJ[String, String] = streamBuilder.stream[String, String](inputTopic)
 
-      val splits: KStreamJ[String, String] = textLines.flatMapValues(
+      val splits: KStreamJ[String, String] = textLines.flatMapValues {
         new ValueMapper[String, java.lang.Iterable[String]] {
           def apply(s: String): java.lang.Iterable[String] = pattern.split(s.toLowerCase).toIterable.asJava
         }
-      )
+      }
 
       val grouped: KGroupedStreamJ[String, String] = splits.groupBy {
         new KeyValueMapper[String, String, String] {
@@ -135,19 +136,19 @@ class TopologyTest {
         }
       }
 
-      grouped.count()
+      val wordCounts: KTableJ[String, java.lang.Long] = grouped.count()
 
       streamBuilder.build().describe()
     }
 
     // should match
-    assertEquals(getTopologyScala, getTopologyJava)
+    assertEquals(getTopologyScala(), getTopologyJava())
   }
 
-  @Test def shouldBuildIdenticalTopologyInJavaNScalaJoin(): Unit = {
+  @Test def shouldBuildIdenticalTopologyInJavaNScalaJoin() = {
 
     // build the Scala topology
-    def getTopologyScala: TopologyDescription = {
+    def getTopologyScala(): TopologyDescription = {
       import Serdes._
 
       val builder = new StreamsBuilder()
@@ -156,18 +157,18 @@ class TopologyTest {
 
       val userRegionsTable: KTable[String, String] = builder.table(userRegionsTopic)
 
-      // clicks per region
-      userClicksStream
-        .leftJoin(userRegionsTable)((clicks, region) => (if (region == null) "UNKNOWN" else region, clicks))
-        .map((_, regionWithClicks) => regionWithClicks)
-        .groupByKey
-        .reduce(_ + _)
+      val clicksPerRegion: KTable[String, Long] =
+        userClicksStream
+          .leftJoin(userRegionsTable)((clicks, region) => (if (region == null) "UNKNOWN" else region, clicks))
+          .map((_, regionWithClicks) => regionWithClicks)
+          .groupByKey
+          .reduce(_ + _)
 
       builder.build().describe()
     }
 
     // build the Java topology
-    def getTopologyJava: TopologyDescription = {
+    def getTopologyJava(): TopologyDescription = {
 
       import java.lang.{Long => JLong}
 
@@ -200,11 +201,11 @@ class TopologyTest {
         }
 
       // Compute the total per region by summing the individual click counts per region.
-      clicksByRegion
+      val clicksPerRegion: KTableJ[String, JLong] = clicksByRegion
         .groupByKey(Grouped.`with`[String, JLong])
         .reduce {
           new Reducer[JLong] {
-            def apply(v1: JLong, v2: JLong): JLong = v1 + v2
+            def apply(v1: JLong, v2: JLong) = v1 + v2
           }
         }
 
@@ -212,19 +213,20 @@ class TopologyTest {
     }
 
     // should match
-    assertEquals(getTopologyScala, getTopologyJava)
+    assertEquals(getTopologyScala(), getTopologyJava())
   }
 
-  @Test def shouldBuildIdenticalTopologyInJavaNScalaTransform(): Unit = {
+  @Test def shouldBuildIdenticalTopologyInJavaNScalaTransform() = {
 
     // build the Scala topology
-    def getTopologyScala: TopologyDescription = {
+    def getTopologyScala(): TopologyDescription = {
 
       import Serdes._
 
       val streamBuilder = new StreamsBuilder
       val textLines = streamBuilder.stream[String, String](inputTopic)
 
+      //noinspection ConvertExpressionToSAM due to 2.11 build
       val _: KTable[String, Long] =
         textLines
           .transform(new TransformerSupplier[String, String, KeyValue[String, String]] {
@@ -238,14 +240,14 @@ class TopologyTest {
                 override def close(): Unit = Unit
               }
           })
-          .groupBy((_, v) => v)
+          .groupBy((k, v) => v)
           .count()
 
       streamBuilder.build().describe()
     }
 
     // build the Java topology
-    def getTopologyJava: TopologyDescription = {
+    def getTopologyJava(): TopologyDescription = {
 
       val streamBuilder = new StreamsBuilderJ
       val textLines: KStreamJ[String, String] = streamBuilder.stream[String, String](inputTopic)
@@ -269,14 +271,13 @@ class TopologyTest {
         }
       }
 
-      // word counts
-      grouped.count()
+      val wordCounts: KTableJ[String, java.lang.Long] = grouped.count()
 
       streamBuilder.build().describe()
     }
 
     // should match
-    assertEquals(getTopologyScala, getTopologyJava)
+    assertEquals(getTopologyScala(), getTopologyJava())
   }
 
   @Test def shouldBuildIdenticalTopologyInJavaNScalaProperties(): Unit = {

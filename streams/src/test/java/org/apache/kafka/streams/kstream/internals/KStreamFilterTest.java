@@ -39,7 +39,12 @@ public class KStreamFilterTest {
     private final ConsumerRecordFactory<Integer, String> recordFactory = new ConsumerRecordFactory<>(new IntegerSerializer(), new StringSerializer());
     private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.Integer(), Serdes.String());
 
-    private final Predicate<Integer, String> isMultipleOfThree = (key, value) -> (key % 3) == 0;
+    private final Predicate<Integer, String> isMultipleOfThree = new Predicate<Integer, String>() {
+        @Override
+        public boolean test(final Integer key, final String value) {
+            return (key % 3) == 0;
+        }
+    };
 
     @Test
     public void testFilter() {
@@ -47,8 +52,9 @@ public class KStreamFilterTest {
         final int[] expectedKeys = new int[]{1, 2, 3, 4, 5, 6, 7};
 
         final KStream<Integer, String> stream;
-        final MockProcessorSupplier<Integer, String> supplier = new MockProcessorSupplier<>();
+        final MockProcessorSupplier<Integer, String> supplier;
 
+        supplier = new MockProcessorSupplier<>();
         stream = builder.stream(topicName, Consumed.with(Serdes.Integer(), Serdes.String()));
         stream.filter(isMultipleOfThree).process(supplier);
 
@@ -67,8 +73,9 @@ public class KStreamFilterTest {
         final int[] expectedKeys = new int[]{1, 2, 3, 4, 5, 6, 7};
 
         final KStream<Integer, String> stream;
-        final MockProcessorSupplier<Integer, String> supplier = new MockProcessorSupplier<>();
+        final MockProcessorSupplier<Integer, String> supplier;
 
+        supplier = new MockProcessorSupplier<>();
         stream = builder.stream(topicName, Consumed.with(Serdes.Integer(), Serdes.String()));
         stream.filterNot(isMultipleOfThree).process(supplier);
 
@@ -83,7 +90,12 @@ public class KStreamFilterTest {
 
     @Test
     public void testTypeVariance() {
-        final Predicate<Number, Object> numberKeyPredicate = (key, value) -> false;
+        final Predicate<Number, Object> numberKeyPredicate = new Predicate<Number, Object>() {
+            @Override
+            public boolean test(final Number key, final Object value) {
+                return false;
+            }
+        };
 
         new StreamsBuilder()
             .<Integer, String>stream("empty")

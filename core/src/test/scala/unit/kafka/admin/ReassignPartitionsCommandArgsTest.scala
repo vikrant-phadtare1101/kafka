@@ -19,8 +19,9 @@ package kafka.admin
 import kafka.utils.Exit
 import org.junit.Assert._
 import org.junit.{After, Before, Test}
+import org.scalatest.junit.JUnitSuite
 
-class ReassignPartitionsCommandArgsTest {
+class ReassignPartitionsCommandArgsTest extends JUnitSuite {
 
   @Before
   def setUp() {

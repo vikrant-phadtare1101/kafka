@@ -59,7 +59,6 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-import static org.junit.Assert.assertThrows;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -689,35 +688,6 @@ public class SelectorTest {
         assertEquals((double) conns, getMetric("connection-count").metricValue());
     }
 
-    @SuppressWarnings("unchecked")
-    @Test
-    public void testLowestPriorityChannel() throws Exception {
-        int conns = 5;
-        InetSocketAddress addr = new InetSocketAddress("localhost", server.port);
-        for (int i = 0; i < conns; i++) {
-            connect(String.valueOf(i), addr);
-        }
-        assertNotNull(selector.lowestPriorityChannel());
-        for (int i = conns - 1; i >= 0; i--) {
-            if (i != 2)
-              assertEquals("", blockingRequest(String.valueOf(i), ""));
-            time.sleep(10);
-        }
-        assertEquals("2", selector.lowestPriorityChannel().id());
-
-        Field field = Selector.class.getDeclaredField("closingChannels");
-        field.setAccessible(true);
-        Map<String, KafkaChannel> closingChannels = (Map<String, KafkaChannel>) field.get(selector);
-        closingChannels.put("3", selector.channel("3"));
-        assertEquals("3", selector.lowestPriorityChannel().id());
-        closingChannels.remove("3");
-
-        for (int i = 0; i < conns; i++) {
-            selector.close(String.valueOf(i));
-        }
-        assertNull(selector.lowestPriorityChannel());
-    }
-
     @Test
     public void testMetricsCleanupOnSelectorClose() throws Exception {
         Metrics metrics = new Metrics();
@@ -732,7 +702,12 @@ public class SelectorTest {
         selector.connect(id, new InetSocketAddress("localhost", server.port), BUFFER_SIZE, BUFFER_SIZE);
 
         // Close the selector and ensure a RuntimeException has been throw
-        assertThrows(RuntimeException.class, selector::close);
+        try {
+            selector.close();
+            fail();
+        } catch (RuntimeException e) {
+            // Expected
+        }
 
         // We should only have one remaining metric for kafka-metrics-count, which is a global metric
         assertEquals(1, metrics.metrics().size());
@@ -813,7 +788,7 @@ public class SelectorTest {
         verifySelectorEmpty(this.selector);
     }
 
-    public void verifySelectorEmpty(Selector selector) throws Exception {
+    private void verifySelectorEmpty(Selector selector) throws Exception {
         for (KafkaChannel channel : selector.channels()) {
             selector.close(channel.id());
             assertNull(channel.selectionKey().attachment());
