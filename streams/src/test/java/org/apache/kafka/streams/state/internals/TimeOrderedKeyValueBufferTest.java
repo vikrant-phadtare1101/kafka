@@ -23,6 +23,8 @@ import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsConfig;
@@ -67,6 +69,16 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
     private final Function<String, B> bufferSupplier;
     private final String testName;
 
+    public static final class NullRejectingStringSerializer extends StringSerializer {
+        @Override
+        public byte[] serialize(final String topic, final String data) {
+            if (data == null) {
+                throw new IllegalArgumentException();
+            }
+            return super.serialize(topic, data);
+        }
+    }
+
     // As we add more buffer implementations/configurations, we can add them here
     @Parameterized.Parameters(name = "{index}: test={0}")
     public static Collection<Object[]> parameters() {
@@ -75,7 +87,7 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
                 "in-memory buffer",
                 (Function<String, InMemoryTimeOrderedKeyValueBuffer<String, String>>) name ->
                     new InMemoryTimeOrderedKeyValueBuffer
-                        .Builder<>(name, Serdes.String(), Serdes.String())
+                        .Builder<>(name, Serdes.String(), Serdes.serdeFrom(new NullRejectingStringSerializer(), new StringDeserializer()))
                         .build()
             }
         );
@@ -362,10 +374,10 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
 
         final FullChangeSerde<String> serializer = FullChangeSerde.wrap(Serdes.String());
 
-        final byte[] todeleteValue = FullChangeSerde.composeLegacyFormat(serializer.serializeParts(null, new Change<>("doomed", null)));
-        final byte[] asdfValue = FullChangeSerde.composeLegacyFormat(serializer.serializeParts(null, new Change<>("qwer", null)));
-        final byte[] zxcvValue1 = FullChangeSerde.composeLegacyFormat(serializer.serializeParts(null, new Change<>("eo4im", "previous")));
-        final byte[] zxcvValue2 = FullChangeSerde.composeLegacyFormat(serializer.serializeParts(null, new Change<>("next", "eo4im")));
+        final byte[] todeleteValue = FullChangeSerde.mergeChangeArraysIntoSingleLegacyFormattedArray(serializer.serializeParts(null, new Change<>("doomed", null)));
+        final byte[] asdfValue = FullChangeSerde.mergeChangeArraysIntoSingleLegacyFormattedArray(serializer.serializeParts(null, new Change<>("qwer", null)));
+        final byte[] zxcvValue1 = FullChangeSerde.mergeChangeArraysIntoSingleLegacyFormattedArray(serializer.serializeParts(null, new Change<>("eo4im", "previous")));
+        final byte[] zxcvValue2 = FullChangeSerde.mergeChangeArraysIntoSingleLegacyFormattedArray(serializer.serializeParts(null, new Change<>("next", "eo4im")));
         stateRestoreCallback.restoreBatch(asList(
             new ConsumerRecord<>("changelog-topic",
                                  0,
@@ -478,11 +490,11 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
         final byte[] asdfValue = getContextualRecord("qwer", 1).serialize(0).array();
         final FullChangeSerde<String> fullChangeSerde = FullChangeSerde.wrap(Serdes.String());
         final byte[] zxcvValue1 = new ContextualRecord(
-            FullChangeSerde.composeLegacyFormat(fullChangeSerde.serializeParts(null, new Change<>("3o4im", "previous"))),
+            FullChangeSerde.mergeChangeArraysIntoSingleLegacyFormattedArray(fullChangeSerde.serializeParts(null, new Change<>("3o4im", "previous"))),
             getContext(2L)
         ).serialize(0).array();
         final byte[] zxcvValue2 = new ContextualRecord(
-            FullChangeSerde.composeLegacyFormat(fullChangeSerde.serializeParts(null, new Change<>("next", "3o4im"))),
+            FullChangeSerde.mergeChangeArraysIntoSingleLegacyFormattedArray(fullChangeSerde.serializeParts(null, new Change<>("next", "3o4im"))),
             getContext(3L)
         ).serialize(0).array();
         stateRestoreCallback.restoreBatch(asList(
@@ -773,7 +785,7 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
     private static ContextualRecord getContextualRecord(final String value, final long timestamp) {
         final FullChangeSerde<String> fullChangeSerde = FullChangeSerde.wrap(Serdes.String());
         return new ContextualRecord(
-            FullChangeSerde.composeLegacyFormat(fullChangeSerde.serializeParts(null, new Change<>(value, null))),
+            FullChangeSerde.mergeChangeArraysIntoSingleLegacyFormattedArray(fullChangeSerde.serializeParts(null, new Change<>(value, null))),
             getContext(timestamp)
         );
     }

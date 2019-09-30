@@ -76,12 +76,12 @@ public class TopicConfig {
         "their data. If set to -1, no time limit is applied.";
 
     public static final String MAX_MESSAGE_BYTES_CONFIG = "max.message.bytes";
-    public static final String MAX_MESSAGE_BYTES_DOC = "<p>The largest record batch size allowed by Kafka. If this " +
+    public static final String MAX_MESSAGE_BYTES_DOC = "The largest record batch size allowed by Kafka. If this " +
         "is increased and there are consumers older than 0.10.2, the consumers' fetch size must also be increased so that " +
-        "the they can fetch record batches this large.</p>" +
-        "<p>In the latest message format version, records are always grouped into batches for efficiency. In previous " +
+        "the they can fetch record batches this large. " +
+        "In the latest message format version, records are always grouped into batches for efficiency. In previous " +
         "message format versions, uncompressed records are not grouped into batches and this limit only applies to a " +
-        "single record in that case.</p>";
+        "single record in that case.";
 
     public static final String INDEX_INTERVAL_BYTES_CONFIG = "index.interval.bytes";
     public static final String INDEX_INTERVAL_BYTES_DOCS = "This setting controls how frequently " +
@@ -116,7 +116,7 @@ public class TopicConfig {
         "the log by duplicates (at 50% at most 50% of the log could be duplicates). A " +
         "higher ratio will mean fewer, more efficient cleanings but will mean more wasted " +
         "space in the log. If the " + MAX_COMPACTION_LAG_MS_CONFIG + " or the " + MIN_COMPACTION_LAG_MS_CONFIG +
-        " configurations are also specified, then the log compactor considers the log eligible for compaction " +
+        " configurations are also specified, then the log compactor considers the log to be eligible for compaction " +
         "as soon as either: (i) the dirty ratio threshold has been met and the log has had dirty (uncompacted) " +
         "records for at least the " + MIN_COMPACTION_LAG_MS_CONFIG + " duration, or (ii) if the log has had " +
         "dirty (uncompacted) records for at most the " + MAX_COMPACTION_LAG_MS_CONFIG + " period.";
