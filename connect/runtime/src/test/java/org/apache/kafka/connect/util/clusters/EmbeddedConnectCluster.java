@@ -333,6 +333,16 @@ public class EmbeddedConnectCluster {
         }
     }
 
+    public String adminEndpoint(String resource) throws IOException {
+        String url = connectCluster.stream()
+                .map(WorkerHandle::adminUrl)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElseThrow(() -> new IOException("Admin endpoint is disabled."))
+                .toString();
+        return url + resource;
+    }
+
     public String endpointForResource(String resource) throws IOException {
         String url = connectCluster.stream()
                 .map(WorkerHandle::url)
@@ -429,7 +439,7 @@ public class EmbeddedConnectCluster {
         private int numWorkers = DEFAULT_NUM_WORKERS;
         private int numBrokers = DEFAULT_NUM_BROKERS;
         private Properties brokerProps = DEFAULT_BROKER_CONFIG;
-        private boolean maskExitProcedures = false;
+        private boolean maskExitProcedures = true;
 
         public Builder name(String name) {
             this.name = name;
