@@ -18,12 +18,18 @@ package org.apache.kafka.streams.integration;
 
 import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.metrics.Sensor;
+import org.apache.kafka.common.serialization.IntegerSerializer;
+import org.apache.kafka.common.serialization.LongDeserializer;
 import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.Bytes;
+import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.KafkaStreams.State;
+import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.integration.utils.EmbeddedKafkaCluster;
 import org.apache.kafka.streams.integration.utils.IntegrationTestUtils;
 import org.apache.kafka.streams.kstream.Consumed;
@@ -45,12 +51,14 @@ import org.junit.experimental.categories.Category;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
 import java.util.stream.Collectors;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.Assert.assertTrue;
 
 @SuppressWarnings("unchecked")
 @Category({IntegrationTest.class})
@@ -60,8 +68,12 @@ public class MetricsIntegrationTest {
 
     @ClassRule
     public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(NUM_BROKERS);
+    private final long timeout = 60000;
+
+    private final static String APPLICATION_ID_VALUE = "stream-metrics-test";
 
     // Metric group
+    private static final String STREAM_CLIENT_NODE_METRICS = "stream-metrics";
     private static final String STREAM_THREAD_NODE_METRICS = "stream-metrics";
     private static final String STREAM_TASK_NODE_METRICS = "stream-task-metrics";
     private static final String STREAM_PROCESSOR_NODE_METRICS = "stream-processor-node-metrics";
@@ -73,6 +85,11 @@ public class MetricsIntegrationTest {
     private static final String STREAM_STORE_SESSION_ROCKSDB_STATE_METRICS = "stream-rocksdb-session-state-metrics";
 
     // Metrics name
+    private static final String VERSION = "version";
+    private static final String COMMIT_ID = "commit-id";
+    private static final String APPLICATION_ID = "application-id";
+    private static final String TOPOLOGY_DESCRIPTION = "topology-description";
+    private static final String STATE = "state";
     private static final String PUT_LATENCY_AVG = "put-latency-avg";
     private static final String PUT_LATENCY_MAX = "put-latency-max";
     private static final String PUT_IF_ABSENT_LATENCY_AVG = "put-if-absent-latency-avg";
@@ -142,9 +159,36 @@ public class MetricsIntegrationTest {
     private static final String SKIPPED_RECORDS_TOTAL = "skipped-records-total";
     private static final String RECORD_LATENESS_AVG = "record-lateness-avg";
     private static final String RECORD_LATENESS_MAX = "record-lateness-max";
-    private static final String HIT_RATIO_AVG = "hitRatio-avg";
-    private static final String HIT_RATIO_MIN = "hitRatio-min";
-    private static final String HIT_RATIO_MAX = "hitRatio-max";
+    private static final String HIT_RATIO_AVG_BEFORE_24 = "hitRatio-avg";
+    private static final String HIT_RATIO_MIN_BEFORE_24 = "hitRatio-min";
+    private static final String HIT_RATIO_MAX_BEFORE_24 = "hitRatio-max";
+    private static final String HIT_RATIO_AVG = "hit-ratio-avg";
+    private static final String HIT_RATIO_MIN = "hit-ratio-min";
+    private static final String HIT_RATIO_MAX = "hit-ratio-max";
+
+    // RocksDB metrics
+    private static final String BYTES_WRITTEN_RATE = "bytes-written-rate";
+    private static final String BYTES_WRITTEN_TOTAL = "bytes-written-total";
+    private static final String BYTES_READ_RATE = "bytes-read-rate";
+    private static final String BYTES_READ_TOTAL = "bytes-read-total";
+    private static final String MEMTABLE_BYTES_FLUSHED_RATE = "memtable-bytes-flushed-rate";
+    private static final String MEMTABLE_BYTES_FLUSHED_TOTAL = "memtable-bytes-flushed-total";
+    private static final String MEMTABLE_HIT_RATIO = "memtable-hit-ratio";
+    private static final String MEMTABLE_FLUSH_TIME_AVG = "memtable-flush-time-avg";
+    private static final String MEMTABLE_FLUSH_TIME_MIN = "memtable-flush-time-min";
+    private static final String MEMTABLE_FLUSH_TIME_MAX = "memtable-flush-time-max";
+    private static final String WRITE_STALL_DURATION_AVG = "write-stall-duration-avg";
+    private static final String WRITE_STALL_DURATION_TOTAL = "write-stall-duration-total";
+    private static final String BLOCK_CACHE_DATA_HIT_RATIO = "block-cache-data-hit-ratio";
+    private static final String BLOCK_CACHE_INDEX_HIT_RATIO = "block-cache-index-hit-ratio";
+    private static final String BLOCK_CACHE_FILTER_HIT_RATIO = "block-cache-filter-hit-ratio";
+    private static final String BYTES_READ_DURING_COMPACTION_RATE = "bytes-read-compaction-rate";
+    private static final String BYTES_WRITTEN_DURING_COMPACTION_RATE = "bytes-written-compaction-rate";
+    private static final String COMPACTION_TIME_AVG = "compaction-time-avg";
+    private static final String COMPACTION_TIME_MIN = "compaction-time-min";
+    private static final String COMPACTION_TIME_MAX = "compaction-time-max";
+    private static final String NUMBER_OF_OPEN_FILES = "number-open-files";
+    private static final String NUMBER_OF_FILE_ERRORS = "number-file-errors-total";
 
     // stores name
     private static final String TIME_WINDOWED_AGGREGATED_STREAM_STORE = "time-windowed-aggregated-stream-store";
@@ -169,7 +213,7 @@ public class MetricsIntegrationTest {
         builder = new StreamsBuilder();
         CLUSTER.createTopics(STREAM_INPUT, STREAM_OUTPUT_1, STREAM_OUTPUT_2, STREAM_OUTPUT_3, STREAM_OUTPUT_4);
         streamsConfiguration = new Properties();
-        streamsConfiguration.put(StreamsConfig.APPLICATION_ID_CONFIG, "stream-metrics-test");
+        streamsConfiguration.put(StreamsConfig.APPLICATION_ID_CONFIG, APPLICATION_ID_VALUE);
         streamsConfiguration.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, CLUSTER.bootstrapServers());
         streamsConfiguration.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.Integer().getClass());
         streamsConfiguration.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
@@ -184,13 +228,56 @@ public class MetricsIntegrationTest {
     }
 
     private void startApplication() throws InterruptedException {
-        kafkaStreams = new KafkaStreams(builder.build(), streamsConfiguration);
+        final Topology topology = builder.build();
+        kafkaStreams = new KafkaStreams(topology, streamsConfiguration);
+
+        verifyStateMetric(State.CREATED);
+        verifyTopologyDescriptionMetric(topology.describe().toString());
+        verifyApplicationIdMetric(APPLICATION_ID_VALUE);
+
         kafkaStreams.start();
-        final long timeout = 60000;
         TestUtils.waitForCondition(
             () -> kafkaStreams.state() == State.RUNNING,
             timeout,
             () -> "Kafka Streams application did not reach state RUNNING in " + timeout + " ms");
+    }
+
+    private void produceRecordsForTwoSegments(final Duration segmentInterval) throws Exception {
+        final MockTime mockTime = new MockTime(Math.max(segmentInterval.toMillis(), 60_000L));
+        IntegrationTestUtils.produceKeyValuesSynchronouslyWithTimestamp(
+            STREAM_INPUT,
+            Collections.singletonList(new KeyValue<>(1, "A")),
+            TestUtils.producerConfig(
+                CLUSTER.bootstrapServers(),
+                IntegerSerializer.class,
+                StringSerializer.class,
+                new Properties()),
+            mockTime.milliseconds()
+        );
+        IntegrationTestUtils.produceKeyValuesSynchronouslyWithTimestamp(
+            STREAM_INPUT,
+            Collections.singletonList(new KeyValue<>(1, "B")),
+            TestUtils.producerConfig(
+                CLUSTER.bootstrapServers(),
+                IntegerSerializer.class,
+                StringSerializer.class,
+                new Properties()),
+            mockTime.milliseconds()
+        );
+    }
+
+    private void waitUntilAllRecordsAreConsumed() throws Exception {
+        IntegrationTestUtils.waitUntilMinKeyValueRecordsReceived(
+            TestUtils.consumerConfig(
+                CLUSTER.bootstrapServers(),
+                "consumerApp",
+                LongDeserializer.class,
+                LongDeserializer.class,
+                new Properties()
+            ),
+            STREAM_OUTPUT_1,
+            2
+        );
     }
 
     private void closeApplication() throws Exception {
@@ -205,7 +292,18 @@ public class MetricsIntegrationTest {
     }
 
     @Test
-    public void shouldAddMetricsOnAllLevels() throws Exception {
+    public void shouldAddMetricsOnAllLevelsWithBuiltInMetricsLatestVersion() throws Exception {
+        shouldAddMetricsOnAllLevels(StreamsConfig.METRICS_LATEST);
+    }
+
+    @Test
+    public void shouldAddMetricsOnAllLevelsWithBuiltInMetricsVersion0100To23() throws Exception {
+        shouldAddMetricsOnAllLevels(StreamsConfig.METRICS_0100_TO_23);
+    }
+
+    private void shouldAddMetricsOnAllLevels(final String builtInMetricsVersion) throws Exception {
+        streamsConfiguration.put(StreamsConfig.BUILT_IN_METRICS_VERSION_CONFIG, builtInMetricsVersion);
+
         builder.stream(STREAM_INPUT, Consumed.with(Serdes.Integer(), Serdes.String()))
             .to(STREAM_OUTPUT_1, Produced.with(Serdes.Integer(), Serdes.String()));
         builder.table(STREAM_OUTPUT_1,
@@ -222,13 +320,15 @@ public class MetricsIntegrationTest {
             .to(STREAM_OUTPUT_4);
         startApplication();
 
+        verifyStateMetric(State.RUNNING);
         checkThreadLevelMetrics();
         checkTaskLevelMetrics();
         checkProcessorLevelMetrics();
-        checkKeyValueStoreMetricsByType(STREAM_STORE_IN_MEMORY_STATE_METRICS);
-        checkKeyValueStoreMetricsByType(STREAM_STORE_IN_MEMORY_LRU_STATE_METRICS);
-        checkKeyValueStoreMetricsByType(STREAM_STORE_ROCKSDB_STATE_METRICS);
-        checkCacheMetrics();
+        checkKeyValueStoreMetricsByGroup(STREAM_STORE_IN_MEMORY_STATE_METRICS);
+        checkKeyValueStoreMetricsByGroup(STREAM_STORE_ROCKSDB_STATE_METRICS);
+        checkKeyValueStoreMetricsByGroup(STREAM_STORE_IN_MEMORY_LRU_STATE_METRICS);
+        checkRocksDBMetricsByTag("rocksdb-state-id");
+        checkCacheMetrics(builtInMetricsVersion);
 
         closeApplication();
 
@@ -237,16 +337,29 @@ public class MetricsIntegrationTest {
 
     @Test
     public void shouldAddMetricsForWindowStore() throws Exception {
+        final Duration windowSize = Duration.ofMillis(50);
         builder.stream(STREAM_INPUT, Consumed.with(Serdes.Integer(), Serdes.String()))
             .groupByKey()
-            .windowedBy(TimeWindows.of(Duration.ofMillis(50)))
+            .windowedBy(TimeWindows.of(windowSize).grace(Duration.ZERO))
             .aggregate(() -> 0L,
                 (aggKey, newValue, aggValue) -> aggValue,
                 Materialized.<Integer, Long, WindowStore<Bytes, byte[]>>as(TIME_WINDOWED_AGGREGATED_STREAM_STORE)
-                    .withValueSerde(Serdes.Long()));
+                    .withValueSerde(Serdes.Long())
+                    .withRetention(windowSize))
+            .toStream()
+            .map((key, value) -> KeyValue.pair(value, value))
+            .to(STREAM_OUTPUT_1, Produced.with(Serdes.Long(), Serdes.Long()));
+
+        produceRecordsForTwoSegments(windowSize);
+
         startApplication();
 
+        verifyStateMetric(State.RUNNING);
+
+        waitUntilAllRecordsAreConsumed();
+
         checkWindowStoreMetrics();
+        checkRocksDBMetricsByTag("rocksdb-window-state-id");
 
         closeApplication();
 
@@ -255,27 +368,96 @@ public class MetricsIntegrationTest {
 
     @Test
     public void shouldAddMetricsForSessionStore() throws Exception {
+        final Duration inactivityGap = Duration.ofMillis(50);
         builder.stream(STREAM_INPUT, Consumed.with(Serdes.Integer(), Serdes.String()))
             .groupByKey()
-            .windowedBy(SessionWindows.with(Duration.ofMillis(50)))
+            .windowedBy(SessionWindows.with(inactivityGap).grace(Duration.ZERO))
             .aggregate(() -> 0L,
                 (aggKey, newValue, aggValue) -> aggValue,
                 (aggKey, leftAggValue, rightAggValue) -> leftAggValue,
                 Materialized.<Integer, Long, SessionStore<Bytes, byte[]>>as(SESSION_AGGREGATED_STREAM_STORE)
-                    .withValueSerde(Serdes.Long()));
+                    .withValueSerde(Serdes.Long())
+                    .withRetention(inactivityGap))
+            .toStream()
+            .map((key, value) -> KeyValue.pair(value, value))
+            .to(STREAM_OUTPUT_1, Produced.with(Serdes.Long(), Serdes.Long()));
+
+        produceRecordsForTwoSegments(inactivityGap);
+
         startApplication();
 
+        verifyStateMetric(State.RUNNING);
+
+        waitUntilAllRecordsAreConsumed();
+
         checkSessionStoreMetrics();
+        checkRocksDBMetricsByTag("rocksdb-session-state-id");
 
         closeApplication();
 
         checkMetricsDeregistration();
     }
 
+    @Test
+    public void shouldNotAddRocksDBMetricsIfRecordingLevelIsInfo() throws Exception {
+        builder.table(
+            STREAM_INPUT,
+            Materialized.as(Stores.persistentKeyValueStore(MY_STORE_PERSISTENT_KEY_VALUE)).withCachingEnabled()
+        ).toStream().to(STREAM_OUTPUT_1);
+        streamsConfiguration.put(StreamsConfig.METRICS_RECORDING_LEVEL_CONFIG, Sensor.RecordingLevel.INFO.name);
+        kafkaStreams = new KafkaStreams(builder.build(), streamsConfiguration);
+        kafkaStreams.start();
+        TestUtils.waitForCondition(
+            () -> kafkaStreams.state() == State.RUNNING,
+            timeout,
+            () -> "Kafka Streams application did not reach state RUNNING in " + timeout + " ms");
+
+        final List<Metric> listMetricStore = new ArrayList<Metric>(kafkaStreams.metrics().values()).stream()
+            .filter(m -> m.metricName().group().equals("stream-state-metrics") && m.metricName().tags().containsKey("rocksdb-state-id"))
+            .collect(Collectors.toList());
+        assertTrue(listMetricStore.isEmpty());
+
+        closeApplication();
+    }
+
+    private void verifyStateMetric(final State state) {
+        final List<Metric> metricsList = new ArrayList<Metric>(kafkaStreams.metrics().values()).stream()
+            .filter(m -> m.metricName().name().equals(STATE) &&
+                m.metricName().group().equals(STREAM_CLIENT_NODE_METRICS))
+            .collect(Collectors.toList());
+        assertThat(metricsList.size(), is(1));
+        assertThat(metricsList.get(0).metricValue(), is(state));
+    }
+
+    private void verifyTopologyDescriptionMetric(final String topologyDescription) {
+        final List<Metric> metricsList = new ArrayList<Metric>(kafkaStreams.metrics().values()).stream()
+            .filter(m -> m.metricName().name().equals(TOPOLOGY_DESCRIPTION) &&
+                m.metricName().group().equals(STREAM_CLIENT_NODE_METRICS))
+            .collect(Collectors.toList());
+        assertThat(metricsList.size(), is(1));
+        assertThat(metricsList.get(0).metricValue(), is(topologyDescription));
+    }
+
+    private void verifyApplicationIdMetric(final String applicationId) {
+        final List<Metric> metricsList = new ArrayList<Metric>(kafkaStreams.metrics().values()).stream()
+            .filter(m -> m.metricName().name().equals(APPLICATION_ID) &&
+                m.metricName().group().equals(STREAM_CLIENT_NODE_METRICS))
+            .collect(Collectors.toList());
+        assertThat(metricsList.size(), is(1));
+        assertThat(metricsList.get(0).metricValue(), is(applicationId));
+    }
+
     private void checkThreadLevelMetrics() {
         final List<Metric> listMetricThread = new ArrayList<Metric>(kafkaStreams.metrics().values()).stream()
             .filter(m -> m.metricName().group().equals(STREAM_THREAD_NODE_METRICS))
             .collect(Collectors.toList());
+        // instance-level metrics start
+        checkMetricByName(listMetricThread, VERSION, 1);
+        checkMetricByName(listMetricThread, COMMIT_ID, 1);
+        checkMetricByName(listMetricThread, APPLICATION_ID, 1);
+        checkMetricByName(listMetricThread, TOPOLOGY_DESCRIPTION, 1);
+        checkMetricByName(listMetricThread, STATE, 1);
+        // instance-level metrics end
         checkMetricByName(listMetricThread, COMMIT_LATENCY_AVG, 1);
         checkMetricByName(listMetricThread, COMMIT_LATENCY_MAX, 1);
         checkMetricByName(listMetricThread, POLL_LATENCY_AVG, 1);
@@ -335,9 +517,31 @@ public class MetricsIntegrationTest {
         checkMetricByName(listMetricProcessor, FORWARD_TOTAL, 18);
     }
 
-    private void checkKeyValueStoreMetricsByType(final String storeType) {
+    private void checkRocksDBMetricsByTag(final String tag) {
         final List<Metric> listMetricStore = new ArrayList<Metric>(kafkaStreams.metrics().values()).stream()
-            .filter(m -> m.metricName().group().equals(storeType))
+            .filter(m -> m.metricName().group().equals("stream-state-metrics") && m.metricName().tags().containsKey(tag))
+            .collect(Collectors.toList());
+        checkMetricByName(listMetricStore, BYTES_WRITTEN_RATE, 1);
+        checkMetricByName(listMetricStore, BYTES_WRITTEN_TOTAL, 1);
+        checkMetricByName(listMetricStore, BYTES_READ_RATE, 1);
+        checkMetricByName(listMetricStore, BYTES_READ_TOTAL, 1);
+        checkMetricByName(listMetricStore, MEMTABLE_BYTES_FLUSHED_RATE, 1);
+        checkMetricByName(listMetricStore, MEMTABLE_BYTES_FLUSHED_TOTAL, 1);
+        checkMetricByName(listMetricStore, MEMTABLE_HIT_RATIO, 1);
+        checkMetricByName(listMetricStore, WRITE_STALL_DURATION_AVG, 1);
+        checkMetricByName(listMetricStore, WRITE_STALL_DURATION_TOTAL, 1);
+        checkMetricByName(listMetricStore, BLOCK_CACHE_DATA_HIT_RATIO, 1);
+        checkMetricByName(listMetricStore, BLOCK_CACHE_INDEX_HIT_RATIO, 1);
+        checkMetricByName(listMetricStore, BLOCK_CACHE_FILTER_HIT_RATIO, 1);
+        checkMetricByName(listMetricStore, BYTES_READ_DURING_COMPACTION_RATE, 1);
+        checkMetricByName(listMetricStore, BYTES_WRITTEN_DURING_COMPACTION_RATE, 1);
+        checkMetricByName(listMetricStore, NUMBER_OF_OPEN_FILES, 1);
+        checkMetricByName(listMetricStore, NUMBER_OF_FILE_ERRORS, 1);
+    }
+
+    private void checkKeyValueStoreMetricsByGroup(final String group) {
+        final List<Metric> listMetricStore = new ArrayList<Metric>(kafkaStreams.metrics().values()).stream()
+            .filter(m -> m.metricName().group().equals(group))
             .collect(Collectors.toList());
         checkMetricByName(listMetricStore, PUT_LATENCY_AVG, 2);
         checkMetricByName(listMetricStore, PUT_LATENCY_MAX, 2);
@@ -383,13 +587,25 @@ public class MetricsIntegrationTest {
         assertThat(listMetricAfterClosingApp.size(), is(0));
     }
 
-    private void checkCacheMetrics() {
+    private void checkCacheMetrics(final String builtInMetricsVersion) {
         final List<Metric> listMetricCache = new ArrayList<Metric>(kafkaStreams.metrics().values()).stream()
             .filter(m -> m.metricName().group().equals(STREAM_CACHE_NODE_METRICS))
             .collect(Collectors.toList());
-        checkMetricByName(listMetricCache, HIT_RATIO_AVG, 6);
-        checkMetricByName(listMetricCache, HIT_RATIO_MIN, 6);
-        checkMetricByName(listMetricCache, HIT_RATIO_MAX, 6);
+        checkMetricByName(
+            listMetricCache,
+            builtInMetricsVersion.equals(StreamsConfig.METRICS_LATEST) ? HIT_RATIO_AVG : HIT_RATIO_AVG_BEFORE_24,
+            builtInMetricsVersion.equals(StreamsConfig.METRICS_LATEST) ? 3 : 6 /* includes parent sensors */
+        );
+        checkMetricByName(
+            listMetricCache,
+            builtInMetricsVersion.equals(StreamsConfig.METRICS_LATEST) ? HIT_RATIO_MIN : HIT_RATIO_MIN_BEFORE_24,
+            builtInMetricsVersion.equals(StreamsConfig.METRICS_LATEST) ? 3 : 6 /* includes parent sensors */
+        );
+        checkMetricByName(
+            listMetricCache,
+            builtInMetricsVersion.equals(StreamsConfig.METRICS_LATEST) ? HIT_RATIO_MAX : HIT_RATIO_MAX_BEFORE_24,
+            builtInMetricsVersion.equals(StreamsConfig.METRICS_LATEST) ? 3 : 6 /* includes parent sensors */
+        );
     }
 
     private void checkWindowStoreMetrics() {
@@ -478,7 +694,7 @@ public class MetricsIntegrationTest {
         final List<Metric> metrics = listMetric.stream()
             .filter(m -> m.metricName().name().equals(metricName))
             .collect(Collectors.toList());
-        Assert.assertEquals("Size of metrics of type:'" + metricName + "' must be equal to:" + numMetric + " but it's equal to " + metrics.size(), numMetric, metrics.size());
+        Assert.assertEquals("Size of metrics of type:'" + metricName + "' must be equal to " + numMetric + " but it's equal to " + metrics.size(), numMetric, metrics.size());
         for (final Metric m : metrics) {
             Assert.assertNotNull("Metric:'" + m.metricName() + "' must be not null", m.metricValue());
         }

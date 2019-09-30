@@ -63,9 +63,9 @@ public class MeteredKeyValueStoreTest {
 
     private final TaskId taskId = new TaskId(0, 0);
     private final Map<String, String> tags = mkMap(
-        mkEntry("client-id", "test"),
+        mkEntry("client-id", Thread.currentThread().getName()),
         mkEntry("task-id", taskId.toString()),
-        mkEntry("scope-id", "metered")
+        mkEntry("scope-state-id", "metered")
     );
     @Mock(type = MockType.NICE)
     private KeyValueStore<Bytes, byte[]> inner;
@@ -105,10 +105,10 @@ public class MeteredKeyValueStoreTest {
         init();
         final JmxReporter reporter = new JmxReporter("kafka.streams");
         metrics.addReporter(reporter);
-        assertTrue(reporter.containsMbean(String.format("kafka.streams:type=stream-%s-metrics,client-id=%s,task-id=%s,%s-id=%s",
-                "scope", "test", taskId.toString(), "scope", "metered")));
-        assertTrue(reporter.containsMbean(String.format("kafka.streams:type=stream-%s-metrics,client-id=%s,task-id=%s,%s-id=%s",
-                "scope", "test", taskId.toString(), "scope", "all")));
+        assertTrue(reporter.containsMbean(String.format("kafka.streams:type=stream-%s-state-metrics,client-id=%s,task-id=%s,%s-state-id=%s",
+                "scope", Thread.currentThread().getName(), taskId.toString(), "scope", "metered")));
+        assertTrue(reporter.containsMbean(String.format("kafka.streams:type=stream-%s-state-metrics,client-id=%s,task-id=%s,%s-state-id=%s",
+                "scope", Thread.currentThread().getName(), taskId.toString(), "scope", "all")));
     }
 
     @Test
@@ -149,7 +149,7 @@ public class MeteredKeyValueStoreTest {
     }
 
     private KafkaMetric metric(final String name) {
-        return this.metrics.metric(new MetricName(name, "stream-scope-metrics", "", this.tags));
+        return this.metrics.metric(new MetricName(name, "stream-scope-state-metrics", "", this.tags));
     }
 
     @SuppressWarnings("unchecked")
@@ -204,7 +204,7 @@ public class MeteredKeyValueStoreTest {
         assertFalse(iterator.hasNext());
         iterator.close();
 
-        final KafkaMetric metric = metric(new MetricName("all-rate", "stream-scope-metrics", "", tags));
+        final KafkaMetric metric = metric(new MetricName("all-rate", "stream-scope-state-metrics", "", tags));
         assertTrue((Double) metric.metricValue() > 0);
         verify(inner);
     }

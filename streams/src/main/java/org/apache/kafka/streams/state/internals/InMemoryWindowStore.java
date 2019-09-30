@@ -43,7 +43,7 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 
 import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.EXPIRED_WINDOW_RECORD_DROP;
-import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.addInvocationRateAndCount;
+import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.addInvocationRateAndCountToSensor;
 import static org.apache.kafka.streams.state.internals.WindowKeySchema.extractStoreKeyBytes;
 import static org.apache.kafka.streams.state.internals.WindowKeySchema.extractStoreTimestamp;
 
@@ -91,17 +91,19 @@ public class InMemoryWindowStore implements WindowStore<Bytes, byte[]> {
         this.context = (InternalProcessorContext) context;
 
         final StreamsMetricsImpl metrics = this.context.metrics();
+        final String threadId = Thread.currentThread().getName();
         final String taskName = context.taskId().toString();
         expiredRecordSensor = metrics.storeLevelSensor(
+            threadId,
             taskName,
             name(),
             EXPIRED_WINDOW_RECORD_DROP,
             Sensor.RecordingLevel.INFO
         );
-        addInvocationRateAndCount(
+        addInvocationRateAndCountToSensor(
             expiredRecordSensor,
             "stream-" + metricScope + "-metrics",
-            metrics.tagMap("task-id", taskName, metricScope + "-id", name()),
+            metrics.tagMap(threadId, "task-id", taskName, metricScope + "-id", name()),
             EXPIRED_WINDOW_RECORD_DROP
         );
 

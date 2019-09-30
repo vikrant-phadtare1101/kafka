@@ -41,7 +41,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.EXPIRED_WINDOW_RECORD_DROP;
-import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.addInvocationRateAndCount;
+import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.addInvocationRateAndCountToSensor;
 
 public class AbstractRocksDBSegmentedBytesStore<S extends Segment> implements SegmentedBytesStore {
     private static final Logger LOG = LoggerFactory.getLogger(AbstractRocksDBSegmentedBytesStore.class);
@@ -174,18 +174,20 @@ public class AbstractRocksDBSegmentedBytesStore<S extends Segment> implements Se
         this.context = (InternalProcessorContext) context;
 
         final StreamsMetricsImpl metrics = this.context.metrics();
+        final String threadId = Thread.currentThread().getName();
         final String taskName = context.taskId().toString();
 
         expiredRecordSensor = metrics.storeLevelSensor(
+            threadId,
             taskName,
             name(),
             EXPIRED_WINDOW_RECORD_DROP,
             Sensor.RecordingLevel.INFO
         );
-        addInvocationRateAndCount(
+        addInvocationRateAndCountToSensor(
             expiredRecordSensor,
             "stream-" + metricScope + "-metrics",
-            metrics.tagMap("task-id", taskName, metricScope + "-id", name()),
+            metrics.tagMap(threadId, "task-id", taskName, metricScope + "-id", name()),
             EXPIRED_WINDOW_RECORD_DROP
         );
 
@@ -233,6 +235,7 @@ public class AbstractRocksDBSegmentedBytesStore<S extends Segment> implements Se
                 final S segment = entry.getKey();
                 final WriteBatch batch = entry.getValue();
                 segment.write(batch);
+                batch.close();
             }
         } catch (final RocksDBException e) {
             throw new ProcessorStateException("Error restoring batch to store " + this.name, e);
