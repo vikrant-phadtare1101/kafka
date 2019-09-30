@@ -22,12 +22,14 @@ import java.net.Socket
 import java.nio.ByteBuffer
 import java.util.Properties
 
+import scala.collection.Seq
+
 import kafka.api.IntegrationTestHarness
 import kafka.network.SocketServer
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.protocol.types.Struct
 import org.apache.kafka.common.protocol.ApiKeys
-import org.apache.kafka.common.requests.{AbstractRequest, AbstractRequestResponse, RequestHeader, ResponseHeader}
+import org.apache.kafka.common.requests.{AbstractRequest, RequestHeader, RequestUtils, ResponseHeader}
 import org.apache.kafka.common.security.auth.SecurityProtocol
 
 abstract class BaseRequestTest extends IntegrationTestHarness {
@@ -37,7 +39,7 @@ abstract class BaseRequestTest extends IntegrationTestHarness {
   override def brokerCount: Int = 3
 
   // If required, override properties by mutating the passed Properties object
-  protected def brokerPropertyOverrides(properties: Properties) {}
+  protected def brokerPropertyOverrides(properties: Properties): Unit = {}
 
   override def modifyConfigs(props: Seq[Properties]): Unit = {
     props.foreach { p =>
@@ -75,7 +77,7 @@ abstract class BaseRequestTest extends IntegrationTestHarness {
     new Socket("localhost", s.boundPort(ListenerName.forSecurityProtocol(protocol)))
   }
 
-  private def sendRequest(socket: Socket, request: Array[Byte]) {
+  private def sendRequest(socket: Socket, request: Array[Byte]): Unit = {
     val outgoing = new DataOutputStream(socket.getOutputStream)
     outgoing.writeInt(request.length)
     outgoing.write(request)
@@ -167,7 +169,7 @@ abstract class BaseRequestTest extends IntegrationTestHarness {
     */
   def sendStructAndReceive(requestStruct: Struct, apiKey: ApiKeys, socket: Socket, apiVersion: Short): ByteBuffer = {
     val header = nextRequestHeader(apiKey, apiVersion)
-    val serializedBytes = AbstractRequestResponse.serialize(header.toStruct, requestStruct).array
+    val serializedBytes = RequestUtils.serialize(header.toStruct, requestStruct).array
     val response = requestAndReceive(socket, serializedBytes)
     skipResponseHeader(response)
   }
