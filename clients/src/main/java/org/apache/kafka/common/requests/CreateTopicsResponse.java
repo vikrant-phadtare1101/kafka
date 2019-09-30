@@ -31,6 +31,7 @@ public class CreateTopicsResponse extends AbstractResponse {
     /**
      * Possible error codes:
      *
+     * UNKNOWN_TOPIC_OR_PARTITION (3)
      * REQUEST_TIMED_OUT(7)
      * INVALID_TOPIC_EXCEPTION(17)
      * TOPIC_AUTHORIZATION_FAILED(29)
