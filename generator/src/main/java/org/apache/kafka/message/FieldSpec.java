@@ -46,6 +46,8 @@ public final class FieldSpec {
 
     private final String about;
 
+    private boolean zeroCopy;
+
     @JsonCreator
     public FieldSpec(@JsonProperty("name") String name,
                      @JsonProperty("versions") String versions,
@@ -56,7 +58,8 @@ public final class FieldSpec {
                      @JsonProperty("default") String fieldDefault,
                      @JsonProperty("ignorable") boolean ignorable,
                      @JsonProperty("entityType") EntityType entityType,
-                     @JsonProperty("about") String about) {
+                     @JsonProperty("about") String about,
+                     @JsonProperty("zeroCopy") boolean zeroCopy) {
         this.name = Objects.requireNonNull(name);
         this.versions = Versions.parse(versions, null);
         if (this.versions == null) {
@@ -84,13 +87,8 @@ public final class FieldSpec {
                 throw new RuntimeException("Non-array field " + name + " cannot have fields");
             }
         }
-    }
 
-    public StructSpec toStruct() {
-        if ((!this.type.isArray()) && (this.type.isStruct())) {
-            throw new RuntimeException("Field " + name + " cannot be treated as a structure.");
-        }
-        return new StructSpec(name, versions.toString(), fields);
+        this.zeroCopy = zeroCopy;
     }
 
     @JsonProperty("name")
@@ -160,5 +158,10 @@ public final class FieldSpec {
     @JsonProperty("about")
     public String about() {
         return about;
+    }
+
+    @JsonProperty("zeroCopy")
+    public boolean zeroCopy() {
+        return zeroCopy;
     }
 }
