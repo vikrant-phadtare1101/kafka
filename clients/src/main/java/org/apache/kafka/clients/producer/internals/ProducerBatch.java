@@ -74,7 +74,6 @@ public final class ProducerBatch {
     private long lastAppendTime;
     private long drainedMs;
     private boolean retry;
-    private boolean reopened;
 
     public ProducerBatch(TopicPartition tp, MemoryRecordsBuilder recordsBuilder, long createdMs) {
         this(tp, recordsBuilder, createdMs, false);
@@ -387,11 +386,6 @@ public final class ProducerBatch {
         recordsBuilder.setProducerState(producerIdAndEpoch.producerId, producerIdAndEpoch.epoch, baseSequence, isTransactional);
     }
 
-    public void resetProducerState(ProducerIdAndEpoch producerIdAndEpoch, int baseSequence, boolean isTransactional) {
-        reopened = true;
-        recordsBuilder.reopenAndRewriteProducerState(producerIdAndEpoch.producerId, producerIdAndEpoch.epoch, baseSequence, isTransactional);
-    }
-
     /**
      * Release resources required for record appends (e.g. compression buffers). Once this method is called, it's only
      * possible to update the RecordBatch header.
@@ -407,7 +401,6 @@ public final class ProducerBatch {
                                                        recordsBuilder.compressionType(),
                                                        (float) recordsBuilder.compressionRatio());
         }
-        reopened = false;
     }
 
     /**
@@ -459,9 +452,5 @@ public final class ProducerBatch {
 
     public boolean isTransactional() {
         return recordsBuilder.isTransactional();
-    }
-
-    public boolean sequenceHasBeenReset() {
-        return reopened;
     }
 }
