@@ -27,14 +27,13 @@ import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.annotation.InterfaceStability;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.metrics.MetricConfig;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.metrics.Sensor;
-import org.apache.kafka.common.metrics.stats.Count;
+import org.apache.kafka.common.metrics.stats.CumulativeSum;
 import org.apache.kafka.common.metrics.stats.Rate;
-import org.apache.kafka.common.metrics.stats.Total;
+import org.apache.kafka.common.metrics.stats.WindowedCount;
 import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.Deserializer;
@@ -186,7 +185,6 @@ import java.util.regex.Pattern;
  * @see ConsumerRecordFactory
  * @see OutputVerifier
  */
-@InterfaceStability.Evolving
 public class TopologyTestDriver implements Closeable {
 
     private static final Logger log = LoggerFactory.getLogger(TopologyTestDriver.class);
@@ -282,19 +280,23 @@ public class TopologyTestDriver implements Closeable {
         metrics = new Metrics(metricConfig, mockWallClockTime);
 
         final String threadName = "topology-test-driver-virtual-thread";
-        final StreamsMetricsImpl streamsMetrics = new StreamsMetricsImpl(metrics, threadName);
+        final StreamsMetricsImpl streamsMetrics = new StreamsMetricsImpl(
+            metrics,
+            threadName,
+            StreamsConfig.METRICS_LATEST
+        );
         final Sensor skippedRecordsSensor = streamsMetrics.threadLevelSensor("skipped-records", Sensor.RecordingLevel.INFO);
         final String threadLevelGroup = "stream-metrics";
         skippedRecordsSensor.add(new MetricName("skipped-records-rate",
                                                 threadLevelGroup,
                                                 "The average per-second number of skipped records",
                                                 streamsMetrics.tagMap()),
-                                 new Rate(TimeUnit.SECONDS, new Count()));
+                                 new Rate(TimeUnit.SECONDS, new WindowedCount()));
         skippedRecordsSensor.add(new MetricName("skipped-records-total",
                                                 threadLevelGroup,
                                                 "The total number of skipped records",
                                                 streamsMetrics.tagMap()),
-                                 new Total());
+                                 new CumulativeSum());
         final ThreadCache cache = new ThreadCache(
             new LogContext("topology-test-driver "),
             Math.max(0, streamsConfig.getLong(StreamsConfig.CACHE_MAX_BYTES_BUFFERING_CONFIG)),
