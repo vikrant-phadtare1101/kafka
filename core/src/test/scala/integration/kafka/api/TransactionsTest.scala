@@ -36,6 +36,7 @@ import org.scalatest.Assertions.fail
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.Buffer
+import scala.collection.Seq
 import scala.concurrent.ExecutionException
 
 class TransactionsTest extends KafkaServerTestHarness {
@@ -388,11 +389,11 @@ class TransactionsTest extends KafkaServerTestHarness {
     val producer2 = transactionalProducers(1)
     producer2.initTransactions()
 
-    assertEquals(offsetAndMetadata, consumer.committed(tp))
+    assertEquals(offsetAndMetadata, consumer.committed(Set(tp).asJava).get(tp))
   }
 
   @Test
-  def testFencingOnSend() {
+  def testFencingOnSend(): Unit = {
     val producer1 = transactionalProducers(0)
     val producer2 = transactionalProducers(1)
     val consumer = transactionalConsumers(0)
