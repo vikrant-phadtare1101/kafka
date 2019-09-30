@@ -17,36 +17,77 @@
 
 package kafka.server
 
-import org.scalatest.junit.JUnit3Suite
+import org.junit.Assert._
+import kafka.utils.TestUtils
 import kafka.zk.ZooKeeperTestHarness
-import junit.framework.Assert._
-import kafka.utils.{ZkUtils, Utils, TestUtils}
+import org.apache.kafka.common.security.auth.SecurityProtocol
+import org.junit.{After, Test}
 
-class AdvertiseBrokerTest extends JUnit3Suite with ZooKeeperTestHarness {
-  var server : KafkaServer = null
+import scala.collection.mutable.ArrayBuffer
+
+class AdvertiseBrokerTest extends ZooKeeperTestHarness {
+  val servers = ArrayBuffer[KafkaServer]()
+
   val brokerId = 0
-  val advertisedHostName = "routable-host"
-  val advertisedPort = 1234
 
-  override def setUp() {
-    super.setUp()
-    val props = TestUtils.createBrokerConfig(brokerId, TestUtils.choosePort())
-    props.put("advertised.host.name", advertisedHostName)
-    props.put("advertised.port", advertisedPort.toString)
-    
-    server = TestUtils.createServer(new KafkaConfig(props))
-  }
-
-  override def tearDown() {
-    server.shutdown()
-    Utils.rm(server.config.logDirs)
+  @After
+  override def tearDown(): Unit = {
+    TestUtils.shutdownServers(servers)
     super.tearDown()
   }
-  
-  def testBrokerAdvertiseToZK {
-    val brokerInfo = ZkUtils.getBrokerInfo(zkClient, brokerId)
-    assertEquals(advertisedHostName, brokerInfo.get.host)
-    assertEquals(advertisedPort, brokerInfo.get.port)
+
+  @Test
+  def testBrokerAdvertiseHostNameAndPortToZK(): Unit = {
+    val advertisedHostName = "routable-host1"
+    val advertisedPort = 1234
+    val props = TestUtils.createBrokerConfig(brokerId, zkConnect)
+    props.put("advertised.host.name", advertisedHostName)
+    props.put("advertised.port", advertisedPort.toString)
+    servers += TestUtils.createServer(KafkaConfig.fromProps(props))
+
+    val brokerInfo = zkClient.getBroker(brokerId).get
+    assertEquals(1, brokerInfo.endPoints.size)
+    val endpoint = brokerInfo.endPoints.head
+    assertEquals(advertisedHostName, endpoint.host)
+    assertEquals(advertisedPort, endpoint.port)
+    assertEquals(SecurityProtocol.PLAINTEXT, endpoint.securityProtocol)
+    assertEquals(SecurityProtocol.PLAINTEXT.name, endpoint.listenerName.value)
+  }
+
+  def testBrokerAdvertiseListenersToZK(): Unit = {
+    val props = TestUtils.createBrokerConfig(brokerId, zkConnect)
+    props.put("advertised.listeners", "PLAINTEXT://routable-listener:3334")
+    servers += TestUtils.createServer(KafkaConfig.fromProps(props))
+
+    val brokerInfo = zkClient.getBroker(brokerId).get
+    assertEquals(1, brokerInfo.endPoints.size)
+    val endpoint = brokerInfo.endPoints.head
+    assertEquals("routable-listener", endpoint.host)
+    assertEquals(3334, endpoint.port)
+    assertEquals(SecurityProtocol.PLAINTEXT, endpoint.securityProtocol)
+    assertEquals(SecurityProtocol.PLAINTEXT.name, endpoint.listenerName)
+  }
+
+  def testBrokerAdvertiseListenersWithCustomNamesToZK(): Unit = {
+    val props = TestUtils.createBrokerConfig(brokerId, zkConnect)
+    props.put("listeners", "INTERNAL://:0,EXTERNAL://:0")
+    props.put("advertised.listeners", "EXTERNAL://external-listener:9999,INTERNAL://internal-listener:10999")
+    props.put("listener.security.protocol.map", "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT")
+    props.put("inter.broker.listener.name", "INTERNAL")
+    servers += TestUtils.createServer(KafkaConfig.fromProps(props))
+
+    val brokerInfo = zkClient.getBroker(brokerId).get
+    assertEquals(1, brokerInfo.endPoints.size)
+    val endpoint = brokerInfo.endPoints.head
+    assertEquals("external-listener", endpoint.host)
+    assertEquals(9999, endpoint.port)
+    assertEquals(SecurityProtocol.PLAINTEXT, endpoint.securityProtocol)
+    assertEquals("EXTERNAL", endpoint.listenerName.value)
+    val endpoint2 = brokerInfo.endPoints(1)
+    assertEquals("internal-listener", endpoint2.host)
+    assertEquals(10999, endpoint2.port)
+    assertEquals(SecurityProtocol.PLAINTEXT, endpoint.securityProtocol)
+    assertEquals("INTERNAL", endpoint2.listenerName)
   }
   
 }

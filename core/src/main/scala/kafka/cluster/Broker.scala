@@ -5,7 +5,7 @@
  * The ASF licenses this file to You under the Apache License, Version 2.0
  * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
- * 
+ *
  *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
@@ -17,66 +17,73 @@
 
 package kafka.cluster
 
-import kafka.utils.Utils._
-import kafka.utils.Json
-import kafka.api.ApiUtils._
-import java.nio.ByteBuffer
-import kafka.common.{KafkaException, BrokerNotAvailableException}
-import org.apache.kafka.common.utils.Utils._
+import java.util
+
+import kafka.common.BrokerEndPointNotAvailableException
+import kafka.server.KafkaConfig
+import org.apache.kafka.common.{ClusterResource, Endpoint, Node}
+import org.apache.kafka.common.network.ListenerName
+import org.apache.kafka.common.security.auth.SecurityProtocol
+import org.apache.kafka.server.authorizer.AuthorizerServerInfo
+
+import scala.collection.Seq
+import scala.collection.JavaConverters._
 
 /**
- * A Kafka broker
+ * A Kafka broker.
+ * A broker has an id, a collection of end-points, an optional rack and a listener to security protocol map.
+ * Each end-point is (host, port, listenerName).
  */
-object Broker {
+case class Broker(id: Int, endPoints: Seq[EndPoint], rack: Option[String]) {
 
-  def createBroker(id: Int, brokerInfoString: String): Broker = {
-    if(brokerInfoString == null)
-      throw new BrokerNotAvailableException("Broker id %s does not exist".format(id))
-    try {
-      Json.parseFull(brokerInfoString) match {
-        case Some(m) =>
-          val brokerInfo = m.asInstanceOf[Map[String, Any]]
-          val host = brokerInfo.get("host").get.asInstanceOf[String]
-          val port = brokerInfo.get("port").get.asInstanceOf[Int]
-          new Broker(id, host, port)
-        case None =>
-          throw new BrokerNotAvailableException("Broker id %d does not exist".format(id))
-      }
-    } catch {
-      case t: Throwable => throw new KafkaException("Failed to parse the broker info from zookeeper: " + brokerInfoString, t)
+  private val endPointsMap = endPoints.map { endPoint =>
+    endPoint.listenerName -> endPoint
+  }.toMap
+
+  if (endPointsMap.size != endPoints.size)
+    throw new IllegalArgumentException(s"There is more than one end point with the same listener name: ${endPoints.mkString(",")}")
+
+  override def toString: String =
+    s"$id : ${endPointsMap.values.mkString("(",",",")")} : ${rack.orNull}"
+
+  def this(id: Int, host: String, port: Int, listenerName: ListenerName, protocol: SecurityProtocol) = {
+    this(id, Seq(EndPoint(host, port, listenerName, protocol)), None)
+  }
+
+  def this(bep: BrokerEndPoint, listenerName: ListenerName, protocol: SecurityProtocol) = {
+    this(bep.id, bep.host, bep.port, listenerName, protocol)
+  }
+
+  def node(listenerName: ListenerName): Node =
+    getNode(listenerName).getOrElse {
+      throw new BrokerEndPointNotAvailableException(s"End point with listener name ${listenerName.value} not found " +
+        s"for broker $id")
     }
+
+  def getNode(listenerName: ListenerName): Option[Node] =
+    endPointsMap.get(listenerName).map(endpoint => new Node(id, endpoint.host, endpoint.port, rack.orNull))
+
+  def brokerEndPoint(listenerName: ListenerName): BrokerEndPoint = {
+    val endpoint = endPoint(listenerName)
+    new BrokerEndPoint(id, endpoint.host, endpoint.port)
   }
 
-  def readFrom(buffer: ByteBuffer): Broker = {
-    val id = buffer.getInt
-    val host = readShortString(buffer)
-    val port = buffer.getInt
-    new Broker(id, host, port)
-  }
-}
-
-case class Broker(id: Int, host: String, port: Int) {
-  
-  override def toString: String = "id:" + id + ",host:" + host + ",port:" + port
-
-  def connectionString: String = formatAddress(host, port)
-
-  def writeTo(buffer: ByteBuffer) {
-    buffer.putInt(id)
-    writeShortString(buffer, host)
-    buffer.putInt(port)
+  def endPoint(listenerName: ListenerName): EndPoint = {
+    endPointsMap.getOrElse(listenerName,
+      throw new BrokerEndPointNotAvailableException(s"End point with listener name ${listenerName.value} not found for broker $id"))
   }
 
-  def sizeInBytes: Int = shortStringLength(host) /* host name */ + 4 /* port */ + 4 /* broker id*/
-
-  override def equals(obj: Any): Boolean = {
-    obj match {
-      case null => false
-      case n: Broker => id == n.id && host == n.host && port == n.port
-      case _ => false
-    }
+  def toServerInfo(clusterId: String, config: KafkaConfig): AuthorizerServerInfo = {
+    val clusterResource: ClusterResource = new ClusterResource(clusterId)
+    val interBrokerEndpoint: Endpoint = endPoint(config.interBrokerListenerName)
+    val brokerEndpoints: util.List[Endpoint] = endPoints.toList.map(_.asInstanceOf[Endpoint]).asJava
+    BrokerEndpointInfo(clusterResource, id, brokerEndpoints, interBrokerEndpoint)
   }
-  
-  override def hashCode(): Int = hashcode(id, host, port)
-  
+
+  case class BrokerEndpointInfo(clusterResource: ClusterResource,
+                                brokerId: Int,
+                                endpoints: util.List[Endpoint],
+                                interBrokerEndpoint: Endpoint)
+    extends AuthorizerServerInfo
+
 }

@@ -17,95 +17,110 @@
 
 package kafka.tools
 
+import java.io._
+import java.nio.charset.StandardCharsets
+import java.util.Properties
+
+import joptsimple.{OptionException, OptionParser, OptionSet}
 import kafka.common._
 import kafka.message._
-import kafka.serializer._
-import kafka.utils.{ToolsUtils, CommandLineUtils}
-import kafka.producer.{NewShinyProducer,OldProducer,KeyedMessage}
+import kafka.utils.Implicits._
+import kafka.utils.{CommandDefaultOptions, CommandLineUtils, Exit, ToolsUtils}
+import org.apache.kafka.clients.producer.internals.ErrorLoggingCallback
+import org.apache.kafka.clients.producer.{KafkaProducer, ProducerConfig, ProducerRecord}
+import org.apache.kafka.common.KafkaException
+import org.apache.kafka.common.utils.Utils
 
-import java.util.Properties
-import java.io._
-
-import joptsimple._
+import scala.collection.JavaConverters._
 
 object ConsoleProducer {
 
-  def main(args: Array[String]) {
-
-    val config = new ProducerConfig(args)
-    val reader = Class.forName(config.readerClass).newInstance().asInstanceOf[MessageReader]
-    val props = new Properties
-    props.put("topic", config.topic)
-    props.putAll(config.cmdLineProps)
-    reader.init(System.in, props)
+  def main(args: Array[String]): Unit = {
 
     try {
-        val producer =
-          if(config.useNewProducer) {
-            import org.apache.kafka.clients.producer.ProducerConfig
+        val config = new ProducerConfig(args)
+        val reader = Class.forName(config.readerClass).getDeclaredConstructor().newInstance().asInstanceOf[MessageReader]
+        reader.init(System.in, getReaderProps(config))
 
-            props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, config.brokerList)
-            props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, config.compressionCodec)
-            props.put(ProducerConfig.SEND_BUFFER_CONFIG, config.socketBuffer.toString)
-            props.put(ProducerConfig.RETRY_BACKOFF_MS_CONFIG, config.retryBackoffMs.toString)
-            props.put(ProducerConfig.METADATA_MAX_AGE_CONFIG, config.metadataExpiryMs.toString)
-            props.put(ProducerConfig.METADATA_FETCH_TIMEOUT_CONFIG, config.metadataFetchTimeoutMs.toString)
-            props.put(ProducerConfig.ACKS_CONFIG, config.requestRequiredAcks.toString)
-            props.put(ProducerConfig.TIMEOUT_CONFIG, config.requestTimeoutMs.toString)
-            props.put(ProducerConfig.RETRIES_CONFIG, config.messageSendMaxRetries.toString)
-            props.put(ProducerConfig.LINGER_MS_CONFIG, config.sendTimeout.toString)
-            if(config.queueEnqueueTimeoutMs != -1)
-              props.put(ProducerConfig.BLOCK_ON_BUFFER_FULL_CONFIG, "false")
-            props.put(ProducerConfig.BUFFER_MEMORY_CONFIG, config.maxMemoryBytes.toString)
-            props.put(ProducerConfig.BATCH_SIZE_CONFIG, config.maxPartitionMemoryBytes.toString)
-            props.put(ProducerConfig.CLIENT_ID_CONFIG, "console-producer")
-            props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer")
-            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer")
-
-            new NewShinyProducer(props)
-          } else {
-            props.put("metadata.broker.list", config.brokerList)
-            props.put("compression.codec", config.compressionCodec)
-            props.put("producer.type", if(config.sync) "sync" else "async")
-            props.put("batch.num.messages", config.batchSize.toString)
-            props.put("message.send.max.retries", config.messageSendMaxRetries.toString)
-            props.put("retry.backoff.ms", config.retryBackoffMs.toString)
-            props.put("queue.buffering.max.ms", config.sendTimeout.toString)
-            props.put("queue.buffering.max.messages", config.queueSize.toString)
-            props.put("queue.enqueue.timeout.ms", config.queueEnqueueTimeoutMs.toString)
-            props.put("request.required.acks", config.requestRequiredAcks.toString)
-            props.put("request.timeout.ms", config.requestTimeoutMs.toString)
-            props.put("key.serializer.class", config.keyEncoderClass)
-            props.put("serializer.class", config.valueEncoderClass)
-            props.put("send.buffer.bytes", config.socketBuffer.toString)
-            props.put("topic.metadata.refresh.interval.ms", config.metadataExpiryMs.toString)
-            props.put("client.id", "console-producer")
-
-            new OldProducer(props)
-          }
+        val producer = new KafkaProducer[Array[Byte], Array[Byte]](producerProps(config))
 
         Runtime.getRuntime.addShutdownHook(new Thread() {
-          override def run() {
+          override def run(): Unit = {
             producer.close()
           }
         })
 
-        var message: KeyedMessage[Array[Byte], Array[Byte]] = null
+        var record: ProducerRecord[Array[Byte], Array[Byte]] = null
         do {
-          message = reader.readMessage()
-          if(message != null)
-            producer.send(message.topic, message.key, message.message)
-        } while(message != null)
+          record = reader.readMessage()
+          if (record != null)
+            send(producer, record, config.sync)
+        } while (record != null)
     } catch {
+      case e: joptsimple.OptionException =>
+        System.err.println(e.getMessage)
+        Exit.exit(1)
       case e: Exception =>
         e.printStackTrace
-        System.exit(1)
+        Exit.exit(1)
     }
-    System.exit(0)
+    Exit.exit(0)
   }
 
-  class ProducerConfig(args: Array[String]) {
-    val parser = new OptionParser
+  private def send(producer: KafkaProducer[Array[Byte], Array[Byte]],
+                         record: ProducerRecord[Array[Byte], Array[Byte]], sync: Boolean): Unit = {
+    if (sync)
+      producer.send(record).get()
+    else
+      producer.send(record, new ErrorLoggingCallback(record.topic, record.key, record.value, false))
+  }
+
+  def getReaderProps(config: ProducerConfig): Properties = {
+    val props = new Properties
+    props.put("topic", config.topic)
+    props ++= config.cmdLineProps
+    props
+  }
+
+  def producerProps(config: ProducerConfig): Properties = {
+    val props =
+      if (config.options.has(config.producerConfigOpt))
+        Utils.loadProps(config.options.valueOf(config.producerConfigOpt))
+      else new Properties
+
+    props ++= config.extraProducerProps
+
+    props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, config.brokerList)
+    props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, config.compressionCodec)
+    props.put(ProducerConfig.CLIENT_ID_CONFIG, "console-producer")
+    props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer")
+    props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer")
+
+    CommandLineUtils.maybeMergeOptions(
+      props, ProducerConfig.LINGER_MS_CONFIG, config.options, config.sendTimeoutOpt)
+    CommandLineUtils.maybeMergeOptions(
+      props, ProducerConfig.ACKS_CONFIG, config.options, config.requestRequiredAcksOpt)
+    CommandLineUtils.maybeMergeOptions(
+      props, ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, config.options, config.requestTimeoutMsOpt)
+    CommandLineUtils.maybeMergeOptions(
+      props, ProducerConfig.RETRIES_CONFIG, config.options, config.messageSendMaxRetriesOpt)
+    CommandLineUtils.maybeMergeOptions(
+      props, ProducerConfig.RETRY_BACKOFF_MS_CONFIG, config.options, config.retryBackoffMsOpt)
+    CommandLineUtils.maybeMergeOptions(
+      props, ProducerConfig.SEND_BUFFER_CONFIG, config.options, config.socketBufferSizeOpt)
+    CommandLineUtils.maybeMergeOptions(
+      props, ProducerConfig.BUFFER_MEMORY_CONFIG, config.options, config.maxMemoryBytesOpt)
+    CommandLineUtils.maybeMergeOptions(
+      props, ProducerConfig.BATCH_SIZE_CONFIG, config.options, config.maxPartitionMemoryBytesOpt)
+    CommandLineUtils.maybeMergeOptions(
+      props, ProducerConfig.METADATA_MAX_AGE_CONFIG, config.options, config.metadataExpiryMsOpt)
+    CommandLineUtils.maybeMergeOptions(
+      props, ProducerConfig.MAX_BLOCK_MS_CONFIG, config.options, config.maxBlockMsOpt)
+
+    props
+  }
+
+  class ProducerConfig(args: Array[String]) extends CommandDefaultOptions(args) {
     val topicOpt = parser.accepts("topic", "REQUIRED: The topic id to produce messages to.")
       .withRequiredArg
       .describedAs("topic")
@@ -115,7 +130,7 @@ object ConsoleProducer {
       .describedAs("broker-list")
       .ofType(classOf[String])
     val syncOpt = parser.accepts("sync", "If set message send requests to the brokers are synchronously, one at a time as they arrive.")
-    val compressionCodecOpt = parser.accepts("compression-codec", "The compression codec: either 'none', 'gzip', 'snappy', or 'lz4'." +
+    val compressionCodecOpt = parser.accepts("compression-codec", "The compression codec: either 'none', 'gzip', 'snappy', 'lz4', or 'zstd'." +
                                                                   "If specified without value, then it defaults to 'gzip'")
                                     .withOptionalArg()
                                     .describedAs("compression-codec")
@@ -134,27 +149,16 @@ object ConsoleProducer {
       .ofType(classOf[java.lang.Integer])
       .defaultsTo(100)
     val sendTimeoutOpt = parser.accepts("timeout", "If set and the producer is running in asynchronous mode, this gives the maximum amount of time" +
-      " a message will queue awaiting suffient batch size. The value is given in ms.")
+      " a message will queue awaiting sufficient batch size. The value is given in ms.")
       .withRequiredArg
       .describedAs("timeout_ms")
       .ofType(classOf[java.lang.Integer])
       .defaultsTo(1000)
-    val queueSizeOpt = parser.accepts("queue-size", "If set and the producer is running in asynchronous mode, this gives the maximum amount of " +
-      " messages will queue awaiting suffient batch size.")
-      .withRequiredArg
-      .describedAs("queue_size")
-      .ofType(classOf[java.lang.Integer])
-      .defaultsTo(10000)
-    val queueEnqueueTimeoutMsOpt = parser.accepts("queue-enqueuetimeout-ms", "Timeout for event enqueue")
-      .withRequiredArg
-      .describedAs("queue enqueuetimeout ms")
-      .ofType(classOf[java.lang.Integer])
-      .defaultsTo(Int.MaxValue)
     val requestRequiredAcksOpt = parser.accepts("request-required-acks", "The required acks of the producer requests")
       .withRequiredArg
       .describedAs("request required acks")
-      .ofType(classOf[java.lang.Integer])
-      .defaultsTo(0)
+      .ofType(classOf[java.lang.String])
+      .defaultsTo("1")
     val requestTimeoutMsOpt = parser.accepts("request-timeout-ms", "The ack timeout of the producer requests. Value must be non-negative and non-zero")
       .withRequiredArg
       .describedAs("request timeout ms")
@@ -166,10 +170,10 @@ object ConsoleProducer {
       .describedAs("metadata expiration interval")
       .ofType(classOf[java.lang.Long])
       .defaultsTo(5*60*1000L)
-    val metadataFetchTimeoutMsOpt = parser.accepts("metadata-fetch-timeout-ms",
-      "The amount of time to block waiting to fetch metadata about a topic the first time a record is sent to that topic.")
+    val maxBlockMsOpt = parser.accepts("max-block-ms",
+      "The max time that the producer will block for during a send request")
       .withRequiredArg
-      .describedAs("metadata fetch timeout")
+      .describedAs("max block on send")
       .ofType(classOf[java.lang.Long])
       .defaultsTo(60*1000L)
     val maxMemoryBytesOpt = parser.accepts("max-memory-bytes",
@@ -185,16 +189,6 @@ object ConsoleProducer {
       .describedAs("memory in bytes per partition")
       .ofType(classOf[java.lang.Long])
       .defaultsTo(16 * 1024L)
-    val valueEncoderOpt = parser.accepts("value-serializer", "The class name of the message encoder implementation to use for serializing values.")
-      .withRequiredArg
-      .describedAs("encoder_class")
-      .ofType(classOf[java.lang.String])
-      .defaultsTo(classOf[DefaultEncoder].getName)
-    val keyEncoderOpt = parser.accepts("key-serializer", "The class name of the message encoder implementation to use for serializing keys.")
-      .withRequiredArg
-      .describedAs("encoder_class")
-      .ofType(classOf[java.lang.String])
-      .defaultsTo(classOf[DefaultEncoder].getName)
     val messageReaderOpt = parser.accepts("line-reader", "The class name of the class to use for reading lines from standard in. " +
       "By default each line is read as a separate message.")
       .withRequiredArg
@@ -211,15 +205,20 @@ object ConsoleProducer {
       .withRequiredArg
       .describedAs("prop")
       .ofType(classOf[String])
-    val useNewProducerOpt = parser.accepts("new-producer", "Use the new producer implementation.")
+    val producerPropertyOpt = parser.accepts("producer-property", "A mechanism to pass user-defined properties in the form key=value to the producer. ")
+            .withRequiredArg
+            .describedAs("producer_prop")
+            .ofType(classOf[String])
+    val producerConfigOpt = parser.accepts("producer.config", s"Producer config properties file. Note that $producerPropertyOpt takes precedence over this config.")
+      .withRequiredArg
+      .describedAs("config file")
+      .ofType(classOf[String])
 
-    val options = parser.parse(args : _*)
-    if(args.length == 0)
-      CommandLineUtils.printUsageAndDie(parser, "Read data from standard input and publish it to Kafka.")
+    options = tryParse(parser, args)
+
+    CommandLineUtils.printHelpAndExitIfNeeded(this, "This tool helps to read data from standard input and publish it to Kafka.")
     CommandLineUtils.checkRequiredArgs(parser, options, topicOpt, brokerListOpt)
 
-    import scala.collection.JavaConversions._
-    val useNewProducer = options.has(useNewProducerOpt)
     val topic = options.valueOf(topicOpt)
     val brokerList = options.valueOf(brokerListOpt)
     ToolsUtils.validatePortOrDie(parser,brokerList)
@@ -231,29 +230,18 @@ object ConsoleProducer {
                              else compressionCodecOptionValue
                            else NoCompressionCodec.name
     val batchSize = options.valueOf(batchSizeOpt)
-    val sendTimeout = options.valueOf(sendTimeoutOpt)
-    val queueSize = options.valueOf(queueSizeOpt)
-    val queueEnqueueTimeoutMs = options.valueOf(queueEnqueueTimeoutMsOpt)
-    val requestRequiredAcks = options.valueOf(requestRequiredAcksOpt)
-    val requestTimeoutMs = options.valueOf(requestTimeoutMsOpt)
-    val messageSendMaxRetries = options.valueOf(messageSendMaxRetriesOpt)
-    val retryBackoffMs = options.valueOf(retryBackoffMsOpt)
-    val keyEncoderClass = options.valueOf(keyEncoderOpt)
-    val valueEncoderClass = options.valueOf(valueEncoderOpt)
     val readerClass = options.valueOf(messageReaderOpt)
-    val socketBuffer = options.valueOf(socketBufferSizeOpt)
-    val cmdLineProps = CommandLineUtils.parseKeyValueArgs(options.valuesOf(propertyOpt))
-    /* new producer related configs */
-    val maxMemoryBytes = options.valueOf(maxMemoryBytesOpt)
-    val maxPartitionMemoryBytes = options.valueOf(maxPartitionMemoryBytesOpt)
-    val metadataExpiryMs = options.valueOf(metadataExpiryMsOpt)
-    val metadataFetchTimeoutMs = options.valueOf(metadataFetchTimeoutMsOpt)
-  }
+    val cmdLineProps = CommandLineUtils.parseKeyValueArgs(options.valuesOf(propertyOpt).asScala)
+    val extraProducerProps = CommandLineUtils.parseKeyValueArgs(options.valuesOf(producerPropertyOpt).asScala)
 
-  trait MessageReader {
-    def init(inputStream: InputStream, props: Properties) {}
-    def readMessage(): KeyedMessage[Array[Byte], Array[Byte]]
-    def close() {}
+    def tryParse(parser: OptionParser, args: Array[String]): OptionSet = {
+      try
+        parser.parse(args: _*)
+      catch {
+        case e: OptionException =>
+          CommandLineUtils.printUsageAndDie(parser, e.getMessage)
+      }
+    }
   }
 
   class LineMessageReader extends MessageReader {
@@ -264,35 +252,33 @@ object ConsoleProducer {
     var ignoreError = false
     var lineNumber = 0
 
-    override def init(inputStream: InputStream, props: Properties) {
+    override def init(inputStream: InputStream, props: Properties): Unit = {
       topic = props.getProperty("topic")
-      if(props.containsKey("parse.key"))
-        parseKey = props.getProperty("parse.key").trim.toLowerCase.equals("true")
-      if(props.containsKey("key.separator"))
+      if (props.containsKey("parse.key"))
+        parseKey = props.getProperty("parse.key").trim.equalsIgnoreCase("true")
+      if (props.containsKey("key.separator"))
         keySeparator = props.getProperty("key.separator")
-      if(props.containsKey("ignore.error"))
-        ignoreError = props.getProperty("ignore.error").trim.toLowerCase.equals("true")
-      reader = new BufferedReader(new InputStreamReader(inputStream))
+      if (props.containsKey("ignore.error"))
+        ignoreError = props.getProperty("ignore.error").trim.equalsIgnoreCase("true")
+      reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))
     }
 
     override def readMessage() = {
       lineNumber += 1
+      print(">")
       (reader.readLine(), parseKey) match {
         case (null, _) => null
         case (line, true) =>
           line.indexOf(keySeparator) match {
             case -1 =>
-              if(ignoreError)
-                new KeyedMessage[Array[Byte], Array[Byte]](topic, line.getBytes())
-              else
-                throw new KafkaException("No key found on line " + lineNumber + ": " + line)
+              if (ignoreError) new ProducerRecord(topic, line.getBytes(StandardCharsets.UTF_8))
+              else throw new KafkaException(s"No key found on line $lineNumber: $line")
             case n =>
-              new KeyedMessage[Array[Byte], Array[Byte]](topic,
-                             line.substring(0, n).getBytes,
-                             (if(n + keySeparator.size > line.size) "" else line.substring(n + keySeparator.size)).getBytes())
+              val value = (if (n + keySeparator.size > line.size) "" else line.substring(n + keySeparator.size)).getBytes(StandardCharsets.UTF_8)
+              new ProducerRecord(topic, line.substring(0, n).getBytes(StandardCharsets.UTF_8), value)
           }
         case (line, false) =>
-          new KeyedMessage[Array[Byte], Array[Byte]](topic, line.getBytes())
+          new ProducerRecord(topic, line.getBytes(StandardCharsets.UTF_8))
       }
     }
   }

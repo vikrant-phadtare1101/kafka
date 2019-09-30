@@ -1,131 +1,188 @@
 /**
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
- * 
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+  * Licensed to the Apache Software Foundation (ASF) under one or more
+  * contributor license agreements.  See the NOTICE file distributed with
+  * this work for additional information regarding copyright ownership.
+  * The ASF licenses this file to You under the Apache License, Version 2.0
+  * (the "License"); you may not use this file except in compliance with
+  * the License.  You may obtain a copy of the License at
+  *
+  *    http://www.apache.org/licenses/LICENSE-2.0
+  *
+  * Unless required by applicable law or agreed to in writing, software
+  * distributed under the License is distributed on an "AS IS" BASIS,
+  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
 
 package kafka.log
 
-import java.io.File
-import kafka.server.OffsetCheckpoint
+import java.io.PrintWriter
 
-import scala.collection._
-import org.junit._
-import kafka.common.TopicAndPartition
-import kafka.utils._
-import kafka.message._
-import org.scalatest.junit.JUnitSuite
-import junit.framework.Assert._
+import com.yammer.metrics.Metrics
+import com.yammer.metrics.core.Gauge
+import kafka.utils.{MockTime, TestUtils}
+import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.test.TestUtils.DEFAULT_MAX_WAIT_MS
+import org.apache.kafka.common.record.{CompressionType, RecordBatch}
+import org.junit.Assert._
+import org.junit.Test
+
+import scala.collection.{Iterable, JavaConverters, Seq}
+import scala.collection.JavaConverters.mapAsScalaMapConverter
 
 /**
- * This is an integration test that tests the fully integrated log cleaner
- */
-class LogCleanerIntegrationTest extends JUnitSuite {
-  
+  * This is an integration test that tests the fully integrated log cleaner
+  */
+class LogCleanerIntegrationTest extends AbstractLogCleanerIntegrationTest {
+
+  val codec: CompressionType = CompressionType.LZ4
+
   val time = new MockTime()
-  val segmentSize = 100
-  val deleteDelay = 1000
-  val logName = "log"
-  val logDir = TestUtils.tempDir()
-  var counter = 0
-  val topics = Array(TopicAndPartition("log", 0), TopicAndPartition("log", 1), TopicAndPartition("log", 2))
-  
-  @Test
-  def cleanerTest() {
-    val cleaner = makeCleaner(parts = 3)
-    val log = cleaner.logs.get(topics(0))
+  val topicPartitions = Array(new TopicPartition("log", 0), new TopicPartition("log", 1), new TopicPartition("log", 2))
 
-    val appends = writeDups(numKeys = 100, numDups = 3, log)
-    val startSize = log.size
+  @Test(timeout = DEFAULT_MAX_WAIT_MS)
+  def testMarksPartitionsAsOfflineAndPopulatesUncleanableMetrics(): Unit = {
+    val largeMessageKey = 20
+    val (_, largeMessageSet) = createLargeSingleMessageSet(largeMessageKey, RecordBatch.CURRENT_MAGIC_VALUE)
+    val maxMessageSize = largeMessageSet.sizeInBytes
+    cleaner = makeCleaner(partitions = topicPartitions, maxMessageSize = maxMessageSize, backOffMs = 100)
+
+    def breakPartitionLog(tp: TopicPartition): Unit = {
+      val log = cleaner.logs.get(tp)
+      writeDups(numKeys = 20, numDups = 3, log = log, codec = codec)
+
+      val partitionFile = log.logSegments.last.log.file()
+      val writer = new PrintWriter(partitionFile)
+      writer.write("jogeajgoea")
+      writer.close()
+
+      writeDups(numKeys = 20, numDups = 3, log = log, codec = codec)
+    }
+
+    def getGauge[T](metricName: String, metricScope: String): Gauge[T] = {
+      Metrics.defaultRegistry.allMetrics.asScala
+        .filterKeys(k => {
+          k.getName.endsWith(metricName) && k.getScope.endsWith(metricScope)
+        })
+        .headOption
+        .getOrElse { fail(s"Unable to find metric $metricName") }
+        .asInstanceOf[(Any, Gauge[Any])]
+        ._2
+        .asInstanceOf[Gauge[T]]
+    }
+
+    breakPartitionLog(topicPartitions(0))
+    breakPartitionLog(topicPartitions(1))
+
     cleaner.startup()
-    
-    val lastCleaned = log.activeSegment.baseOffset
-    // wait until we clean up to base_offset of active segment - minDirtyMessages
-    cleaner.awaitCleaned("log", 0, lastCleaned)
-    
-    val read = readFromLog(log)
-    assertEquals("Contents of the map shouldn't change.", appends.toMap, read.toMap)
-    assertTrue(startSize > log.size)
-    
-    // write some more stuff and validate again
-    val appends2 = appends ++ writeDups(numKeys = 100, numDups = 3, log)
-    val lastCleaned2 = log.activeSegment.baseOffset
-    cleaner.awaitCleaned("log", 0, lastCleaned2)
-    val read2 = readFromLog(log)
-    assertEquals("Contents of the map shouldn't change.", appends2.toMap, read2.toMap)
 
-    // simulate deleting a partition, by removing it from logs
-    // force a checkpoint
-    // and make sure its gone from checkpoint file
+    val log = cleaner.logs.get(topicPartitions(0))
+    val log2 = cleaner.logs.get(topicPartitions(1))
+    val uncleanableDirectory = log.dir.getParent
+    val uncleanablePartitionsCountGauge = getGauge[Int]("uncleanable-partitions-count", uncleanableDirectory)
+    val uncleanableBytesGauge = getGauge[Long]("uncleanable-bytes", uncleanableDirectory)
 
-    cleaner.logs.remove(topics(0))
+    TestUtils.waitUntilTrue(() => uncleanablePartitionsCountGauge.value() == 2, "There should be 2 uncleanable partitions", 2000L)
+    val expectedTotalUncleanableBytes = LogCleaner.calculateCleanableBytes(log, 0, log.logSegments.last.baseOffset)._2 +
+      LogCleaner.calculateCleanableBytes(log2, 0, log2.logSegments.last.baseOffset)._2
+    TestUtils.waitUntilTrue(() => uncleanableBytesGauge.value() == expectedTotalUncleanableBytes,
+      s"There should be $expectedTotalUncleanableBytes uncleanable bytes", 1000L)
 
-    cleaner.updateCheckpoints(logDir)
-    val checkpoints = new OffsetCheckpoint(new File(logDir,cleaner.cleanerManager.offsetCheckpointFile)).read()
-
-    // we expect partition 0 to be gone
-    assert(!checkpoints.contains(topics(0)))
-    
-    cleaner.shutdown()
+    val uncleanablePartitions = cleaner.cleanerManager.uncleanablePartitions(uncleanableDirectory)
+    assertTrue(uncleanablePartitions.contains(topicPartitions(0)))
+    assertTrue(uncleanablePartitions.contains(topicPartitions(1)))
+    assertFalse(uncleanablePartitions.contains(topicPartitions(2)))
   }
-  
-  def readFromLog(log: Log): Iterable[(Int, Int)] = {
-    for(segment <- log.logSegments; message <- segment.log) yield {
-      val key = Utils.readString(message.message.key).toInt
-      val value = Utils.readString(message.message.payload).toInt
+
+  @Test
+  def testMaxLogCompactionLag(): Unit = {
+    val msPerHour = 60 * 60 * 1000
+
+    val minCompactionLagMs = 1 * msPerHour
+    val maxCompactionLagMs = 6 * msPerHour
+
+    val cleanerBackOffMs = 200L
+    val segmentSize = 512
+    val topicPartitions = Array(new TopicPartition("log", 0), new TopicPartition("log", 1), new TopicPartition("log", 2))
+    val minCleanableDirtyRatio = 1.0F
+
+    cleaner = makeCleaner(partitions = topicPartitions,
+      backOffMs = cleanerBackOffMs,
+      minCompactionLagMs = minCompactionLagMs,
+      segmentSize = segmentSize,
+      maxCompactionLagMs= maxCompactionLagMs,
+      minCleanableDirtyRatio = minCleanableDirtyRatio)
+    val log = cleaner.logs.get(topicPartitions(0))
+
+    val T0 = time.milliseconds
+    writeKeyDups(numKeys = 100, numDups = 3, log, CompressionType.NONE, timestamp = T0, startValue = 0, step = 1)
+
+    val startSizeBlock0 = log.size
+
+    val activeSegAtT0 = log.activeSegment
+
+    cleaner.startup()
+
+    // advance to a time still less than maxCompactionLagMs from start
+    time.sleep(maxCompactionLagMs/2)
+    Thread.sleep(5 * cleanerBackOffMs) // give cleaning thread a chance to _not_ clean
+    assertEquals("There should be no cleaning until the max compaction lag has passed", startSizeBlock0, log.size)
+
+    // advance to time a bit more than one maxCompactionLagMs from start
+    time.sleep(maxCompactionLagMs/2 + 1)
+    val T1 = time.milliseconds
+
+    // write the second block of data: all zero keys
+    val appends1 = writeKeyDups(numKeys = 100, numDups = 1, log, CompressionType.NONE, timestamp = T1, startValue = 0, step = 0)
+
+    // roll the active segment
+    log.roll()
+    val activeSegAtT1 = log.activeSegment
+    val firstBlockCleanableSegmentOffset = activeSegAtT0.baseOffset
+
+    // the first block should get cleaned
+    cleaner.awaitCleaned(new TopicPartition("log", 0), firstBlockCleanableSegmentOffset)
+
+    val read1 = readFromLog(log)
+    val lastCleaned = cleaner.cleanerManager.allCleanerCheckpoints(new TopicPartition("log", 0))
+    assertTrue(s"log cleaner should have processed at least to offset $firstBlockCleanableSegmentOffset, " +
+      s"but lastCleaned=$lastCleaned", lastCleaned >= firstBlockCleanableSegmentOffset)
+
+    //minCleanableDirtyRatio  will prevent second block of data from compacting
+    assertNotEquals(s"log should still contain non-zero keys", appends1, read1)
+
+    time.sleep(maxCompactionLagMs + 1)
+    // the second block should get cleaned. only zero keys left
+    cleaner.awaitCleaned(new TopicPartition("log", 0), activeSegAtT1.baseOffset)
+
+    val read2 = readFromLog(log)
+
+    assertEquals(s"log should only contains zero keys now", appends1, read2)
+
+    val lastCleaned2 = cleaner.cleanerManager.allCleanerCheckpoints(new TopicPartition("log", 0))
+    val secondBlockCleanableSegmentOffset = activeSegAtT1.baseOffset
+    assertTrue(s"log cleaner should have processed at least to offset $secondBlockCleanableSegmentOffset, " +
+      s"but lastCleaned=$lastCleaned2", lastCleaned2 >= secondBlockCleanableSegmentOffset)
+  }
+
+  private def readFromLog(log: Log): Iterable[(Int, Int)] = {
+    import JavaConverters._
+    for (segment <- log.logSegments; record <- segment.log.records.asScala) yield {
+      val key = TestUtils.readString(record.key).toInt
+      val value = TestUtils.readString(record.value).toInt
       key -> value
     }
   }
-  
-  def writeDups(numKeys: Int, numDups: Int, log: Log): Seq[(Int, Int)] = {
-    for(dup <- 0 until numDups; key <- 0 until numKeys) yield {
-      val count = counter
-      log.append(TestUtils.singleMessageSet(payload = counter.toString.getBytes, key = key.toString.getBytes), assignOffsets = true)
-      counter += 1
-      (key, count)
-    }
-  }
-    
-  @After
-  def teardown() {
-    Utils.rm(logDir)
-  }
-  
-  /* create a cleaner instance and logs with the given parameters */
-  def makeCleaner(parts: Int, 
-                  minDirtyMessages: Int = 0, 
-                  numThreads: Int = 1,
-                  defaultPolicy: String = "compact",
-                  policyOverrides: Map[String, String] = Map()): LogCleaner = {
-    
-    // create partitions and add them to the pool
-    val logs = new Pool[TopicAndPartition, Log]()
-    for(i <- 0 until parts) {
-      val dir = new File(logDir, "log-" + i)
-      dir.mkdirs()
-      val log = new Log(dir = dir,
-                        LogConfig(segmentSize = segmentSize, maxIndexSize = 100*1024, fileDeleteDelayMs = deleteDelay, compact = true),
-                        recoveryPoint = 0L,
-                        scheduler = time.scheduler,
-                        time = time)
-      logs.put(TopicAndPartition("log", i), log)      
-    }
-  
-    new LogCleaner(CleanerConfig(numThreads = numThreads),
-                   logDirs = Array(logDir),
-                   logs = logs,
-                   time = time)
-  }
 
+  private def writeKeyDups(numKeys: Int, numDups: Int, log: Log, codec: CompressionType, timestamp: Long, startValue: Int, step: Int): Seq[(Int, Int)] = {
+    var valCounter = startValue
+    for (_ <- 0 until numDups; key <- 0 until numKeys) yield {
+      val curValue = valCounter
+      log.appendAsLeader(TestUtils.singletonRecords(value = curValue.toString.getBytes, codec = codec,
+        key = key.toString.getBytes, timestamp = timestamp), leaderEpoch = 0)
+      valCounter += step
+      (key, curValue)
+    }
+  }
 }

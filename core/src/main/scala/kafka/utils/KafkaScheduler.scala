@@ -19,7 +19,7 @@ package kafka.utils
 
 import java.util.concurrent._
 import atomic._
-import collection.mutable.HashMap
+import org.apache.kafka.common.utils.KafkaThread
 
 /**
  * A scheduler for running jobs
@@ -32,13 +32,18 @@ trait Scheduler {
   /**
    * Initialize this scheduler so it is ready to accept scheduling of tasks
    */
-  def startup()
+  def startup(): Unit
   
   /**
    * Shutdown this scheduler. When this method is complete no more executions of background tasks will occur. 
    * This includes tasks scheduled with a delayed execution.
    */
-  def shutdown()
+  def shutdown(): Unit
+  
+  /**
+   * Check if the scheduler has been started
+   */
+  def isStarted: Boolean
   
   /**
    * Schedule a task
@@ -46,8 +51,9 @@ trait Scheduler {
    * @param delay The amount of time to wait before the first execution
    * @param period The period with which to execute the task. If < 0 the task will execute only once.
    * @param unit The unit for the preceding times.
+   * @return A Future object to manage the task scheduled.
    */
-  def schedule(name: String, fun: ()=>Unit, delay: Long = 0, period: Long = -1, unit: TimeUnit = TimeUnit.MILLISECONDS)
+  def schedule(name: String, fun: ()=>Unit, delay: Long = 0, period: Long = -1, unit: TimeUnit = TimeUnit.MILLISECONDS) : ScheduledFuture[_]
 }
 
 /**
@@ -63,54 +69,83 @@ trait Scheduler {
 class KafkaScheduler(val threads: Int, 
                      val threadNamePrefix: String = "kafka-scheduler-", 
                      daemon: Boolean = true) extends Scheduler with Logging {
-  @volatile private var executor: ScheduledThreadPoolExecutor = null
+  private var executor: ScheduledThreadPoolExecutor = null
   private val schedulerThreadId = new AtomicInteger(0)
-  
-  override def startup() {
+
+  override def startup(): Unit = {
     debug("Initializing task scheduler.")
     this synchronized {
-      if(executor != null)
+      if(isStarted)
         throw new IllegalStateException("This scheduler has already been started!")
       executor = new ScheduledThreadPoolExecutor(threads)
       executor.setContinueExistingPeriodicTasksAfterShutdownPolicy(false)
       executor.setExecuteExistingDelayedTasksAfterShutdownPolicy(false)
+      executor.setRemoveOnCancelPolicy(true)
       executor.setThreadFactory(new ThreadFactory() {
                                   def newThread(runnable: Runnable): Thread = 
-                                    Utils.newThread(threadNamePrefix + schedulerThreadId.getAndIncrement(), runnable, daemon)
+                                    new KafkaThread(threadNamePrefix + schedulerThreadId.getAndIncrement(), runnable, daemon)
                                 })
     }
   }
   
-  override def shutdown() {
+  override def shutdown(): Unit = {
     debug("Shutting down task scheduler.")
-    ensureStarted
-    executor.shutdown()
-    executor.awaitTermination(1, TimeUnit.DAYS)
-    this.executor = null
+    // We use the local variable to avoid NullPointerException if another thread shuts down scheduler at same time.
+    val cachedExecutor = this.executor
+    if (cachedExecutor != null) {
+      this synchronized {
+        cachedExecutor.shutdown()
+        this.executor = null
+      }
+      cachedExecutor.awaitTermination(1, TimeUnit.DAYS)
+    }
   }
 
-  def schedule(name: String, fun: ()=>Unit, delay: Long, period: Long, unit: TimeUnit) = {
+  def scheduleOnce(name: String, fun: () => Unit): Unit = {
+    schedule(name, fun, delay = 0L, period = -1L, unit = TimeUnit.MILLISECONDS)
+  }
+
+  def schedule(name: String, fun: () => Unit, delay: Long, period: Long, unit: TimeUnit): ScheduledFuture[_] = {
     debug("Scheduling task %s with initial delay %d ms and period %d ms."
         .format(name, TimeUnit.MILLISECONDS.convert(delay, unit), TimeUnit.MILLISECONDS.convert(period, unit)))
-    ensureStarted
-    val runnable = Utils.runnable {
-      try {
-        trace("Begining execution of scheduled task '%s'.".format(name))
-        fun()
-      } catch {
-        case t: Throwable => error("Uncaught exception in scheduled task '" + name +"'", t)
-      } finally {
-        trace("Completed execution of scheduled task '%s'.".format(name))
+    this synchronized {
+      ensureRunning()
+      val runnable = CoreUtils.runnable {
+        try {
+          trace("Beginning execution of scheduled task '%s'.".format(name))
+          fun()
+        } catch {
+          case t: Throwable => error(s"Uncaught exception in scheduled task '$name'", t)
+        } finally {
+          trace("Completed execution of scheduled task '%s'.".format(name))
+        }
       }
+      if(period >= 0)
+        executor.scheduleAtFixedRate(runnable, delay, period, unit)
+      else
+        executor.schedule(runnable, delay, unit)
     }
-    if(period >= 0)
-      executor.scheduleAtFixedRate(runnable, delay, period, unit)
-    else
-      executor.schedule(runnable, delay, unit)
+  }
+
+  /**
+   * Package private for testing.
+   */
+  private[utils] def taskRunning(task: ScheduledFuture[_]): Boolean = {
+    executor.getQueue().contains(task)
+  }
+
+  def resizeThreadPool(newSize: Int): Unit = {
+    executor.setCorePoolSize(newSize)
   }
   
-  private def ensureStarted = {
-    if(executor == null)
-      throw new IllegalStateException("Kafka scheduler has not been started")
+  def isStarted: Boolean = {
+    this synchronized {
+      executor != null
+    }
+  }
+  
+  private def ensureRunning(): Unit = {
+    if (!isStarted)
+      throw new IllegalStateException("Kafka scheduler is not running.")
   }
 }
