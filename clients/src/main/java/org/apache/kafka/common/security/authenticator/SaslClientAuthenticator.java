@@ -23,6 +23,7 @@ import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.errors.IllegalSaslStateException;
 import org.apache.kafka.common.errors.SaslAuthenticationException;
 import org.apache.kafka.common.errors.UnsupportedSaslMechanismException;
+import org.apache.kafka.common.message.RequestHeaderData;
 import org.apache.kafka.common.message.SaslAuthenticateRequestData;
 import org.apache.kafka.common.message.SaslHandshakeRequestData;
 import org.apache.kafka.common.network.Authenticator;
@@ -324,7 +325,14 @@ public class SaslClientAuthenticator implements Authenticator {
 
     private RequestHeader nextRequestHeader(ApiKeys apiKey, short version) {
         String clientId = (String) configs.get(CommonClientConfigs.CLIENT_ID_CONFIG);
-        currentRequestHeader = new RequestHeader(apiKey, version, clientId, correlationId++);
+        short requestApiKey = apiKey.id;
+        currentRequestHeader = new RequestHeader(
+            new RequestHeaderData().
+                setRequestApiKey(requestApiKey).
+                setRequestApiVersion(version).
+                setClientId(clientId).
+                setCorrelationId(correlationId++),
+            apiKey.headerVersion(version));
         return currentRequestHeader;
     }
 
@@ -377,7 +385,7 @@ public class SaslClientAuthenticator implements Authenticator {
                     SaslAuthenticateRequestData data = new SaslAuthenticateRequestData()
                             .setAuthBytes(tokenBuf.array());
                     SaslAuthenticateRequest request = new SaslAuthenticateRequest.Builder(data).build(saslAuthenticateVersion);
-                    tokenBuf = request.serialize(nextRequestHeader(ApiKeys.SASL_AUTHENTICATE, saslAuthenticateVersion));
+                    tokenBuf = request.serializeWithHeader(nextRequestHeader(ApiKeys.SASL_AUTHENTICATE, saslAuthenticateVersion));
                 }
                 send(new NetworkSend(node, tokenBuf));
                 return true;
