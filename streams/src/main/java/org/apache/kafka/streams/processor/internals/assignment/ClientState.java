@@ -16,6 +16,10 @@
  */
 package org.apache.kafka.streams.processor.internals.assignment;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.streams.processor.TaskId;
 
 import java.util.HashSet;
@@ -29,6 +33,8 @@ public class ClientState {
     private final Set<TaskId> prevStandbyTasks;
     private final Set<TaskId> prevAssignedTasks;
 
+    private final Map<TopicPartition, String> ownedPartitions;
+
     private int capacity;
 
 
@@ -37,7 +43,7 @@ public class ClientState {
     }
 
     ClientState(final int capacity) {
-        this(new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashSet<>(), capacity);
+        this(new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashMap<>(), capacity);
     }
 
     private ClientState(final Set<TaskId> activeTasks,
@@ -46,6 +52,7 @@ public class ClientState {
                         final Set<TaskId> prevActiveTasks,
                         final Set<TaskId> prevStandbyTasks,
                         final Set<TaskId> prevAssignedTasks,
+                        final Map<TopicPartition, String> ownedPartitions,
                         final int capacity) {
         this.activeTasks = activeTasks;
         this.standbyTasks = standbyTasks;
@@ -53,6 +60,7 @@ public class ClientState {
         this.prevActiveTasks = prevActiveTasks;
         this.prevStandbyTasks = prevStandbyTasks;
         this.prevAssignedTasks = prevAssignedTasks;
+        this.ownedPartitions = ownedPartitions;
         this.capacity = capacity;
     }
 
@@ -64,6 +72,7 @@ public class ClientState {
             new HashSet<>(prevActiveTasks),
             new HashSet<>(prevStandbyTasks),
             new HashSet<>(prevAssignedTasks),
+            new HashMap<>(ownedPartitions),
             capacity);
     }
 
@@ -93,6 +102,10 @@ public class ClientState {
         return prevStandbyTasks;
     }
 
+    public Map<TopicPartition, String> ownedPartitions() {
+        return ownedPartitions;
+    }
+
     @SuppressWarnings("WeakerAccess")
     public int assignedTaskCount() {
         return assignedTasks.size();
@@ -107,14 +120,31 @@ public class ClientState {
         return activeTasks.size();
     }
 
+    public void addOwnedPartitions(final List<TopicPartition> ownedPartitions, final String consumer) {
+        for (final TopicPartition tp : ownedPartitions) {
+            this.ownedPartitions.put(tp, consumer);
+        }
+    }
+
     public void addPreviousActiveTasks(final Set<TaskId> prevTasks) {
-        prevActiveTasks.addAll(prevTasks);
+        for (final TaskId task : prevTasks) {
+            addPreviousActiveTask(task);
+        }
         prevAssignedTasks.addAll(prevTasks);
+    }
+
+    public void addPreviousActiveTask(final TaskId task) {
+        prevActiveTasks.add(task);
     }
 
     public void addPreviousStandbyTasks(final Set<TaskId> standbyTasks) {
         prevStandbyTasks.addAll(standbyTasks);
         prevAssignedTasks.addAll(standbyTasks);
+    }
+
+    public void removeFromAssignment(final TaskId task) {
+        activeTasks.remove(task);
+        assignedTasks.remove(task);
     }
 
     @Override
@@ -125,6 +155,7 @@ public class ClientState {
                 ") prevActiveTasks: (" + prevActiveTasks +
                 ") prevStandbyTasks: (" + prevStandbyTasks +
                 ") prevAssignedTasks: (" + prevAssignedTasks +
+                ") prevOwnedPartitions: (" + ownedPartitions.keySet() +
                 ") capacity: " + capacity +
                 "]";
     }
@@ -152,16 +183,6 @@ public class ClientState {
         } else {
             return capacity > other.capacity;
         }
-    }
-
-    Set<TaskId> previousStandbyTasks() {
-        final Set<TaskId> standby = new HashSet<>(prevAssignedTasks);
-        standby.removeAll(prevActiveTasks);
-        return standby;
-    }
-
-    Set<TaskId> previousActiveTasks() {
-        return prevActiveTasks;
     }
 
     boolean hasAssignedTask(final TaskId taskId) {
