@@ -20,6 +20,7 @@ import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.streams.KeyValue;
+import org.apache.kafka.streams.KeyValueTimestamp;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.TopologyTestDriver;
 import org.apache.kafka.streams.TopologyWrapper;
@@ -46,7 +47,7 @@ import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.TopicNameExtractor;
 import org.apache.kafka.streams.processor.internals.ProcessorTopology;
 import org.apache.kafka.streams.processor.internals.SourceNode;
-import org.apache.kafka.streams.test.ConsumerRecordFactory;
+import org.apache.kafka.streams.TestInputTopic;
 import org.apache.kafka.test.MockMapper;
 import org.apache.kafka.test.MockProcessor;
 import org.apache.kafka.test.MockProcessorSupplier;
@@ -56,6 +57,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -85,8 +87,6 @@ public class KStreamImplTest {
     private KStream<String, String> testStream;
     private StreamsBuilder builder;
 
-    private final ConsumerRecordFactory<String, String> recordFactory =
-        new ConsumerRecordFactory<>(new StringSerializer(), new StringSerializer(), 0L);
     private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.String(), Serdes.String());
 
     private final Serde<String> mySerde = new Serdes.StringSerde();
@@ -288,9 +288,11 @@ public class KStreamImplTest {
         stream.through("through-topic", Produced.with(Serdes.String(), Serdes.String())).process(processorSupplier);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            driver.pipeInput(recordFactory.create(input, "a", "b"));
+            final TestInputTopic<String, String> inputTopic =
+                    driver.createInputTopic(input, new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            inputTopic.pipeInput("a", "b");
         }
-        assertThat(processorSupplier.theCapturedProcessor().processed, equalTo(Collections.singletonList("a:b (ts: 0)")));
+        assertThat(processorSupplier.theCapturedProcessor().processed, equalTo(Collections.singletonList(new KeyValueTimestamp<>("a", "b", 0))));
     }
 
     @Test
@@ -302,9 +304,11 @@ public class KStreamImplTest {
         builder.stream("to-topic", stringConsumed).process(processorSupplier);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            driver.pipeInput(recordFactory.create(input, "e", "f"));
+            final TestInputTopic<String, String> inputTopic =
+                    driver.createInputTopic(input, new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            inputTopic.pipeInput("e", "f");
         }
-        assertThat(processorSupplier.theCapturedProcessor().processed, equalTo(Collections.singletonList("e:f (ts: 0)")));
+        assertThat(processorSupplier.theCapturedProcessor().processed, equalTo(Collections.singletonList(new KeyValueTimestamp<>("e", "f", 0))));
     }
 
     @Test
@@ -318,13 +322,16 @@ public class KStreamImplTest {
         builder.stream(input + "-b-v", stringConsumed).process(processorSupplier);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            driver.pipeInput(recordFactory.create(input, "a", "v1"));
-            driver.pipeInput(recordFactory.create(input, "a", "v2"));
-            driver.pipeInput(recordFactory.create(input, "b", "v1"));
+            final TestInputTopic<String, String> inputTopic =
+                    driver.createInputTopic(input, new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            inputTopic.pipeInput("a", "v1");
+            inputTopic.pipeInput("a", "v2");
+            inputTopic.pipeInput("b", "v1");
         }
         final List<MockProcessor<String, String>> mockProcessors = processorSupplier.capturedProcessors(2);
-        assertThat(mockProcessors.get(0).processed, equalTo(asList("a:v1 (ts: 0)", "a:v2 (ts: 0)")));
-        assertThat(mockProcessors.get(1).processed, equalTo(Collections.singletonList("b:v1 (ts: 0)")));
+        assertThat(mockProcessors.get(0).processed, equalTo(asList(new KeyValueTimestamp<>("a", "v1", 0),
+                new KeyValueTimestamp<>("a", "v2", 0))));
+        assertThat(mockProcessors.get(1).processed, equalTo(Collections.singletonList(new KeyValueTimestamp<>("b", "v1", 0))));
     }
 
     @SuppressWarnings("deprecation") // specifically testing the deprecated variant
@@ -670,13 +677,20 @@ public class KStreamImplTest {
         merged.process(processorSupplier);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            driver.pipeInput(recordFactory.create(topic1, "A", "aa"));
-            driver.pipeInput(recordFactory.create(topic2, "B", "bb"));
-            driver.pipeInput(recordFactory.create(topic2, "C", "cc"));
-            driver.pipeInput(recordFactory.create(topic1, "D", "dd"));
+            final TestInputTopic<String, String> inputTopic1 =
+                    driver.createInputTopic(topic1, new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            final TestInputTopic<String, String> inputTopic2 =
+                    driver.createInputTopic(topic2, new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            inputTopic1.pipeInput("A", "aa");
+            inputTopic2.pipeInput("B", "bb");
+            inputTopic2.pipeInput("C", "cc");
+            inputTopic1.pipeInput("D", "dd");
         }
 
-        assertEquals(asList("A:aa (ts: 0)", "B:bb (ts: 0)", "C:cc (ts: 0)", "D:dd (ts: 0)"), processorSupplier.theCapturedProcessor().processed);
+        assertEquals(asList(new KeyValueTimestamp<>("A", "aa", 0),
+                new KeyValueTimestamp<>("B", "bb", 0),
+                new KeyValueTimestamp<>("C", "cc", 0),
+                new KeyValueTimestamp<>("D", "dd", 0)), processorSupplier.theCapturedProcessor().processed);
     }
 
     @Test
@@ -695,17 +709,33 @@ public class KStreamImplTest {
         merged.process(processorSupplier);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            driver.pipeInput(recordFactory.create(topic1, "A", "aa", 1L));
-            driver.pipeInput(recordFactory.create(topic2, "B", "bb", 9L));
-            driver.pipeInput(recordFactory.create(topic3, "C", "cc", 2L));
-            driver.pipeInput(recordFactory.create(topic4, "D", "dd", 8L));
-            driver.pipeInput(recordFactory.create(topic4, "E", "ee", 3L));
-            driver.pipeInput(recordFactory.create(topic3, "F", "ff", 7L));
-            driver.pipeInput(recordFactory.create(topic2, "G", "gg", 4L));
-            driver.pipeInput(recordFactory.create(topic1, "H", "hh", 6L));
+            final TestInputTopic<String, String> inputTopic1 =
+                    driver.createInputTopic(topic1, new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            final TestInputTopic<String, String> inputTopic2 =
+                    driver.createInputTopic(topic2, new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            final TestInputTopic<String, String> inputTopic3 =
+                    driver.createInputTopic(topic3, new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            final TestInputTopic<String, String> inputTopic4 =
+                    driver.createInputTopic(topic4, new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+
+            inputTopic1.pipeInput("A", "aa", 1L);
+            inputTopic2.pipeInput("B", "bb", 9L);
+            inputTopic3.pipeInput("C", "cc", 2L);
+            inputTopic4.pipeInput("D", "dd", 8L);
+            inputTopic4.pipeInput("E", "ee", 3L);
+            inputTopic3.pipeInput("F", "ff", 7L);
+            inputTopic2.pipeInput("G", "gg", 4L);
+            inputTopic1.pipeInput("H", "hh", 6L);
         }
 
-        assertEquals(asList("A:aa (ts: 1)", "B:bb (ts: 9)", "C:cc (ts: 2)", "D:dd (ts: 8)", "E:ee (ts: 3)", "F:ff (ts: 7)", "G:gg (ts: 4)", "H:hh (ts: 6)"),
+        assertEquals(asList(new KeyValueTimestamp<>("A", "aa", 1),
+                new KeyValueTimestamp<>("B", "bb", 9),
+                new KeyValueTimestamp<>("C", "cc", 2),
+                new KeyValueTimestamp<>("D", "dd", 8),
+                new KeyValueTimestamp<>("E", "ee", 3),
+                new KeyValueTimestamp<>("F", "ff", 7),
+                new KeyValueTimestamp<>("G", "gg", 4),
+                new KeyValueTimestamp<>("H", "hh", 6)),
                      processorSupplier.theCapturedProcessor().processed);
     }
 
@@ -716,14 +746,29 @@ public class KStreamImplTest {
         pattern2Source.process(processorSupplier);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            driver.pipeInput(recordFactory.create("topic-3", "A", "aa", 1L));
-            driver.pipeInput(recordFactory.create("topic-4", "B", "bb", 5L));
-            driver.pipeInput(recordFactory.create("topic-5", "C", "cc", 10L));
-            driver.pipeInput(recordFactory.create("topic-6", "D", "dd", 8L));
-            driver.pipeInput(recordFactory.create("topic-7", "E", "ee", 3L));
+            final TestInputTopic<String, String> inputTopic3 =
+                    driver.createInputTopic("topic-3", new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            final TestInputTopic<String, String> inputTopic4 =
+                    driver.createInputTopic("topic-4", new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            final TestInputTopic<String, String> inputTopic5 =
+                    driver.createInputTopic("topic-5", new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            final TestInputTopic<String, String> inputTopic6 =
+                    driver.createInputTopic("topic-6", new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            final TestInputTopic<String, String> inputTopic7 =
+                    driver.createInputTopic("topic-7", new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+
+            inputTopic3.pipeInput("A", "aa", 1L);
+            inputTopic4.pipeInput("B", "bb", 5L);
+            inputTopic5.pipeInput("C", "cc", 10L);
+            inputTopic6.pipeInput("D", "dd", 8L);
+            inputTopic7.pipeInput("E", "ee", 3L);
         }
 
-        assertEquals(asList("A:aa (ts: 1)", "B:bb (ts: 5)", "C:cc (ts: 10)", "D:dd (ts: 8)", "E:ee (ts: 3)"),
+        assertEquals(asList(new KeyValueTimestamp<>("A", "aa", 1),
+                new KeyValueTimestamp<>("B", "bb", 5),
+                new KeyValueTimestamp<>("C", "cc", 10),
+                new KeyValueTimestamp<>("D", "dd", 8),
+                new KeyValueTimestamp<>("E", "ee", 3)),
                 processorSupplier.theCapturedProcessor().processed);
     }
 
@@ -739,14 +784,29 @@ public class KStreamImplTest {
         merged.process(processorSupplier);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            driver.pipeInput(recordFactory.create("topic-3", "A", "aa", 1L));
-            driver.pipeInput(recordFactory.create("topic-4", "B", "bb", 5L));
-            driver.pipeInput(recordFactory.create("topic-A", "C", "cc", 10L));
-            driver.pipeInput(recordFactory.create("topic-Z", "D", "dd", 8L));
-            driver.pipeInput(recordFactory.create(topic3, "E", "ee", 3L));
+            final TestInputTopic<String, String> inputTopic3 =
+                    driver.createInputTopic("topic-3", new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            final TestInputTopic<String, String> inputTopic4 =
+                    driver.createInputTopic("topic-4", new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            final TestInputTopic<String, String> inputTopicA =
+                    driver.createInputTopic("topic-A", new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            final TestInputTopic<String, String> inputTopicZ =
+                    driver.createInputTopic("topic-Z", new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            final TestInputTopic<String, String> inputTopic =
+                    driver.createInputTopic(topic3, new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+
+            inputTopic3.pipeInput("A", "aa", 1L);
+            inputTopic4.pipeInput("B", "bb", 5L);
+            inputTopicA.pipeInput("C", "cc", 10L);
+            inputTopicZ.pipeInput("D", "dd", 8L);
+            inputTopic.pipeInput("E", "ee", 3L);
         }
 
-        assertEquals(asList("A:aa (ts: 1)", "B:bb (ts: 5)", "C:cc (ts: 10)", "D:dd (ts: 8)", "E:ee (ts: 3)"),
+        assertEquals(asList(new KeyValueTimestamp<>("A", "aa", 1),
+                new KeyValueTimestamp<>("B", "bb", 5),
+                new KeyValueTimestamp<>("C", "cc", 10),
+                new KeyValueTimestamp<>("D", "dd", 8),
+                new KeyValueTimestamp<>("E", "ee", 3)),
                 processorSupplier.theCapturedProcessor().processed);
     }
 }
