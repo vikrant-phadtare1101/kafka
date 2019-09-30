@@ -23,6 +23,8 @@ import org.apache.kafka.common.utils.ByteUtils;
 import org.apache.kafka.common.utils.Utils;
 
 import java.nio.ByteBuffer;
+import java.util.Optional;
+import java.util.UUID;
 
 /**
  * A serializable type
@@ -61,6 +63,20 @@ public abstract class Type {
      */
     public boolean isNullable() {
         return false;
+    }
+
+    /**
+     * If the type is an array, return the type of the array elements.  Otherwise, return empty.
+     */
+    public Optional<Type> arrayElementType() {
+        return Optional.empty();
+    }
+
+    /**
+     * Returns true if the type is an array.
+     */
+    public final boolean isArray() {
+        return arrayElementType().isPresent();
     }
 
     /**
@@ -313,6 +329,44 @@ public abstract class Type {
         }
     };
 
+    public static final DocumentedType UUID = new DocumentedType() {
+        @Override
+        public void write(ByteBuffer buffer, Object o) {
+            final java.util.UUID uuid = (java.util.UUID) o;
+            buffer.putLong(uuid.getMostSignificantBits());
+            buffer.putLong(uuid.getLeastSignificantBits());
+        }
+
+        @Override
+        public Object read(ByteBuffer buffer) {
+            return new java.util.UUID(buffer.getLong(), buffer.getLong());
+        }
+
+        @Override
+        public int sizeOf(Object o) {
+            return 16;
+        }
+
+        @Override
+        public String typeName() {
+            return "UUID";
+        }
+
+        @Override
+        public UUID validate(Object item) {
+            if (item instanceof UUID)
+                return (UUID) item;
+            else
+                throw new SchemaException(item + " is not a UUID.");
+        }
+
+        @Override
+        public String documentation() {
+            return "Represents a java.util.UUID. " +
+                    "The values are encoded using sixteen bytes in network byte order (big-endian).";
+        }
+    };
+
     public static final DocumentedType STRING = new DocumentedType() {
         @Override
         public void write(ByteBuffer buffer, Object o) {
@@ -541,6 +595,67 @@ public abstract class Type {
         }
     };
 
+    public static final DocumentedType BYTE_BUFFER = new DocumentedType() {
+        @Override
+        public String typeName() {
+            return "BYTE_BUFFER";
+        }
+
+        @Override
+        public String documentation() {
+            return "Represents a byte buffer or null. For non-null values, first the length N is given as an " + INT32 +
+                ". Then N bytes follow. A null value is encoded with length of -1 and there are no following bytes.";
+        }
+
+        @Override
+        public void write(ByteBuffer buffer, Object o) {
+            if (o == null) {
+                buffer.putInt(-1);
+                return;
+            }
+
+            ByteBuffer arg = (ByteBuffer) o;
+            int pos = arg.position();
+            buffer.putInt(arg.remaining());
+            buffer.put(arg);
+            arg.position(pos);
+        }
+
+        @Override
+        public Object read(ByteBuffer buffer) {
+            int size = buffer.getInt();
+            if (size < 0)
+                return null;
+            if (size > buffer.remaining())
+                throw new SchemaException("Error reading bytes of size " + size + ", only " + buffer.remaining() + " bytes available");
+
+            ByteBuffer val = buffer.slice();
+            val.limit(size);
+            buffer.position(buffer.position() + size);
+            return val;
+        }
+
+        @Override
+        public Object validate(Object item) {
+            if (item == null)
+                return null;
+
+            if (item instanceof ByteBuffer)
+                return (ByteBuffer) item;
+
+            throw new SchemaException(item + " is not a java.nio.ByteBuffer.");
+        }
+
+        @Override
+        public int sizeOf(Object o) {
+            if (o == null)
+                return 4;
+
+            ByteBuffer buffer = (ByteBuffer) o;
+            return 4 + buffer.remaining();
+        }
+    };
+
     public static final DocumentedType RECORDS = new DocumentedType() {
         @Override
         public boolean isNullable() {
@@ -665,10 +780,9 @@ public abstract class Type {
     };
 
     private static String toHtml() {
-
         DocumentedType[] types = {
             BOOLEAN, INT8, INT16, INT32, INT64,
-            UNSIGNED_INT32, VARINT, VARLONG,
+            UNSIGNED_INT32, VARINT, VARLONG, UUID,
             STRING, NULLABLE_STRING, BYTES, NULLABLE_BYTES,
             RECORDS, new ArrayOf(STRING)};
         final StringBuilder b = new StringBuilder();
