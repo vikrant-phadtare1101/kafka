@@ -44,7 +44,6 @@ import org.apache.kafka.trogdor.rest.TasksRequest;
 import org.apache.kafka.trogdor.rest.TaskState;
 import org.apache.kafka.trogdor.rest.TasksResponse;
 import org.apache.kafka.trogdor.task.TaskSpec;
-import org.apache.kafka.trogdor.rest.RequestConflictException;
 import org.apache.kafka.trogdor.rest.UptimeResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -427,15 +426,8 @@ public class CoordinatorClient {
                 TaskSpec taskSpec = JsonUtil.
                     objectFromCommandLineArgument(res.getString("taskSpec"), TaskSpec.class);
                 CreateTaskRequest req = new CreateTaskRequest(taskId, taskSpec);
-                try {
-                    client.createTask(req);
-                    System.out.printf("Sent CreateTaskRequest for task %s.%n", req.id());
-                } catch (RequestConflictException rce) {
-                    System.out.printf("CreateTaskRequest for task %s got a 409 status code - " +
-                        "a task with the same ID but a different specification already exists.%nException: %s%n",
-                        req.id(), rce.getMessage());
-                    Exit.exit(1);
-                }
+                client.createTask(req);
+                System.out.printf("Sent CreateTaskRequest for task %s.%n", req.id());
                 break;
             }
             case "stopTask": {

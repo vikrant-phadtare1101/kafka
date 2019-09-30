@@ -22,8 +22,6 @@ import java.util.concurrent.locks.ReentrantLock
 import kafka.common.OffsetAndMetadata
 import kafka.utils.{CoreUtils, Logging, nonthreadsafe}
 import org.apache.kafka.common.TopicPartition
-import org.apache.kafka.common.message.JoinGroupResponseData.JoinGroupResponseMember
-import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.utils.Time
 
 import scala.collection.{Seq, immutable, mutable}
@@ -130,16 +128,9 @@ private object GroupMetadata {
     group.protocol = Option(protocol)
     group.leaderId = Option(leaderId)
     group.currentStateTimestamp = currentStateTimestamp
-    members.foreach(member => {
-      group.add(member, null)
-      if (member.isStaticMember) {
-        group.addStaticMember(member.groupInstanceId, member.memberId)
-      }
-    })
+    members.foreach(group.add(_, null))
     group
   }
-
-  private val MemberIdDelimiter = "-"
 }
 
 /**
@@ -163,7 +154,7 @@ case class GroupSummary(state: String,
   * being materialized.
   */
 case class CommitRecordMetadataAndOffset(appendedBatchOffset: Option[Long], offsetAndMetadata: OffsetAndMetadata) {
-  def olderThan(that: CommitRecordMetadataAndOffset): Boolean = appendedBatchOffset.get < that.appendedBatchOffset.get
+  def olderThan(that: CommitRecordMetadataAndOffset) : Boolean = appendedBatchOffset.get < that.appendedBatchOffset.get
 }
 
 /**
@@ -193,8 +184,6 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   private var protocol: Option[String] = None
 
   private val members = new mutable.HashMap[String, MemberMetadata]
-  // Static membership mapping [key: group.instance.id, value: member.id]
-  private val staticMembers = new mutable.HashMap[String, String]
   private val pendingMembers = new mutable.HashSet[String]
   private var numMembersAwaitingJoin = 0
   private val supportedProtocols = new mutable.HashMap[String, Integer]().withDefaultValue(0)
@@ -243,74 +232,13 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
         numMembersAwaitingJoin -= 1
     }
 
-    if (isLeader(memberId))
-      leaderId = members.keys.headOption
-  }
-
-  /**
-    * Check whether current leader is rejoined. If not, try to find another joined member to be
-    * new leader. Return false if
-    *   1. the group is currently empty (has no designated leader)
-    *   2. no member rejoined
-    */
-  def maybeElectNewJoinedLeader(): Boolean = {
-    leaderId.exists { currentLeaderId =>
-      val currentLeader = get(currentLeaderId)
-      if (!currentLeader.isAwaitingJoin) {
-        members.find(_._2.isAwaitingJoin) match {
-          case Some((anyJoinedMemberId, anyJoinedMember)) =>
-            leaderId = Option(anyJoinedMemberId)
-            info(s"Group leader [member.id: ${currentLeader.memberId}, " +
-              s"group.instance.id: ${currentLeader.groupInstanceId}] failed to join " +
-              s"before rebalance timeout, while new leader $anyJoinedMember was elected.")
-            true
-
-          case None =>
-            info(s"Group leader [member.id: ${currentLeader.memberId}, " +
-              s"group.instance.id: ${currentLeader.groupInstanceId}] failed to join " +
-              s"before rebalance timeout, and the group couldn't proceed to next generation" +
-              s"because no member joined.")
-            false
-        }
+    if (isLeader(memberId)) {
+      leaderId = if (members.isEmpty) {
+        None
       } else {
-        true
+        Some(members.keys.head)
       }
     }
-  }
-
-  /**
-    * [For static members only]: Replace the old member id with the new one,
-    * keep everything else unchanged and return the updated member.
-    */
-  def replaceGroupInstance(oldMemberId: String,
-                           newMemberId: String,
-                           groupInstanceId: Option[String]): MemberMetadata = {
-    if(groupInstanceId.isEmpty) {
-      throw new IllegalArgumentException(s"unexpected null group.instance.id in replaceGroupInstance")
-    }
-    val oldMember = members.remove(oldMemberId)
-      .getOrElse(throw new IllegalArgumentException(s"Cannot replace non-existing member id $oldMemberId"))
-
-    // Fence potential duplicate member immediately if someone awaits join/sync callback.
-    maybeInvokeJoinCallback(oldMember, JoinGroupResult(
-      members = List.empty,
-      memberId = oldMemberId,
-      generationId = GroupCoordinator.NoGeneration,
-      subProtocol = GroupCoordinator.NoProtocol,
-      leaderId = GroupCoordinator.NoLeader,
-      error = Errors.FENCED_INSTANCE_ID))
-
-    maybeInvokeSyncCallback(oldMember, SyncGroupResult(
-      Array.empty, Errors.FENCED_INSTANCE_ID
-    ))
-
-    oldMember.memberId = newMemberId
-    members.put(newMemberId, oldMember)
-
-    if (isLeader(oldMemberId))
-      leaderId = Some(newMemberId)
-    addStaticMember(groupInstanceId, newMemberId)
-    oldMember
   }
 
   def isPendingMember(memberId: String): Boolean = pendingMembers.contains(memberId) && !has(memberId)
@@ -318,28 +246,6 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   def addPendingMember(memberId: String) = pendingMembers.add(memberId)
 
   def removePendingMember(memberId: String) = pendingMembers.remove(memberId)
-
-  def hasStaticMember(groupInstanceId: Option[String]) = groupInstanceId.isDefined && staticMembers.contains(groupInstanceId.get)
-
-  def getStaticMemberId(groupInstanceId: Option[String]) = {
-    if(groupInstanceId.isEmpty) {
-      throw new IllegalArgumentException(s"unexpected null group.instance.id in getStaticMemberId")
-    }
-    staticMembers(groupInstanceId.get)
-  }
-
-  def addStaticMember(groupInstanceId: Option[String], newMemberId: String) = {
-    if(groupInstanceId.isEmpty) {
-      throw new IllegalArgumentException(s"unexpected null group.instance.id in addStaticMember")
-    }
-    staticMembers.put(groupInstanceId.get, newMemberId)
-  }
-
-  def removeStaticMember(groupInstanceId: Option[String]) = {
-    if (groupInstanceId.isDefined) {
-      staticMembers.remove(groupInstanceId.get)
-    }
-  }
 
   def currentState = state
 
@@ -349,8 +255,6 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
 
   def allMembers = members.keySet
 
-  def allStaticMembers = staticMembers.keySet
-
   def numPending = pendingMembers.size
 
   def allMemberMetadata = members.values.toList
@@ -359,31 +263,7 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
     timeout.max(member.rebalanceTimeoutMs)
   }
 
-  def generateMemberId(clientId: String,
-                       groupInstanceId: Option[String]): String = {
-    groupInstanceId match {
-      case None =>
-        clientId + GroupMetadata.MemberIdDelimiter + UUID.randomUUID().toString
-      case Some(instanceId) =>
-        instanceId + GroupMetadata.MemberIdDelimiter + currentStateTimestamp.get
-    }
-  }
-
-  /**
-    * Verify the member.id is up to date for static members. Return true if both conditions met:
-    *   1. given member is a known static member to group
-    *   2. group stored member.id doesn't match with given member.id
-    */
-  def isStaticMemberFenced(memberId: String,
-                           groupInstanceId: Option[String]): Boolean = {
-    if (hasStaticMember(groupInstanceId)
-      && getStaticMemberId(groupInstanceId) != memberId) {
-        error(s"given member.id $memberId is identified as a known static member ${groupInstanceId.get}," +
-          s"but not matching the expected member.id ${getStaticMemberId(groupInstanceId)}")
-        true
-    } else
-      false
-  }
+  def generateMemberIdSuffix = UUID.randomUUID().toString
 
   def canRebalance = GroupMetadata.validPreviousStates(PreparingRebalance).contains(state)
 
@@ -439,7 +319,7 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   }
 
   def maybeInvokeJoinCallback(member: MemberMetadata,
-                              joinGroupResult: JoinGroupResult): Unit = {
+                              joinGroupResult: JoinGroupResult) : Unit = {
     if (member.isAwaitingJoin) {
       member.awaitingJoinCallback(joinGroupResult)
       member.awaitingJoinCallback = null
@@ -447,21 +327,8 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
     }
   }
 
-  /**
-    * @return true if a sync callback actually performs.
-    */
-  def maybeInvokeSyncCallback(member: MemberMetadata,
-                              syncGroupResult: SyncGroupResult): Boolean = {
-    if (member.isAwaitingSync) {
-      member.awaitingSyncCallback(syncGroupResult)
-      member.awaitingSyncCallback = null
-      true
-    } else {
-      false
-    }
-  }
-
   def initNextGeneration() = {
+    assert(notYetRejoinedMembers == List.empty[MemberMetadata])
     if (members.nonEmpty) {
       generationId += 1
       protocol = Some(selectProtocol)
@@ -475,14 +342,10 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
     receivedTransactionalOffsetCommits = false
   }
 
-  def currentMemberMetadata: List[JoinGroupResponseMember] = {
+  def currentMemberMetadata: Map[String, Array[Byte]] = {
     if (is(Dead) || is(PreparingRebalance))
       throw new IllegalStateException("Cannot obtain member metadata for group in state %s".format(state))
-    members.map{ case (memberId, memberMetadata) => new JoinGroupResponseMember()
-        .setMemberId(memberId)
-        .setGroupInstanceId(memberMetadata.groupInstanceId.orNull)
-        .setMetadata(memberMetadata.metadata(protocol.get))
-    }.toList
+    members.map{ case (memberId, memberMetadata) => (memberId, memberMetadata.metadata(protocol.get))}.toMap
   }
 
   def summary: GroupSummary = {
@@ -628,7 +491,7 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
     }.toMap
   }
 
-  def removeExpiredOffsets(currentTimestamp: Long, offsetRetentionMs: Long): Map[TopicPartition, OffsetAndMetadata] = {
+  def removeExpiredOffsets(currentTimestamp: Long, offsetRetentionMs: Long) : Map[TopicPartition, OffsetAndMetadata] = {
 
     def getExpiredOffsets(baseTimestamp: CommitRecordMetadataAndOffset => Long): Map[TopicPartition, OffsetAndMetadata] = {
       offsets.filter {

@@ -29,10 +29,11 @@ import java.util.Properties;
 
 public class StreamsUpgradeTest {
 
+
     @SuppressWarnings("unchecked")
     public static void main(final String[] args) throws Exception {
         if (args.length < 2) {
-            System.err.println("StreamsUpgradeTest requires two argument (kafka-url, properties-file) but only " + args.length + " provided: "
+            System.err.println("StreamsUpgradeTest requires three argument (kafka-url, properties-file) but only " + args.length + " provided: "
                 + (args.length > 0 ? args[0] : ""));
         }
         final String kafka = args[0];
@@ -71,7 +72,7 @@ public class StreamsUpgradeTest {
 
             @Override
             public void init(final ProcessorContext context) {
-                System.out.println("[2.0] initializing processor: topic=data taskId=" + context.taskId());
+                System.out.println("initializing processor: topic=data taskId=" + context.taskId());
                 numRecordsProcessed = 0;
             }
 

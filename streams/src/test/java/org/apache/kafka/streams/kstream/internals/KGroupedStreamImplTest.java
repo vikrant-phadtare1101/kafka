@@ -18,13 +18,13 @@ package org.apache.kafka.streams.kstream.internals;
 
 import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.MetricName;
+import org.apache.kafka.common.errors.InvalidTopicException;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.TopologyTestDriver;
-import org.apache.kafka.streams.errors.TopologyException;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.Grouped;
 import org.apache.kafka.streams.kstream.KGroupedStream;
@@ -38,12 +38,9 @@ import org.apache.kafka.streams.kstream.Windows;
 import org.apache.kafka.streams.processor.internals.testutil.LogCaptureAppender;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.SessionStore;
-import org.apache.kafka.streams.state.ValueAndTimestamp;
 import org.apache.kafka.streams.test.ConsumerRecordFactory;
 import org.apache.kafka.test.MockAggregator;
 import org.apache.kafka.test.MockInitializer;
-import org.apache.kafka.test.MockProcessor;
-import org.apache.kafka.test.MockProcessorSupplier;
 import org.apache.kafka.test.MockReducer;
 import org.apache.kafka.test.StreamsTestUtils;
 import org.junit.Before;
@@ -51,6 +48,7 @@ import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -87,7 +85,7 @@ public class KGroupedStreamImplTest {
         groupedStream.reduce(null);
     }
 
-    @Test(expected = TopologyException.class)
+    @Test(expected = InvalidTopicException.class)
     public void shouldNotHaveInvalidStoreNameOnReduce() {
         groupedStream.reduce(MockReducer.STRING_ADDER, Materialized.as(INVALID_STORE_NAME));
     }
@@ -104,7 +102,7 @@ public class KGroupedStreamImplTest {
         groupedStream.windowedBy((Windows) null);
     }
 
-    @Test(expected = TopologyException.class)
+    @Test(expected = InvalidTopicException.class)
     public void shouldNotHaveInvalidStoreNameWithWindowedReduce() {
         groupedStream
             .windowedBy(TimeWindows.of(ofMillis(10)))
@@ -121,7 +119,7 @@ public class KGroupedStreamImplTest {
         groupedStream.aggregate(MockInitializer.STRING_INIT, null, Materialized.as("store"));
     }
 
-    @Test(expected = TopologyException.class)
+    @Test(expected = InvalidTopicException.class)
     public void shouldNotHaveInvalidStoreNameOnAggregate() {
         groupedStream.aggregate(
             MockInitializer.STRING_INIT,
@@ -148,38 +146,30 @@ public class KGroupedStreamImplTest {
         groupedStream.windowedBy((Windows) null);
     }
 
-    @Test(expected = TopologyException.class)
+    @Test(expected = InvalidTopicException.class)
     public void shouldNotHaveInvalidStoreNameOnWindowedAggregate() {
         groupedStream
             .windowedBy(TimeWindows.of(ofMillis(10)))
             .aggregate(MockInitializer.STRING_INIT, MockAggregator.TOSTRING_ADDER, Materialized.as(INVALID_STORE_NAME));
     }
 
-    private void doAggregateSessionWindows(final MockProcessorSupplier<Windowed<String>, Integer> supplier) {
+    private void doAggregateSessionWindows(final Map<Windowed<String>, Integer> results) {
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             driver.pipeInput(recordFactory.create(TOPIC, "1", "1", 10));
             driver.pipeInput(recordFactory.create(TOPIC, "2", "2", 15));
             driver.pipeInput(recordFactory.create(TOPIC, "1", "1", 30));
             driver.pipeInput(recordFactory.create(TOPIC, "1", "1", 70));
-            driver.pipeInput(recordFactory.create(TOPIC, "1", "1", 100));
             driver.pipeInput(recordFactory.create(TOPIC, "1", "1", 90));
+            driver.pipeInput(recordFactory.create(TOPIC, "1", "1", 100));
         }
-        final Map<Windowed<String>, ValueAndTimestamp<Integer>> result
-            = supplier.theCapturedProcessor().lastValueAndTimestampPerKey;
-        assertEquals(
-            ValueAndTimestamp.make(2, 30L),
-            result.get(new Windowed<>("1", new SessionWindow(10L, 30L))));
-        assertEquals(
-            ValueAndTimestamp.make(1, 15L),
-            result.get(new Windowed<>("2", new SessionWindow(15L, 15L))));
-        assertEquals(
-            ValueAndTimestamp.make(3, 100L),
-            result.get(new Windowed<>("1", new SessionWindow(70L, 100L))));
+        assertEquals(Integer.valueOf(2), results.get(new Windowed<>("1", new SessionWindow(10, 30))));
+        assertEquals(Integer.valueOf(1), results.get(new Windowed<>("2", new SessionWindow(15, 15))));
+        assertEquals(Integer.valueOf(3), results.get(new Windowed<>("1", new SessionWindow(70, 100))));
     }
 
     @Test
     public void shouldAggregateSessionWindows() {
-        final MockProcessorSupplier<Windowed<String>, Integer> supplier = new MockProcessorSupplier<>();
+        final Map<Windowed<String>, Integer> results = new HashMap<>();
         final KTable<Windowed<String>, Integer> table = groupedStream
             .windowedBy(SessionWindows.with(ofMillis(30)))
             .aggregate(
@@ -189,15 +179,15 @@ public class KGroupedStreamImplTest {
                 Materialized
                     .<String, Integer, SessionStore<Bytes, byte[]>>as("session-store").
                     withValueSerde(Serdes.Integer()));
-        table.toStream().process(supplier);
+        table.toStream().foreach(results::put);
 
-        doAggregateSessionWindows(supplier);
+        doAggregateSessionWindows(results);
         assertEquals(table.queryableStoreName(), "session-store");
     }
 
     @Test
     public void shouldAggregateSessionWindowsWithInternalStoreName() {
-        final MockProcessorSupplier<Windowed<String>, Integer> supplier = new MockProcessorSupplier<>();
+        final Map<Windowed<String>, Integer> results = new HashMap<>();
         final KTable<Windowed<String>, Integer> table = groupedStream
             .windowedBy(SessionWindows.with(ofMillis(30)))
             .aggregate(
@@ -205,97 +195,80 @@ public class KGroupedStreamImplTest {
                 (aggKey, value, aggregate) -> aggregate + 1,
                 (aggKey, aggOne, aggTwo) -> aggOne + aggTwo,
                 Materialized.with(null, Serdes.Integer()));
-        table.toStream().process(supplier);
+        table.toStream().foreach(results::put);
 
-        doAggregateSessionWindows(supplier);
+        doAggregateSessionWindows(results);
     }
 
-    private void doCountSessionWindows(final MockProcessorSupplier<Windowed<String>, Long> supplier) {
-
+    private void doCountSessionWindows(final Map<Windowed<String>, Long> results) {
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             driver.pipeInput(recordFactory.create(TOPIC, "1", "1", 10));
             driver.pipeInput(recordFactory.create(TOPIC, "2", "2", 15));
             driver.pipeInput(recordFactory.create(TOPIC, "1", "1", 30));
             driver.pipeInput(recordFactory.create(TOPIC, "1", "1", 70));
-            driver.pipeInput(recordFactory.create(TOPIC, "1", "1", 100));
             driver.pipeInput(recordFactory.create(TOPIC, "1", "1", 90));
+            driver.pipeInput(recordFactory.create(TOPIC, "1", "1", 100));
         }
-        final Map<Windowed<String>, ValueAndTimestamp<Long>> result =
-            supplier.theCapturedProcessor().lastValueAndTimestampPerKey;
-        assertEquals(
-            ValueAndTimestamp.make(2L, 30L),
-            result.get(new Windowed<>("1", new SessionWindow(10L, 30L))));
-        assertEquals(
-            ValueAndTimestamp.make(1L, 15L),
-            result.get(new Windowed<>("2", new SessionWindow(15L, 15L))));
-        assertEquals(
-            ValueAndTimestamp.make(3L, 100L),
-            result.get(new Windowed<>("1", new SessionWindow(70L, 100L))));
+        assertEquals(Long.valueOf(2), results.get(new Windowed<>("1", new SessionWindow(10, 30))));
+        assertEquals(Long.valueOf(1), results.get(new Windowed<>("2", new SessionWindow(15, 15))));
+        assertEquals(Long.valueOf(3), results.get(new Windowed<>("1", new SessionWindow(70, 100))));
     }
 
     @Test
     public void shouldCountSessionWindows() {
-        final MockProcessorSupplier<Windowed<String>, Long> supplier = new MockProcessorSupplier<>();
+        final Map<Windowed<String>, Long> results = new HashMap<>();
         final KTable<Windowed<String>, Long> table = groupedStream
             .windowedBy(SessionWindows.with(ofMillis(30)))
             .count(Materialized.as("session-store"));
-        table.toStream().process(supplier);
-        doCountSessionWindows(supplier);
+        table.toStream().foreach(results::put);
+        doCountSessionWindows(results);
         assertEquals(table.queryableStoreName(), "session-store");
     }
 
     @Test
     public void shouldCountSessionWindowsWithInternalStoreName() {
-        final MockProcessorSupplier<Windowed<String>, Long> supplier = new MockProcessorSupplier<>();
+        final Map<Windowed<String>, Long> results = new HashMap<>();
         final KTable<Windowed<String>, Long> table = groupedStream
             .windowedBy(SessionWindows.with(ofMillis(30)))
             .count();
-        table.toStream().process(supplier);
-        doCountSessionWindows(supplier);
+        table.toStream().foreach(results::put);
+        doCountSessionWindows(results);
         assertNull(table.queryableStoreName());
     }
 
-    private void doReduceSessionWindows(final MockProcessorSupplier<Windowed<String>, String> supplier) {
+    private void doReduceSessionWindows(final Map<Windowed<String>, String> results) {
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             driver.pipeInput(recordFactory.create(TOPIC, "1", "A", 10));
             driver.pipeInput(recordFactory.create(TOPIC, "2", "Z", 15));
             driver.pipeInput(recordFactory.create(TOPIC, "1", "B", 30));
             driver.pipeInput(recordFactory.create(TOPIC, "1", "A", 70));
-            driver.pipeInput(recordFactory.create(TOPIC, "1", "B", 100));
-            driver.pipeInput(recordFactory.create(TOPIC, "1", "C", 90));
+            driver.pipeInput(recordFactory.create(TOPIC, "1", "B", 90));
+            driver.pipeInput(recordFactory.create(TOPIC, "1", "C", 100));
         }
-        final Map<Windowed<String>, ValueAndTimestamp<String>> result =
-            supplier.theCapturedProcessor().lastValueAndTimestampPerKey;
-        assertEquals(
-            ValueAndTimestamp.make("A:B", 30L),
-            result.get(new Windowed<>("1", new SessionWindow(10L, 30L))));
-        assertEquals(
-            ValueAndTimestamp.make("Z", 15L),
-            result.get(new Windowed<>("2", new SessionWindow(15L, 15L))));
-        assertEquals(
-            ValueAndTimestamp.make("A:B:C", 100L),
-            result.get(new Windowed<>("1", new SessionWindow(70L, 100L))));
+        assertEquals("A:B", results.get(new Windowed<>("1", new SessionWindow(10, 30))));
+        assertEquals("Z", results.get(new Windowed<>("2", new SessionWindow(15, 15))));
+        assertEquals("A:B:C", results.get(new Windowed<>("1", new SessionWindow(70, 100))));
     }
 
     @Test
     public void shouldReduceSessionWindows() {
-        final MockProcessorSupplier<Windowed<String>, String> supplier = new MockProcessorSupplier<>();
+        final Map<Windowed<String>, String> results = new HashMap<>();
         final KTable<Windowed<String>, String> table = groupedStream
             .windowedBy(SessionWindows.with(ofMillis(30)))
             .reduce((value1, value2) -> value1 + ":" + value2, Materialized.as("session-store"));
-        table.toStream().process(supplier);
-        doReduceSessionWindows(supplier);
+        table.toStream().foreach(results::put);
+        doReduceSessionWindows(results);
         assertEquals(table.queryableStoreName(), "session-store");
     }
 
     @Test
     public void shouldReduceSessionWindowsWithInternalStoreName() {
-        final MockProcessorSupplier<Windowed<String>, String> supplier = new MockProcessorSupplier<>();
+        final Map<Windowed<String>, String> results = new HashMap<>();
         final KTable<Windowed<String>, String> table = groupedStream
             .windowedBy(SessionWindows.with(ofMillis(30)))
             .reduce((value1, value2) -> value1 + ":" + value2);
-        table.toStream().process(supplier);
-        doReduceSessionWindows(supplier);
+        table.toStream().foreach(results::put);
+        doReduceSessionWindows(results);
         assertNull(table.queryableStoreName());
     }
 
@@ -311,7 +284,7 @@ public class KGroupedStreamImplTest {
         groupedStream.windowedBy((SessionWindows) null);
     }
 
-    @Test(expected = TopologyException.class)
+    @Test(expected = InvalidTopicException.class)
     public void shouldNotAcceptInvalidStoreNameWhenReducingSessionWindows() {
         groupedStream
             .windowedBy(SessionWindows.with(ofMillis(30)))
@@ -376,7 +349,7 @@ public class KGroupedStreamImplTest {
                 Materialized.with(Serdes.String(), Serdes.String()));
     }
 
-    @Test(expected = TopologyException.class)
+    @Test(expected = InvalidTopicException.class)
     public void shouldNotAcceptInvalidStoreNameWhenAggregatingSessionWindows() {
         groupedStream
             .windowedBy(SessionWindows.with(ofMillis(10)))
@@ -412,20 +385,11 @@ public class KGroupedStreamImplTest {
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             processData(driver);
 
-            {
-                final KeyValueStore<String, Long> count = driver.getKeyValueStore("count");
+            final KeyValueStore<String, Long> count = driver.getKeyValueStore("count");
 
-                assertThat(count.get("1"), equalTo(3L));
-                assertThat(count.get("2"), equalTo(1L));
-                assertThat(count.get("3"), equalTo(2L));
-            }
-            {
-                final KeyValueStore<String, ValueAndTimestamp<Long>> count = driver.getTimestampedKeyValueStore("count");
-
-                assertThat(count.get("1"), equalTo(ValueAndTimestamp.make(3L, 10L)));
-                assertThat(count.get("2"), equalTo(ValueAndTimestamp.make(1L, 1L)));
-                assertThat(count.get("3"), equalTo(ValueAndTimestamp.make(2L, 9L)));
-            }
+            assertThat(count.get("1"), equalTo(3L));
+            assertThat(count.get("2"), equalTo(1L));
+            assertThat(count.get("3"), equalTo(2L));
         }
     }
 
@@ -457,20 +421,11 @@ public class KGroupedStreamImplTest {
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             processData(driver);
 
-            {
-                final KeyValueStore<String, String> reduced = driver.getKeyValueStore("reduce");
+            final KeyValueStore<String, String> reduced = driver.getKeyValueStore("reduce");
 
-                assertThat(reduced.get("1"), equalTo("A+C+D"));
-                assertThat(reduced.get("2"), equalTo("B"));
-                assertThat(reduced.get("3"), equalTo("E+F"));
-            }
-            {
-                final KeyValueStore<String, ValueAndTimestamp<String>> reduced = driver.getTimestampedKeyValueStore("reduce");
-
-                assertThat(reduced.get("1"), equalTo(ValueAndTimestamp.make("A+C+D", 10L)));
-                assertThat(reduced.get("2"), equalTo(ValueAndTimestamp.make("B", 1L)));
-                assertThat(reduced.get("3"), equalTo(ValueAndTimestamp.make("E+F", 9L)));
-            }
+            assertThat(reduced.get("1"), equalTo("A+C+D"));
+            assertThat(reduced.get("2"), equalTo("B"));
+            assertThat(reduced.get("3"), equalTo("E+F"));
         }
     }
 
@@ -509,110 +464,84 @@ public class KGroupedStreamImplTest {
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             processData(driver);
 
-            {
-                final KeyValueStore<String, String> aggregate = driver.getKeyValueStore("aggregate");
+            final KeyValueStore<String, String> aggregate = driver.getKeyValueStore("aggregate");
 
-                assertThat(aggregate.get("1"), equalTo("0+A+C+D"));
-                assertThat(aggregate.get("2"), equalTo("0+B"));
-                assertThat(aggregate.get("3"), equalTo("0+E+F"));
-            }
-            {
-                final KeyValueStore<String, ValueAndTimestamp<String>> aggregate = driver.getTimestampedKeyValueStore("aggregate");
-
-                assertThat(aggregate.get("1"), equalTo(ValueAndTimestamp.make("0+A+C+D", 10L)));
-                assertThat(aggregate.get("2"), equalTo(ValueAndTimestamp.make("0+B", 1L)));
-                assertThat(aggregate.get("3"), equalTo(ValueAndTimestamp.make("0+E+F", 9L)));
-            }
+            assertThat(aggregate.get("1"), equalTo("0+A+C+D"));
+            assertThat(aggregate.get("2"), equalTo("0+B"));
+            assertThat(aggregate.get("3"), equalTo("0+E+F"));
         }
     }
 
     @SuppressWarnings("unchecked")
     @Test
     public void shouldAggregateWithDefaultSerdes() {
-        final MockProcessorSupplier<String, String> supplier = new MockProcessorSupplier<>();
+        final Map<String, String> results = new HashMap<>();
         groupedStream
             .aggregate(MockInitializer.STRING_INIT, MockAggregator.TOSTRING_ADDER)
             .toStream()
-            .process(supplier);
+            .foreach(results::put);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             processData(driver);
 
-            assertThat(
-                supplier.theCapturedProcessor().lastValueAndTimestampPerKey.get("1"),
-                equalTo(ValueAndTimestamp.make("0+A+C+D", 10L)));
-            assertThat(
-                supplier.theCapturedProcessor().lastValueAndTimestampPerKey.get("2"),
-                equalTo(ValueAndTimestamp.make("0+B", 1L)));
-            assertThat(
-                supplier.theCapturedProcessor().lastValueAndTimestampPerKey.get("3"),
-                equalTo(ValueAndTimestamp.make("0+E+F", 9L)));
+            assertThat(results.get("1"), equalTo("0+A+C+D"));
+            assertThat(results.get("2"), equalTo("0+B"));
+            assertThat(results.get("3"), equalTo("0+E+F"));
         }
     }
 
     private void processData(final TopologyTestDriver driver) {
-        driver.pipeInput(recordFactory.create(TOPIC, "1", "A", 5L));
-        driver.pipeInput(recordFactory.create(TOPIC, "2", "B", 1L));
-        driver.pipeInput(recordFactory.create(TOPIC, "1", "C", 3L));
-        driver.pipeInput(recordFactory.create(TOPIC, "1", "D", 10L));
-        driver.pipeInput(recordFactory.create(TOPIC, "3", "E", 8L));
-        driver.pipeInput(recordFactory.create(TOPIC, "3", "F", 9L));
+        driver.pipeInput(recordFactory.create(TOPIC, "1", "A"));
+        driver.pipeInput(recordFactory.create(TOPIC, "2", "B"));
+        driver.pipeInput(recordFactory.create(TOPIC, "1", "C"));
+        driver.pipeInput(recordFactory.create(TOPIC, "1", "D"));
+        driver.pipeInput(recordFactory.create(TOPIC, "3", "E"));
+        driver.pipeInput(recordFactory.create(TOPIC, "3", "F"));
         driver.pipeInput(recordFactory.create(TOPIC, "3", (String) null));
     }
 
-    private void doCountWindowed(final  MockProcessorSupplier<Windowed<String>, Long> supplier) {
+    private void doCountWindowed(final List<KeyValue<Windowed<String>, Long>> results) {
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            driver.pipeInput(recordFactory.create(TOPIC, "1", "A", 0L));
-            driver.pipeInput(recordFactory.create(TOPIC, "1", "A", 499L));
-            driver.pipeInput(recordFactory.create(TOPIC, "1", "A", 100L));
-            driver.pipeInput(recordFactory.create(TOPIC, "2", "B", 0L));
-            driver.pipeInput(recordFactory.create(TOPIC, "2", "B", 100L));
-            driver.pipeInput(recordFactory.create(TOPIC, "2", "B", 200L));
-            driver.pipeInput(recordFactory.create(TOPIC, "3", "C", 1L));
-            driver.pipeInput(recordFactory.create(TOPIC, "1", "A", 500L));
-            driver.pipeInput(recordFactory.create(TOPIC, "1", "A", 500L));
-            driver.pipeInput(recordFactory.create(TOPIC, "2", "B", 500L));
-            driver.pipeInput(recordFactory.create(TOPIC, "2", "B", 500L));
-            driver.pipeInput(recordFactory.create(TOPIC, "3", "B", 100L));
+            driver.pipeInput(recordFactory.create(TOPIC, "1", "A", 0));
+            driver.pipeInput(recordFactory.create(TOPIC, "2", "B", 0));
+            driver.pipeInput(recordFactory.create(TOPIC, "3", "C", 0));
+            driver.pipeInput(recordFactory.create(TOPIC, "1", "A", 500));
+            driver.pipeInput(recordFactory.create(TOPIC, "1", "A", 500));
+            driver.pipeInput(recordFactory.create(TOPIC, "2", "B", 500));
+            driver.pipeInput(recordFactory.create(TOPIC, "2", "B", 500));
         }
-        assertThat(supplier.theCapturedProcessor().processed, equalTo(Arrays.asList(
-            MockProcessor.makeRecord(new Windowed<>("1", new TimeWindow(0L, 500L)), 1L, 0L),
-            MockProcessor.makeRecord(new Windowed<>("1", new TimeWindow(0L, 500L)), 2L, 499L),
-            MockProcessor.makeRecord(new Windowed<>("1", new TimeWindow(0L, 500L)), 3L, 499L),
-            MockProcessor.makeRecord(new Windowed<>("2", new TimeWindow(0L, 500L)), 1L, 0L),
-            MockProcessor.makeRecord(new Windowed<>("2", new TimeWindow(0L, 500L)), 2L, 100L),
-            MockProcessor.makeRecord(new Windowed<>("2", new TimeWindow(0L, 500L)), 3L, 200L),
-            MockProcessor.makeRecord(new Windowed<>("3", new TimeWindow(0L, 500L)), 1L, 1L),
-            MockProcessor.makeRecord(new Windowed<>("1", new TimeWindow(500L, 1000L)), 1L, 500L),
-            MockProcessor.makeRecord(new Windowed<>("1", new TimeWindow(500L, 1000L)), 2L, 500L),
-            MockProcessor.makeRecord(new Windowed<>("2", new TimeWindow(500L, 1000L)), 1L, 500L),
-            MockProcessor.makeRecord(new Windowed<>("2", new TimeWindow(500L, 1000L)), 2L, 500L),
-            MockProcessor.makeRecord(new Windowed<>("3", new TimeWindow(0L, 500L)), 2L, 100L)
+        assertThat(results, equalTo(Arrays.asList(
+                KeyValue.pair(new Windowed<>("1", new TimeWindow(0, 500)), 1L),
+                KeyValue.pair(new Windowed<>("2", new TimeWindow(0, 500)), 1L),
+                KeyValue.pair(new Windowed<>("3", new TimeWindow(0, 500)), 1L),
+                KeyValue.pair(new Windowed<>("1", new TimeWindow(500, 1000)), 1L),
+                KeyValue.pair(new Windowed<>("1", new TimeWindow(500, 1000)), 2L),
+                KeyValue.pair(new Windowed<>("2", new TimeWindow(500, 1000)), 1L),
+                KeyValue.pair(new Windowed<>("2", new TimeWindow(500, 1000)), 2L)
         )));
     }
 
     @Test
     public void shouldCountWindowed() {
-        final MockProcessorSupplier<Windowed<String>, Long> supplier = new MockProcessorSupplier<>();
+        final List<KeyValue<Windowed<String>, Long>> results = new ArrayList<>();
         groupedStream
             .windowedBy(TimeWindows.of(ofMillis(500L)))
             .count(Materialized.as("aggregate-by-key-windowed"))
             .toStream()
-            .process(supplier);
+            .foreach((key, value) -> results.add(KeyValue.pair(key, value)));
 
-        doCountWindowed(supplier);
+        doCountWindowed(results);
     }
 
     @Test
     public void shouldCountWindowedWithInternalStoreName() {
-        final MockProcessorSupplier<Windowed<String>, Long> supplier = new MockProcessorSupplier<>();
-        final List<KeyValue<Windowed<String>, KeyValue<Long, Long>>> results = new ArrayList<>();
+        final List<KeyValue<Windowed<String>, Long>> results = new ArrayList<>();
         groupedStream
             .windowedBy(TimeWindows.of(ofMillis(500L)))
             .count()
             .toStream()
-            .process(supplier);
+            .foreach((key, value) -> results.add(KeyValue.pair(key, value)));
 
-        doCountWindowed(supplier);
+        doCountWindowed(results);
     }
 }

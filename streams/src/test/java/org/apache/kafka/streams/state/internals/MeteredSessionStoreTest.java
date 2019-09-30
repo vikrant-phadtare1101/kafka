@@ -34,6 +34,7 @@ import org.apache.kafka.streams.processor.internals.MockStreamsMetrics;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.SessionStore;
 import org.apache.kafka.test.KeyValueIteratorStub;
+import org.easymock.EasyMock;
 import org.easymock.EasyMockRunner;
 import org.easymock.Mock;
 import org.easymock.MockType;
@@ -46,18 +47,9 @@ import java.util.Map;
 
 import static org.apache.kafka.common.utils.Utils.mkEntry;
 import static org.apache.kafka.common.utils.Utils.mkMap;
-import static org.easymock.EasyMock.anyObject;
-import static org.easymock.EasyMock.aryEq;
-import static org.easymock.EasyMock.eq;
-import static org.easymock.EasyMock.expect;
-import static org.easymock.EasyMock.expectLastCall;
-import static org.easymock.EasyMock.mock;
-import static org.easymock.EasyMock.replay;
-import static org.easymock.EasyMock.verify;
 import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(EasyMockRunner.class)
@@ -80,22 +72,22 @@ public class MeteredSessionStoreTest {
     private final byte[] keyBytes = key.getBytes();
     private final Windowed<Bytes> windowedKeyBytes = new Windowed<>(Bytes.wrap(keyBytes), new SessionWindow(0, 0));
 
+
     @Before
     public void before() {
-        metered = new MeteredSessionStore<>(
-            inner,
-            "scope",
-            Serdes.String(),
-            Serdes.String(),
-            new MockTime());
+        metered = new MeteredSessionStore<>(inner,
+                                            "scope",
+                                            Serdes.String(),
+                                            Serdes.String(),
+                                            new MockTime());
         metrics.config().recordLevel(Sensor.RecordingLevel.DEBUG);
-        expect(context.metrics()).andReturn(new MockStreamsMetrics(metrics));
-        expect(context.taskId()).andReturn(taskId);
-        expect(inner.name()).andReturn("metered").anyTimes();
+        EasyMock.expect(context.metrics()).andReturn(new MockStreamsMetrics(metrics));
+        EasyMock.expect(context.taskId()).andReturn(taskId);
+        EasyMock.expect(inner.name()).andReturn("metered").anyTimes();
     }
 
     private void init() {
-        replay(inner, context);
+        EasyMock.replay(inner, context);
         metered.init(context, metered);
     }
 
@@ -112,20 +104,20 @@ public class MeteredSessionStoreTest {
 
     @Test
     public void shouldWriteBytesToInnerStoreAndRecordPutMetric() {
-        inner.put(eq(windowedKeyBytes), aryEq(keyBytes));
-        expectLastCall();
+        inner.put(EasyMock.eq(windowedKeyBytes), EasyMock.aryEq(keyBytes));
+        EasyMock.expectLastCall();
         init();
 
         metered.put(new Windowed<>(key, new SessionWindow(0, 0)), key);
 
         final KafkaMetric metric = metric("put-rate");
         assertTrue(((Double) metric.metricValue()) > 0);
-        verify(inner);
+        EasyMock.verify(inner);
     }
 
     @Test
     public void shouldFindSessionsFromStoreAndRecordFetchMetric() {
-        expect(inner.findSessions(Bytes.wrap(keyBytes), 0, 0))
+        EasyMock.expect(inner.findSessions(Bytes.wrap(keyBytes), 0, 0))
                 .andReturn(new KeyValueIteratorStub<>(
                         Collections.singleton(KeyValue.pair(windowedKeyBytes, keyBytes)).iterator()));
         init();
@@ -137,12 +129,12 @@ public class MeteredSessionStoreTest {
 
         final KafkaMetric metric = metric("fetch-rate");
         assertTrue((Double) metric.metricValue() > 0);
-        verify(inner);
+        EasyMock.verify(inner);
     }
 
     @Test
     public void shouldFindSessionRangeFromStoreAndRecordFetchMetric() {
-        expect(inner.findSessions(Bytes.wrap(keyBytes), Bytes.wrap(keyBytes), 0, 0))
+        EasyMock.expect(inner.findSessions(Bytes.wrap(keyBytes), Bytes.wrap(keyBytes), 0, 0))
                 .andReturn(new KeyValueIteratorStub<>(
                         Collections.singleton(KeyValue.pair(windowedKeyBytes, keyBytes)).iterator()));
         init();
@@ -154,13 +146,13 @@ public class MeteredSessionStoreTest {
 
         final KafkaMetric metric = metric("fetch-rate");
         assertTrue((Double) metric.metricValue() > 0);
-        verify(inner);
+        EasyMock.verify(inner);
     }
 
     @Test
     public void shouldRemoveFromStoreAndRecordRemoveMetric() {
         inner.remove(windowedKeyBytes);
-        expectLastCall();
+        EasyMock.expectLastCall();
 
         init();
 
@@ -168,12 +160,12 @@ public class MeteredSessionStoreTest {
 
         final KafkaMetric metric = metric("remove-rate");
         assertTrue((Double) metric.metricValue() > 0);
-        verify(inner);
+        EasyMock.verify(inner);
     }
 
     @Test
     public void shouldFetchForKeyAndRecordFetchMetric() {
-        expect(inner.fetch(Bytes.wrap(keyBytes)))
+        EasyMock.expect(inner.findSessions(Bytes.wrap(keyBytes), 0, Long.MAX_VALUE))
                 .andReturn(new KeyValueIteratorStub<>(
                         Collections.singleton(KeyValue.pair(windowedKeyBytes, keyBytes)).iterator()));
         init();
@@ -185,12 +177,12 @@ public class MeteredSessionStoreTest {
 
         final KafkaMetric metric = metric("fetch-rate");
         assertTrue((Double) metric.metricValue() > 0);
-        verify(inner);
+        EasyMock.verify(inner);
     }
 
     @Test
     public void shouldFetchRangeFromStoreAndRecordFetchMetric() {
-        expect(inner.fetch(Bytes.wrap(keyBytes), Bytes.wrap(keyBytes)))
+        EasyMock.expect(inner.findSessions(Bytes.wrap(keyBytes), Bytes.wrap(keyBytes), 0, Long.MAX_VALUE))
                 .andReturn(new KeyValueIteratorStub<>(
                         Collections.singleton(KeyValue.pair(windowedKeyBytes, keyBytes)).iterator()));
         init();
@@ -202,7 +194,7 @@ public class MeteredSessionStoreTest {
 
         final KafkaMetric metric = metric("fetch-rate");
         assertTrue((Double) metric.metricValue() > 0);
-        verify(inner);
+        EasyMock.verify(inner);
     }
 
     @Test
@@ -210,14 +202,6 @@ public class MeteredSessionStoreTest {
         init();
         final KafkaMetric metric = metric("restore-rate");
         assertTrue((Double) metric.metricValue() > 0);
-    }
-
-    @Test
-    public void shouldNotThrowNullPointerExceptionIfFetchSessionReturnsNull() {
-        expect(inner.fetchSession(Bytes.wrap("a".getBytes()), 0, Long.MAX_VALUE)).andReturn(null);
-
-        init();
-        assertNull(metered.fetchSession("a", 0, Long.MAX_VALUE));
     }
 
     @Test(expected = NullPointerException.class)
@@ -258,32 +242,6 @@ public class MeteredSessionStoreTest {
     @Test(expected = NullPointerException.class)
     public void shouldThrowNullPointerOnFindSessionsRangeIfToIsNull() {
         metered.findSessions("a", null, 0, 0);
-    }
-
-    private interface CachedSessionStore extends SessionStore<Bytes, byte[]>, CachedStateStore<byte[], byte[]> { }
-
-    @SuppressWarnings("unchecked")
-    @Test
-    public void shouldSetFlushListenerOnWrappedCachingStore() {
-        final CachedSessionStore cachedSessionStore = mock(CachedSessionStore.class);
-
-        expect(cachedSessionStore.setFlushListener(anyObject(CacheFlushListener.class), eq(false))).andReturn(true);
-        replay(cachedSessionStore);
-
-        metered = new MeteredSessionStore<>(
-            cachedSessionStore,
-            "scope",
-            Serdes.String(),
-            Serdes.String(),
-            new MockTime());
-        assertTrue(metered.setFlushListener(null, false));
-
-        verify(cachedSessionStore);
-    }
-
-    @Test
-    public void shouldNotSetFlushListenerOnWrappedNoneCachingStore() {
-        assertFalse(metered.setFlushListener(null, false));
     }
 
     private KafkaMetric metric(final String name) {

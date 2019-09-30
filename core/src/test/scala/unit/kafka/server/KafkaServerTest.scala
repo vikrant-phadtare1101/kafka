@@ -20,7 +20,6 @@ package kafka.server
 import kafka.utils.TestUtils
 import kafka.zk.ZooKeeperTestHarness
 import org.junit.Test
-import org.scalatest.Assertions.intercept
 
 class KafkaServerTest extends ZooKeeperTestHarness {
 

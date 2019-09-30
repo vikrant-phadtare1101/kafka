@@ -37,9 +37,7 @@ public interface Serializer<T> extends Closeable {
      * @param configs configs in key/value pairs
      * @param isKey whether is for key or value
      */
-    default void configure(Map<String, ?> configs, boolean isKey) {
-        // intentionally left blank
-    }
+    void configure(Map<String, ?> configs, boolean isKey);
 
     /**
      * Convert {@code data} into a byte array.
@@ -64,11 +62,9 @@ public interface Serializer<T> extends Closeable {
 
     /**
      * Close this serializer.
-     * <p>
+     *
      * This method must be idempotent as it may be called multiple times.
      */
     @Override
-    default void close() {
-        // intentionally left blank
-    }
+    void close();
 }

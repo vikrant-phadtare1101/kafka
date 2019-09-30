@@ -20,7 +20,7 @@ import org.apache.kafka.streams.kstream.Suppressed;
 
 import java.util.Objects;
 
-public class EagerBufferConfigImpl extends BufferConfigInternal<Suppressed.EagerBufferConfig> implements Suppressed.EagerBufferConfig {
+public class EagerBufferConfigImpl extends BufferConfigInternal {
 
     private final long maxRecords;
     private final long maxBytes;
@@ -31,12 +31,12 @@ public class EagerBufferConfigImpl extends BufferConfigInternal<Suppressed.Eager
     }
 
     @Override
-    public Suppressed.EagerBufferConfig withMaxRecords(final long recordLimit) {
+    public Suppressed.BufferConfig withMaxRecords(final long recordLimit) {
         return new EagerBufferConfigImpl(recordLimit, maxBytes);
     }
 
     @Override
-    public Suppressed.EagerBufferConfig withMaxBytes(final long byteLimit) {
+    public Suppressed.BufferConfig withMaxBytes(final long byteLimit) {
         return new EagerBufferConfigImpl(maxRecords, byteLimit);
     }
 

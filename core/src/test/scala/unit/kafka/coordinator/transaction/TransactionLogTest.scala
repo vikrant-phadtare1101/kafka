@@ -22,11 +22,11 @@ import org.apache.kafka.common.record.{CompressionType, SimpleRecord, MemoryReco
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import org.scalatest.Assertions.intercept
+import org.scalatest.junit.JUnitSuite
 
 import scala.collection.JavaConverters._
 
-class TransactionLogTest {
+class TransactionLogTest extends JUnitSuite {
 
   val producerEpoch: Short = 0
   val transactionTimeoutMs: Int = 1000

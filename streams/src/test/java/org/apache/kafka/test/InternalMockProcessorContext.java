@@ -159,6 +159,7 @@ public class InternalMockProcessorContext extends AbstractProcessorContext imple
         this.valSerde = valSerde;
     }
 
+    // serdes will override whatever specified in the configs
     @Override
     public Serde<?> keySerde() {
         return keySerde;
@@ -178,6 +179,7 @@ public class InternalMockProcessorContext extends AbstractProcessorContext imple
         if (stateDir == null) {
             throw new UnsupportedOperationException("State directory not specified");
         }
+
         return stateDir;
     }
 
@@ -193,8 +195,8 @@ public class InternalMockProcessorContext extends AbstractProcessorContext imple
         return storeMap.get(name);
     }
 
+    @SuppressWarnings("deprecation")
     @Override
-    @Deprecated
     public Cancellable schedule(final long interval, final PunctuationType type, final Punctuator callback) {
         throw new UnsupportedOperationException("schedule() not supported.");
     }
@@ -207,24 +209,22 @@ public class InternalMockProcessorContext extends AbstractProcessorContext imple
     }
 
     @Override
-    public void commit() {}
+    public void commit() { }
 
-    @SuppressWarnings("unchecked")
     @Override
+    @SuppressWarnings("unchecked")
     public <K, V> void forward(final K key, final V value) {
         forward(key, value, To.all());
     }
 
-    @SuppressWarnings("unchecked")
     @Override
-    @Deprecated
+    @SuppressWarnings({"unchecked", "deprecation"})
     public <K, V> void forward(final K key, final V value, final int childIndex) {
         forward(key, value, To.child(((List<ProcessorNode>) currentNode().children()).get(childIndex).name()));
     }
 
-    @SuppressWarnings("unchecked")
     @Override
-    @Deprecated
+    @SuppressWarnings({"unchecked", "deprecation"})
     public <K, V> void forward(final K key, final V value, final String childName) {
         forward(key, value, To.child(childName));
     }

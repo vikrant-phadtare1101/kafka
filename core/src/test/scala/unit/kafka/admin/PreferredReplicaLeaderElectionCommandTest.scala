@@ -21,23 +21,21 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Paths}
 import java.util.Properties
 
-import kafka.common.AdminCommandFailedException
+import kafka.admin.PreferredReplicaLeaderElectionCommand
+import kafka.common.{AdminCommandFailedException, TopicAndPartition}
 import kafka.network.RequestChannel
 import kafka.security.auth._
 import kafka.server.{KafkaConfig, KafkaServer}
-import kafka.utils.{Logging, TestUtils}
+import kafka.utils.{Logging, TestUtils, ZkUtils}
 import kafka.zk.ZooKeeperTestHarness
 import org.apache.kafka.common.TopicPartition
-import org.apache.kafka.common.errors.ClusterAuthorizationException
-import org.apache.kafka.common.errors.PreferredLeaderNotAvailableException
-import org.apache.kafka.common.errors.TimeoutException
-import org.apache.kafka.common.errors.UnknownTopicOrPartitionException
+import org.apache.kafka.common.errors.{ClusterAuthorizationException, PreferredLeaderNotAvailableException, TimeoutException, UnknownTopicOrPartitionException}
 import org.apache.kafka.common.network.ListenerName
-import org.apache.kafka.test
 import org.junit.Assert._
 import org.junit.{After, Test}
 
-class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness with Logging {
+class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness with Logging /*with RackAwareTest*/ {
+
   var servers: Seq[KafkaServer] = Seq()
 
   @After
@@ -64,20 +62,13 @@ class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness wit
     // create brokers
     servers = brokerConfigs.map(b => TestUtils.createServer(KafkaConfig.fromProps(b)))
     // create the topic
-    partitionsAndAssignments.foreach { case (tp, assignment) =>
-      zkClient.createTopicAssignment(tp.topic,
-      Map(tp -> assignment))
+    partitionsAndAssignments.foreach { case (tp, assigment) =>
+      zkClient.createTopicAssignment(tp.topic(),
+      Map(tp -> assigment))
     }
     // wait until replica log is created on every broker
-    TestUtils.waitUntilTrue(
-      () =>
-        servers.forall { server =>
-          partitionsAndAssignments.forall { partitionAndAssignment =>
-            server.getLogManager().getLog(partitionAndAssignment._1).isDefined
-          }
-        },
-      "Replicas for topic test not created"
-    )
+    TestUtils.waitUntilTrue(() => servers.forall(server => partitionsAndAssignments.forall(partitionAndAssignment => server.getLogManager().getLog(partitionAndAssignment._1).isDefined)),
+      "Replicas for topic test not created")
   }
 
   /** Bounce the given targetServer and wait for all servers to get metadata for the given partition */
@@ -98,11 +89,8 @@ class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness wit
     servers.find(p => p.kafkaController.isActive)
   }
 
-  private def awaitLeader(topicPartition: TopicPartition, timeoutMs: Long = test.TestUtils.DEFAULT_MAX_WAIT_MS): Int = {
-    TestUtils.awaitValue(() => {
-      servers.head.metadataCache.getPartitionInfo(topicPartition.topic, topicPartition.partition)
-          .map(_.basePartitionState.leader)
-    }, s"Timed out waiting to find current leader of $topicPartition", timeoutMs)
+  private def getLeader(topicPartition: TopicPartition) = {
+    servers(0).metadataCache.getPartitionInfo(topicPartition.topic(), topicPartition.partition()).get.basePartitionState.leader
   }
 
   private def bootstrapServer(broker: Int = 0): String = {
@@ -122,11 +110,11 @@ class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness wit
     createTestTopicAndCluster(testPartitionAndAssignment)
     bounceServer(testPartitionPreferredLeader, testPartition)
     // Check the leader for the partition is not the preferred one
-    assertNotEquals(testPartitionPreferredLeader, awaitLeader(testPartition))
+    assertNotEquals(testPartitionPreferredLeader, getLeader(testPartition))
     PreferredReplicaLeaderElectionCommand.run(Array(
       "--bootstrap-server", s"${bootstrapServer(1)},${bootstrapServer(0)}"))
     // Check the leader for the partition IS the preferred one
-    assertEquals(testPartitionPreferredLeader, awaitLeader(testPartition))
+    assertEquals(testPartitionPreferredLeader, getLeader(testPartition))
   }
 
   /** Test the case when an invalid broker is given for --bootstrap-broker */
@@ -149,17 +137,17 @@ class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness wit
     createTestTopicAndCluster(testPartitionAndAssignment)
     bounceServer(testPartitionPreferredLeader, testPartition)
     // Check the leader for the partition is not the preferred one
-    assertNotEquals(testPartitionPreferredLeader, awaitLeader(testPartition))
+    assertNotEquals(testPartitionPreferredLeader, getLeader(testPartition))
     PreferredReplicaLeaderElectionCommand.run(Array(
       "--bootstrap-server", bootstrapServer()))
     // Check the leader for the partition IS the preferred one
-    assertEquals(testPartitionPreferredLeader, awaitLeader(testPartition))
+    assertEquals(testPartitionPreferredLeader, getLeader(testPartition))
   }
 
-  private def toJsonFile(partitions: Set[TopicPartition]): File = {
+  private def toJsonFile(partitions: scala.collection.Set[TopicPartition]): File = {
     val jsonFile = File.createTempFile("preferredreplicaelection", ".js")
     jsonFile.deleteOnExit()
-    val jsonString = TestUtils.stringifyTopicPartitions(partitions)
+    val jsonString = ZkUtils.preferredReplicaLeaderElectionZkData(partitions.map(new TopicAndPartition(_)))
     debug("Using json: "+jsonString)
     Files.write(Paths.get(jsonFile.getAbsolutePath), jsonString.getBytes(StandardCharsets.UTF_8))
     jsonFile
@@ -171,7 +159,7 @@ class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness wit
     createTestTopicAndCluster(testPartitionAndAssignment)
     bounceServer(testPartitionPreferredLeader, testPartition)
     // Check the leader for the partition is not the preferred one
-    assertNotEquals(testPartitionPreferredLeader, awaitLeader(testPartition))
+    assertNotEquals(testPartitionPreferredLeader, getLeader(testPartition))
     val jsonFile = toJsonFile(testPartitionAndAssignment.keySet)
     try {
       PreferredReplicaLeaderElectionCommand.run(Array(
@@ -181,7 +169,7 @@ class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness wit
       jsonFile.delete()
     }
     // Check the leader for the partition IS the preferred one
-    assertEquals(testPartitionPreferredLeader, awaitLeader(testPartition))
+    assertEquals(testPartitionPreferredLeader, getLeader(testPartition))
   }
 
   /** Test the case where a topic does not exist */
@@ -221,8 +209,8 @@ class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness wit
     createTestTopicAndCluster(testPartitionAndAssignment)
     bounceServer(testPartitionPreferredLeader, testPartitionA)
     // Check the leader for the partition is not the preferred one
-    assertNotEquals(testPartitionPreferredLeader, awaitLeader(testPartitionA))
-    assertNotEquals(testPartitionPreferredLeader, awaitLeader(testPartitionB))
+    assertNotEquals(testPartitionPreferredLeader, getLeader(testPartitionA))
+    assertNotEquals(testPartitionPreferredLeader, getLeader(testPartitionB))
     val jsonFile = toJsonFile(testPartitionAndAssignment.keySet)
     try {
       PreferredReplicaLeaderElectionCommand.run(Array(
@@ -232,16 +220,16 @@ class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness wit
       jsonFile.delete()
     }
     // Check the leader for the partition IS the preferred one
-    assertEquals(testPartitionPreferredLeader, awaitLeader(testPartitionA))
-    assertEquals(testPartitionPreferredLeader, awaitLeader(testPartitionB))
+    assertEquals(testPartitionPreferredLeader, getLeader(testPartitionA))
+    assertEquals(testPartitionPreferredLeader, getLeader(testPartitionB))
   }
 
   /** What happens when the preferred replica is already the leader? */
   @Test
   def testNoopElection() {
     createTestTopicAndCluster(testPartitionAndAssignment)
-    // Don't bounce the server. Doublecheck the leader for the partition is the preferred one
-    assertEquals(testPartitionPreferredLeader, awaitLeader(testPartition))
+    // Don't bounce the server. Doublec heck the leader for the partition is the preferred one
+    assertEquals(testPartitionPreferredLeader, getLeader(testPartition))
     val jsonFile = toJsonFile(testPartitionAndAssignment.keySet)
     try {
       // Now do the election, even though the preferred replica is *already* the leader
@@ -249,7 +237,7 @@ class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness wit
         "--bootstrap-server", bootstrapServer(),
         "--path-to-json-file", jsonFile.getAbsolutePath))
       // Check the leader for the partition still is the preferred one
-      assertEquals(testPartitionPreferredLeader, awaitLeader(testPartition))
+      assertEquals(testPartitionPreferredLeader, getLeader(testPartition))
     } finally {
       jsonFile.delete()
     }
@@ -261,7 +249,7 @@ class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness wit
     createTestTopicAndCluster(testPartitionAndAssignment)
     bounceServer(testPartitionPreferredLeader, testPartition)
     // Check the leader for the partition is not the preferred one
-    val leader = awaitLeader(testPartition)
+    val leader = getLeader(testPartition)
     assertNotEquals(testPartitionPreferredLeader, leader)
     // Now kill the preferred one
     servers(testPartitionPreferredLeader).shutdown()
@@ -279,7 +267,7 @@ class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness wit
         assertTrue(suppressed.isInstanceOf[PreferredLeaderNotAvailableException])
         assertTrue(suppressed.getMessage, suppressed.getMessage.contains("Failed to elect leader for partition test-0 under strategy PreferredReplicaPartitionLeaderElectionStrategy"))
         // Check we still have the same leader
-        assertEquals(leader, awaitLeader(testPartition))
+        assertEquals(leader, getLeader(testPartition))
     } finally {
       jsonFile.delete()
     }
@@ -291,7 +279,7 @@ class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness wit
     createTestTopicAndCluster(testPartitionAndAssignment)
     bounceServer(testPartitionPreferredLeader, testPartition)
     // Check the leader for the partition is not the preferred one
-    val leader = awaitLeader(testPartition)
+    val leader = getLeader(testPartition)
     assertNotEquals(testPartitionPreferredLeader, leader)
     // Now kill the controller just before we trigger the election
     val controller = getController().get.config.brokerId
@@ -305,9 +293,10 @@ class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness wit
       fail();
     } catch {
       case e: AdminCommandFailedException =>
-        assertEquals("Timeout waiting for election results", e.getMessage)
+        assertEquals("1 preferred replica(s) could not be elected", e.getMessage)
+        assertTrue(e.getSuppressed()(0).getMessage.contains("Timed out waiting for a node assignment"))
         // Check we still have the same leader
-        assertEquals(leader, awaitLeader(testPartition))
+        assertEquals(leader, getLeader(testPartition))
     } finally {
       jsonFile.delete()
     }
@@ -319,10 +308,10 @@ class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness wit
     createTestTopicAndCluster(testPartitionAndAssignment, Some(classOf[PreferredReplicaLeaderElectionCommandTestAuthorizer].getName))
     bounceServer(testPartitionPreferredLeader, testPartition)
     // Check the leader for the partition is not the preferred one
-    val leader = awaitLeader(testPartition)
+    val leader = getLeader(testPartition)
     assertNotEquals(testPartitionPreferredLeader, leader)
     // Check the leader for the partition is not the preferred one
-    assertNotEquals(testPartitionPreferredLeader, awaitLeader(testPartition))
+    assertNotEquals(testPartitionPreferredLeader, getLeader(testPartition))
     val jsonFile = toJsonFile(testPartitionAndAssignment.keySet)
     try {
       PreferredReplicaLeaderElectionCommand.run(Array(
@@ -331,46 +320,15 @@ class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness wit
       fail();
     } catch {
       case e: AdminCommandFailedException =>
-        assertEquals("Not authorized to perform leader election", e.getMessage)
-        assertTrue(e.getCause().isInstanceOf[ClusterAuthorizationException])
+        assertEquals("1 preferred replica(s) could not be elected", e.getMessage)
+        assertTrue(e.getSuppressed()(0).isInstanceOf[ClusterAuthorizationException])
         // Check we still have the same leader
-        assertEquals(leader, awaitLeader(testPartition))
+        assertEquals(leader, getLeader(testPartition))
     } finally {
       jsonFile.delete()
     }
   }
 
-  @Test
-  def testPreferredReplicaJsonData() {
-    // write preferred replica json data to zk path
-    val partitionsForPreferredReplicaElection = Set(new TopicPartition("test", 1), new TopicPartition("test2", 1))
-    PreferredReplicaLeaderElectionCommand.writePreferredReplicaElectionData(zkClient, partitionsForPreferredReplicaElection)
-    // try to read it back and compare with what was written
-    val partitionsUndergoingPreferredReplicaElection = zkClient.getPreferredReplicaElection
-    assertEquals("Preferred replica election ser-de failed", partitionsForPreferredReplicaElection,
-      partitionsUndergoingPreferredReplicaElection)
-  }
-
-  @Test
-  def testBasicPreferredReplicaElection() {
-    val expectedReplicaAssignment = Map(0  -> List(0, 1, 2))
-    val topic = "test"
-    val partition = 0
-    val preferredReplica = 0
-    // create brokers
-    val brokerRack = Map(0 -> "rack0", 1 -> "rack1", 2 -> "rack2")
-    val serverConfigs = TestUtils.createBrokerConfigs(3, zkConnect, false, rackInfo = brokerRack).map(KafkaConfig.fromProps)
-    // create the topic
-    adminZkClient.createTopicWithAssignment(topic, config = new Properties, expectedReplicaAssignment)
-    servers = serverConfigs.reverseMap(s => TestUtils.createServer(s))
-    // broker 2 should be the leader since it was started first
-    val currentLeader = TestUtils.waitUntilLeaderIsElectedOrChanged(zkClient, topic, partition, oldLeaderOpt = None)
-    // trigger preferred replica election
-    val preferredReplicaElection = new PreferredReplicaLeaderElectionCommand(zkClient, Set(new TopicPartition(topic, partition)))
-    preferredReplicaElection.moveLeaderToPreferredReplica()
-    val newLeader = TestUtils.waitUntilLeaderIsElectedOrChanged(zkClient, topic, partition, oldLeaderOpt = Some(currentLeader))
-    assertEquals("Preferred replica election failed", preferredReplica, newLeader)
-  }
 }
 
 class PreferredReplicaLeaderElectionCommandTestAuthorizer extends SimpleAclAuthorizer {

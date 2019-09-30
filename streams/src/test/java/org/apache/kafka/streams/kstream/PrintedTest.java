@@ -36,7 +36,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 
 import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.Assert.assertThat;
 
 public class PrintedTest {
 

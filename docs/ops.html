@@ -453,7 +453,7 @@
   There are two interfaces that can be used to engage a throttle. The simplest, and safest, is to apply a throttle when invoking the kafka-reassign-partitions.sh, but kafka-configs.sh can also be used to view and alter the throttle values directly.
   <p></p>
   So for example, if you were to execute a rebalance, with the below command, it would move partitions at no more than 50MB/s.
-  <pre class="brush: bash;">$ bin/kafka-reassign-partitions.sh --zookeeper localhost:2181 --execute --reassignment-json-file bigger-cluster.json —throttle 50000000</pre>
+  <pre class="brush: bash;">$ bin/kafka-reassign-partitions.sh --zookeeper myhost:2181--execute --reassignment-json-file bigger-cluster.json —throttle 50000000</pre>
   When you execute this script you will see the throttle engage:
   <pre class="brush: bash;">
   The throttle limit was set to 50000000 B/s
@@ -786,16 +786,6 @@
   <code>records-consumed-rate</code> has a corresponding metric named <code>records-consumed-total</code>.
   <p>
   The easiest way to see the available metrics is to fire up jconsole and point it at a running kafka client or server; this will allow browsing all metrics with JMX.
-
-  <h4><a id="remote_jmx" href="#remote_jmx">Security Considerations for Remote Monitoring using JMX</a></h4>
-  Apache Kafka disables remote JMX by default. You can enable remote monitoring using JMX by setting the environment variable
-  <code>JMX_PORT</code> for processes started using the CLI or standard Java system properties to enable remote JMX programmatically.
-  You must enable security when enabling remote JMX in production scenarios to ensure that unauthorized users cannot monitor or
-  control your broker or application as well as the platform on which these are running. Note that authentication is disabled for
-  JMX by default in Kafka and security configs must be overridden for production deployments by setting the environment variable
-  <code>KAFKA_JMX_OPTS</code> for processes started using the CLI or by setting appropriate Java system properties. See
-  <a href=https://docs.oracle.com/javase/8/docs/technotes/guides/management/agent.html">Monitoring and Management Using JMX Technology</a>
-  for details on securing JMX.
   <p>
   We do graphing and alerting on the following metrics:
   <table class="data-table">
@@ -873,11 +863,6 @@
       <tr>
         <td># of under minIsr partitions (|ISR| &lt min.insync.replicas)</td>
         <td>kafka.server:type=ReplicaManager,name=UnderMinIsrPartitionCount</td>
-        <td>0</td>
-      </tr>
-      <tr>
-        <td># of at minIsr partitions (|ISR| = min.insync.replicas)</td>
-        <td>kafka.server:type=ReplicaManager,name=AtMinIsrPartitionCount</td>
         <td>0</td>
       </tr>
       <tr>
@@ -1229,62 +1214,62 @@
       <tr>
         <td>outgoing-byte-rate</td>
         <td>The average number of outgoing bytes sent per second for a node.</td>
-        <td>kafka.[producer|consumer|connect]:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
+        <td>kafka.producer:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
       </tr>
       <tr>
         <td>outgoing-byte-total</td>
         <td>The total number of outgoing bytes sent for a node.</td>
-        <td>kafka.[producer|consumer|connect]:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
+        <td>kafka.producer:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
       </tr>
       <tr>
         <td>request-rate</td>
         <td>The average number of requests sent per second for a node.</td>
-        <td>kafka.[producer|consumer|connect]:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
+        <td>kafka.producer:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
       </tr>
       <tr>
         <td>request-total</td>
         <td>The total number of requests sent for a node.</td>
-        <td>kafka.[producer|consumer|connect]:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
+        <td>kafka.producer:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
       </tr>
       <tr>
         <td>request-size-avg</td>
         <td>The average size of all requests in the window for a node.</td>
-        <td>kafka.[producer|consumer|connect]:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
+        <td>kafka.producer:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
       </tr>
       <tr>
         <td>request-size-max</td>
         <td>The maximum size of any request sent in the window for a node.</td>
-        <td>kafka.[producer|consumer|connect]:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
+        <td>kafka.producer:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
       </tr>
       <tr>
         <td>incoming-byte-rate</td>
         <td>The average number of bytes received per second for a node.</td>
-        <td>kafka.[producer|consumer|connect]:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
+        <td>kafka.producer:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
       </tr>
       <tr>
         <td>incoming-byte-total</td>
         <td>The total number of bytes received for a node.</td>
-        <td>kafka.[producer|consumer|connect]:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
+        <td>kafka.producer:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
       </tr>
       <tr>
         <td>request-latency-avg</td>
         <td>The average request latency in ms for a node.</td>
-        <td>kafka.[producer|consumer|connect]:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
+        <td>kafka.producer:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
       </tr>
       <tr>
         <td>request-latency-max</td>
         <td>The maximum request latency in ms for a node.</td>
-        <td>kafka.[producer|consumer|connect]:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
+        <td>kafka.producer:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
       </tr>
       <tr>
         <td>response-rate</td>
         <td>Responses received per second for a node.</td>
-        <td>kafka.[producer|consumer|connect]:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
+        <td>kafka.producer:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
       </tr>
       <tr>
         <td>response-total</td>
         <td>Total responses received for a node.</td>
-        <td>kafka.[producer|consumer|connect]:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
+        <td>kafka.producer:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
       </tr>
     </tbody>
   </table>
@@ -1743,7 +1728,6 @@ All the following metrics have a recording level of <code>debug</code>:
   <ul>
     <li><code>in-memory-state</code></li>
     <li><code>in-memory-lru-state</code></li>
-    <li><code>in-memory-window-state</code></li>
     <li><code>rocksdb-state</code> (for RocksDB backed key-value store)</li>
     <li><code>rocksdb-window-state</code> (for RocksDB backed window store)</li>
     <li><code>rocksdb-session-state</code> (for RocksDB backed session store)</li>

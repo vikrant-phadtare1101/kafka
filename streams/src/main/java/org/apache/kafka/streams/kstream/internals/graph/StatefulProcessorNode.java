@@ -36,8 +36,11 @@ public class StatefulProcessorNode<K, V> extends ProcessorGraphNode<K, V> {
      */
     public StatefulProcessorNode(final String nodeName,
                                  final ProcessorParameters<K, V> processorParameters,
-                                 final String[] storeNames) {
-        super(nodeName, processorParameters);
+                                 final String[] storeNames,
+                                 final boolean repartitionRequired) {
+        super(nodeName,
+              processorParameters,
+              repartitionRequired);
 
         this.storeNames = storeNames;
         this.storeBuilder = null;
@@ -50,8 +53,11 @@ public class StatefulProcessorNode<K, V> extends ProcessorGraphNode<K, V> {
      */
     public StatefulProcessorNode(final String nodeName,
                                  final ProcessorParameters<K, V> processorParameters,
-                                 final StoreBuilder<? extends StateStore> materializedKTableStoreBuilder) {
-        super(nodeName, processorParameters);
+                                 final StoreBuilder<? extends StateStore> materializedKTableStoreBuilder,
+                                 final boolean repartitionRequired) {
+        super(nodeName,
+              processorParameters,
+              repartitionRequired);
 
         this.storeNames = null;
         this.storeBuilder = materializedKTableStoreBuilder;

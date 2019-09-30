@@ -21,7 +21,6 @@ import org.apache.kafka.streams.kstream.Produced;
 import org.apache.kafka.streams.processor.StreamPartitioner;
 
 public class ProducedInternal<K, V> extends Produced<K, V> {
-
     public ProducedInternal(final Produced<K, V> produced) {
         super(produced);
     }
@@ -37,9 +36,4 @@ public class ProducedInternal<K, V> extends Produced<K, V> {
     public StreamPartitioner<? super K, ? super V> streamPartitioner() {
         return partitioner;
     }
-
-    public String name() {
-        return processorName;
-    }
-
 }

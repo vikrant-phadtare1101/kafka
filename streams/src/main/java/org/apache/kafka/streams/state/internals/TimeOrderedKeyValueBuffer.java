@@ -17,23 +17,20 @@
 package org.apache.kafka.streams.state.internals;
 
 import org.apache.kafka.common.serialization.Serde;
-import org.apache.kafka.streams.kstream.internals.Change;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.internals.ProcessorRecordContext;
-import org.apache.kafka.streams.state.ValueAndTimestamp;
 
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 public interface TimeOrderedKeyValueBuffer<K, V> extends StateStore {
-
     final class Eviction<K, V> {
         private final K key;
-        private final Change<V> value;
+        private final V value;
         private final ProcessorRecordContext recordContext;
 
-        Eviction(final K key, final Change<V> value, final ProcessorRecordContext recordContext) {
+        Eviction(final K key, final V value, final ProcessorRecordContext recordContext) {
             this.key = key;
             this.value = value;
             this.recordContext = recordContext;
@@ -43,7 +40,7 @@ public interface TimeOrderedKeyValueBuffer<K, V> extends StateStore {
             return key;
         }
 
-        public Change<V> value() {
+        public V value() {
             return value;
         }
 
@@ -76,9 +73,7 @@ public interface TimeOrderedKeyValueBuffer<K, V> extends StateStore {
 
     void evictWhile(final Supplier<Boolean> predicate, final Consumer<Eviction<K, V>> callback);
 
-    Maybe<ValueAndTimestamp<V>> priorValueForBuffered(K key);
-
-    void put(long time, K key, Change<V> value, ProcessorRecordContext recordContext);
+    void put(long time, K key, V value, ProcessorRecordContext recordContext);
 
     int numRecords();
 

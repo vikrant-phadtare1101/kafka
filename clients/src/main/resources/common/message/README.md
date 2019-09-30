@@ -144,9 +144,7 @@ been set:
 
 * Array fields default to empty.
 
-You can specify "null" as a default value for a string field by specifing the
-literal string "null".  Note that you can only specify null as a default if all
-versions of the field are nullable.
+Null is never used as a default for any field.
 
 Custom Default Values
 ---------------------

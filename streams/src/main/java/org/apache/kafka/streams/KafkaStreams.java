@@ -155,23 +155,23 @@ public class KafkaStreams implements AutoCloseable {
      *
      * <pre>
      *                 +--------------+
-     *         +&lt;----- | Created (0)  |
+     *         +<----- | Created (0)  |
      *         |       +-----+--------+
      *         |             |
      *         |             v
      *         |       +----+--+------+
      *         |       | Re-          |
-     *         +&lt;----- | Balancing (1)| --------&gt;+
+     *         +<----- | Balancing (1)| -------->+
      *         |       +-----+-+------+          |
      *         |             | ^                 |
      *         |             v |                 |
      *         |       +--------------+          v
-     *         |       | Running (2)  | --------&gt;+
+     *         |       | Running (2)  | -------->+
      *         |       +------+-------+          |
      *         |              |                  |
      *         |              v                  |
      *         |       +------+-------+     +----+-------+
-     *         +-----&gt; | Pending      |&lt;--- | Error (5)  |
+     *         +-----> | Pending      |<--- | Error (5)  |
      *                 | Shutdown (3) |     +------------+
      *                 +------+-------+
      *                        |
@@ -726,8 +726,7 @@ public class KafkaStreams implements AutoCloseable {
                                              streamsMetadataState,
                                              cacheSizePerThread,
                                              stateDirectory,
-                                             delegatingStateRestoreListener,
-                                             i + 1);
+                                             delegatingStateRestoreListener);
             threadState.put(threads[i].getId(), threads[i].state());
             storeProviders.add(new StreamThreadStateStoreProvider(threads[i]));
         }

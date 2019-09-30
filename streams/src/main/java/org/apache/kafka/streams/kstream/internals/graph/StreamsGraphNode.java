@@ -29,14 +29,17 @@ public abstract class StreamsGraphNode {
     private final Collection<StreamsGraphNode> childNodes = new LinkedHashSet<>();
     private final Collection<StreamsGraphNode> parentNodes = new LinkedHashSet<>();
     private final String nodeName;
+    private final boolean repartitionRequired;
     private boolean keyChangingOperation;
     private boolean valueChangingOperation;
     private boolean mergeNode;
     private Integer buildPriority;
     private boolean hasWrittenToTopology = false;
 
-    public StreamsGraphNode(final String nodeName) {
+    public StreamsGraphNode(final String nodeName,
+                            final boolean repartitionRequired) {
         this.nodeName = nodeName;
+        this.repartitionRequired = repartitionRequired;
     }
 
     public Collection<StreamsGraphNode> parentNodes() {
@@ -83,6 +86,10 @@ public abstract class StreamsGraphNode {
 
     public String nodeName() {
         return nodeName;
+    }
+
+    public boolean repartitionRequired() {
+        return repartitionRequired;
     }
 
     public boolean isKeyChangingOperation() {
@@ -133,6 +140,7 @@ public abstract class StreamsGraphNode {
         return "StreamsGraphNode{" +
                "nodeName='" + nodeName + '\'' +
                ", buildPriority=" + buildPriority +
+               ", repartitionRequired=" + repartitionRequired +
                ", hasWrittenToTopology=" + hasWrittenToTopology +
                ", keyChangingOperation=" + keyChangingOperation +
                ", valueChangingOperation=" + valueChangingOperation +

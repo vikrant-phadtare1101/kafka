@@ -19,10 +19,10 @@ package kafka.security.auth
 import kafka.common.KafkaException
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import org.scalatest.Assertions.fail
+import org.scalatest.junit.JUnitSuite
 import org.apache.kafka.common.resource.{ResourceType => JResourceType}
 
-class ResourceTypeTest {
+class ResourceTypeTest extends JUnitSuite {
 
   @Test
   def testFromString(): Unit = {

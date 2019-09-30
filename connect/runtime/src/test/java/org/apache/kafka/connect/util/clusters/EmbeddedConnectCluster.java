@@ -362,14 +362,13 @@ public class EmbeddedConnectCluster {
         try (OutputStreamWriter out = new OutputStreamWriter(httpCon.getOutputStream())) {
             out.write(body);
         }
-        if (httpCon.getResponseCode() < HttpURLConnection.HTTP_BAD_REQUEST) {
-            try (InputStream is = httpCon.getInputStream()) {
-                log.info("PUT response for URL={} is {}", url, responseToString(is));
+        try (InputStream is = httpCon.getInputStream()) {
+            int c;
+            StringBuilder response = new StringBuilder();
+            while ((c = is.read()) != -1) {
+                response.append((char) c);
             }
-        } else {
-            try (InputStream is = httpCon.getErrorStream()) {
-                log.info("PUT error response for URL={} is {}", url, responseToString(is));
-            }
+            log.info("Put response for URL={} is {}", url, response);
         }
         return httpCon.getResponseCode();
     }
@@ -393,7 +392,7 @@ public class EmbeddedConnectCluster {
             while ((c = is.read()) != -1) {
                 response.append((char) c);
             }
-            log.debug("GET response for URL={} is {}", url, response);
+            log.debug("Get response for URL={} is {}", url, response);
             return response.toString();
         } catch (IOException e) {
             Response.Status status = Response.Status.fromStatusCode(httpCon.getResponseCode());
@@ -412,15 +411,6 @@ public class EmbeddedConnectCluster {
         httpCon.setRequestMethod("DELETE");
         httpCon.connect();
         return httpCon.getResponseCode();
-    }
-
-    private String responseToString(InputStream stream) throws IOException {
-        int c;
-        StringBuilder response = new StringBuilder();
-        while ((c = stream.read()) != -1) {
-            response.append((char) c);
-        }
-        return response.toString();
     }
 
     public static class Builder {

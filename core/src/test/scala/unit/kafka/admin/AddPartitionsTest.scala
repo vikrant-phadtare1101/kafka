@@ -33,7 +33,7 @@ import scala.collection.JavaConverters._
 
 class AddPartitionsTest extends BaseRequestTest {
 
-  override def brokerCount: Int = 4
+  protected override def numBrokers: Int = 4
 
   val partitionId = 0
 

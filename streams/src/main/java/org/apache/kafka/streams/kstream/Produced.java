@@ -30,28 +30,24 @@ import java.util.Objects;
  * @param <K> key type
  * @param <V> value type
  */
-public class Produced<K, V> implements NamedOperation<Produced<K, V>> {
+public class Produced<K, V> {
 
     protected Serde<K> keySerde;
     protected Serde<V> valueSerde;
     protected StreamPartitioner<? super K, ? super V> partitioner;
-    protected String processorName;
 
     private Produced(final Serde<K> keySerde,
                      final Serde<V> valueSerde,
-                     final StreamPartitioner<? super K, ? super V> partitioner,
-                     final String processorName) {
+                     final StreamPartitioner<? super K, ? super V> partitioner) {
         this.keySerde = keySerde;
         this.valueSerde = valueSerde;
         this.partitioner = partitioner;
-        this.processorName = processorName;
     }
 
     protected Produced(final Produced<K, V> produced) {
         this.keySerde = produced.keySerde;
         this.valueSerde = produced.valueSerde;
         this.partitioner = produced.partitioner;
-        this.processorName = produced.processorName;
     }
 
     /**
@@ -66,7 +62,7 @@ public class Produced<K, V> implements NamedOperation<Produced<K, V>> {
      */
     public static <K, V> Produced<K, V> with(final Serde<K> keySerde,
                                              final Serde<V> valueSerde) {
-        return new Produced<>(keySerde, valueSerde, null, null);
+        return new Produced<>(keySerde, valueSerde, null);
     }
 
     /**
@@ -86,19 +82,7 @@ public class Produced<K, V> implements NamedOperation<Produced<K, V>> {
     public static <K, V> Produced<K, V> with(final Serde<K> keySerde,
                                              final Serde<V> valueSerde,
                                              final StreamPartitioner<? super K, ? super V> partitioner) {
-        return new Produced<>(keySerde, valueSerde, partitioner, null);
-    }
-
-    /**
-     * Create an instance of {@link Produced} with provided processor name.
-     *
-     * @param processorName the processor name to be used. If {@code null} a default processor name will be generated
-     * @param <K>         key type
-     * @param <V>         value type
-     * @return a new instance of {@link Produced}
-     */
-    public static <K, V> Produced<K, V> as(final String processorName) {
-        return new Produced<>(null, null, null, processorName);
+        return new Produced<>(keySerde, valueSerde, partitioner);
     }
 
     /**
@@ -111,7 +95,7 @@ public class Produced<K, V> implements NamedOperation<Produced<K, V>> {
      * @see KStream#to(String, Produced)
      */
     public static <K, V> Produced<K, V> keySerde(final Serde<K> keySerde) {
-        return new Produced<>(keySerde, null, null, null);
+        return new Produced<>(keySerde, null, null);
     }
 
     /**
@@ -124,7 +108,7 @@ public class Produced<K, V> implements NamedOperation<Produced<K, V>> {
      * @see KStream#to(String, Produced)
      */
     public static <K, V> Produced<K, V> valueSerde(final Serde<V> valueSerde) {
-        return new Produced<>(null, valueSerde, null, null);
+        return new Produced<>(null, valueSerde, null);
     }
 
     /**
@@ -139,7 +123,7 @@ public class Produced<K, V> implements NamedOperation<Produced<K, V>> {
      * @see KStream#to(String, Produced)
      */
     public static <K, V> Produced<K, V> streamPartitioner(final StreamPartitioner<? super K, ? super V> partitioner) {
-        return new Produced<>(null, null, partitioner, null);
+        return new Produced<>(null, null, partitioner);
     }
 
     /**
@@ -191,11 +175,5 @@ public class Produced<K, V> implements NamedOperation<Produced<K, V>> {
     @Override
     public int hashCode() {
         return Objects.hash(keySerde, valueSerde, partitioner);
-    }
-
-    @Override
-    public Produced<K, V> withName(final String name) {
-        this.processorName = name;
-        return this;
     }
 }

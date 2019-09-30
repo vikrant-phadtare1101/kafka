@@ -149,11 +149,6 @@ public class Plugins {
     }
 
     public Connector newConnector(String connectorClassOrAlias) {
-        Class<? extends Connector> klass = connectorClass(connectorClassOrAlias);
-        return newPlugin(klass);
-    }
-
-    public Class<? extends Connector> connectorClass(String connectorClassOrAlias) {
         Class<? extends Connector> klass;
         try {
             klass = pluginClass(
@@ -193,7 +188,7 @@ public class Plugins {
             PluginDesc<Connector> entry = matches.get(0);
             klass = entry.pluginClass();
         }
-        return klass;
+        return newPlugin(klass);
     }
 
     public Task newTask(Class<? extends Task> taskClass) {

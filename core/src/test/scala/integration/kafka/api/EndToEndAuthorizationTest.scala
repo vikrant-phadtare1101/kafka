@@ -36,7 +36,6 @@ import org.apache.kafka.common.resource.PatternType
 import org.apache.kafka.common.resource.PatternType.{LITERAL, PREFIXED}
 import org.junit.Assert._
 import org.junit.{After, Before, Test}
-import org.scalatest.Assertions.fail
 
 import scala.collection.JavaConverters._
 
@@ -59,7 +58,7 @@ import scala.collection.JavaConverters._
   * would end up with ZooKeeperTestHarness twice.
   */
 abstract class EndToEndAuthorizationTest extends IntegrationTestHarness with SaslSetup {
-  override val brokerCount = 3
+  override val serverCount = 3
 
   override def configureSecurityBeforeServersStart() {
     AclCommand.main(clusterActionArgs)

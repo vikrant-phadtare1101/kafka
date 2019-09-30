@@ -30,9 +30,7 @@ import org.apache.kafka.streams.state.StateSerdes;
  * Simple wrapper around a {@link SessionStore} to support writing
  * updates to a changelog
  */
-class ChangeLoggingSessionBytesStore
-    extends WrappedStateStore<SessionStore<Bytes, byte[]>, byte[], byte[]>
-    implements SessionStore<Bytes, byte[]> {
+class ChangeLoggingSessionBytesStore extends WrappedStateStore<SessionStore<Bytes, byte[]>> implements SessionStore<Bytes, byte[]> {
 
     private StoreChangeLogger<Bytes, byte[]> changeLogger;
 
@@ -83,11 +81,11 @@ class ChangeLoggingSessionBytesStore
 
     @Override
     public KeyValueIterator<Windowed<Bytes>, byte[]> fetch(final Bytes key) {
-        return wrapped().fetch(key);
+        return findSessions(key, 0, Long.MAX_VALUE);
     }
 
     @Override
     public KeyValueIterator<Windowed<Bytes>, byte[]> fetch(final Bytes from, final Bytes to) {
-        return wrapped().fetch(from, to);
+        return findSessions(from, to, 0, Long.MAX_VALUE);
     }
 }

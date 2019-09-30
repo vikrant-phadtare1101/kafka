@@ -20,7 +20,6 @@ import org.apache.kafka.common.annotation.InterfaceStability;
 
 import java.util.Arrays;
 import java.util.Base64;
-import java.util.Objects;
 
 /**
  * A class representing a delegation token.
@@ -59,7 +58,10 @@ public class DelegationToken {
 
         DelegationToken token = (DelegationToken) o;
 
-        return Objects.equals(tokenInformation, token.tokenInformation) && Arrays.equals(hmac, token.hmac);
+        if (tokenInformation != null ? !tokenInformation.equals(token.tokenInformation) : token.tokenInformation != null) {
+            return false;
+        }
+        return Arrays.equals(hmac, token.hmac);
     }
 
     @Override

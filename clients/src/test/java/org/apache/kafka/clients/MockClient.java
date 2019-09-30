@@ -23,7 +23,6 @@ import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.requests.AbstractRequest;
 import org.apache.kafka.common.requests.AbstractResponse;
-import org.apache.kafka.common.requests.MetadataRequest;
 import org.apache.kafka.common.requests.MetadataResponse;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.test.TestCondition;
@@ -31,7 +30,6 @@ import org.apache.kafka.test.TestUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -95,10 +93,6 @@ public class MockClient implements KafkaClient {
     public MockClient(Time time, MockMetadataUpdater metadataUpdater) {
         this.time = time;
         this.metadataUpdater = metadataUpdater;
-    }
-
-    public boolean isConnected(String idString) {
-        return connectionState(idString).state == ConnectionState.State.CONNECTED;
     }
 
     private ConnectionState connectionState(String idString) {
@@ -618,26 +612,13 @@ public class MockClient implements KafkaClient {
             update(time, lastUpdate);
         }
 
-        private void maybeCheckExpectedTopics(MetadataUpdate update, MetadataRequest.Builder builder) {
-            if (update.expectMatchRefreshTopics) {
-                if (builder.isAllTopics())
-                    throw new IllegalStateException("The metadata topics does not match expectation. "
-                            + "Expected topics: " + update.topics()
-                            + ", asked topics: ALL");
-
-                Set<String> requestedTopics = new HashSet<>(builder.topics());
-                if (!requestedTopics.equals(update.topics())) {
-                    throw new IllegalStateException("The metadata topics does not match expectation. "
-                            + "Expected topics: " + update.topics()
-                            + ", asked topics: " + requestedTopics);
-                }
-            }
-        }
-
         @Override
         public void update(Time time, MetadataUpdate update) {
-            MetadataRequest.Builder builder = metadata.newMetadataRequestBuilder();
-            maybeCheckExpectedTopics(update, builder);
+            if (update.expectMatchRefreshTopics && !metadata.topics().equals(update.topics())) {
+                throw new IllegalStateException("The metadata topics does not match expectation. "
+                        + "Expected topics: " + update.topics()
+                        + ", asked topics: " + metadata.topics());
+            }
             metadata.update(update.updateResponse, time.milliseconds());
             this.lastUpdate = update;
         }

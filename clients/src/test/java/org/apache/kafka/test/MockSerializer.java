@@ -20,6 +20,7 @@ import org.apache.kafka.common.ClusterResourceListener;
 import org.apache.kafka.common.ClusterResource;
 import org.apache.kafka.common.serialization.Serializer;
 
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -32,6 +33,10 @@ public class MockSerializer implements ClusterResourceListener, Serializer<byte[
 
     public MockSerializer() {
         INIT_COUNT.incrementAndGet();
+    }
+
+    @Override
+    public void configure(Map<String, ?> configs, boolean isKey) {
     }
 
     @Override

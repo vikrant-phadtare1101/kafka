@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.streams.processor.internals;
 
+import java.time.Duration;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeader;
@@ -35,7 +36,6 @@ import org.apache.kafka.test.MockKeyValueStore;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.time.Duration;
 import java.util.Properties;
 
 import static org.apache.kafka.test.StreamsTestUtils.getStreamsConfig;
@@ -171,16 +171,12 @@ public class AbstractProcessorContextTest {
     @SuppressWarnings("unchecked")
     @Test
     public void appConfigsShouldReturnParsedValues() {
-        assertThat(
-            context.appConfigs().get(StreamsConfig.ROCKSDB_CONFIG_SETTER_CLASS_CONFIG),
-            equalTo(RocksDBConfigSetter.class));
+        assertThat((Class<RocksDBConfigSetter>) context.appConfigs().get(StreamsConfig.ROCKSDB_CONFIG_SETTER_CLASS_CONFIG), equalTo(RocksDBConfigSetter.class));
     }
 
     @Test
     public void appConfigsShouldReturnUnrecognizedValues() {
-        assertThat(
-            context.appConfigs().get("user.supplied.config"),
-            equalTo("user-suppplied-value"));
+        assertThat((String) context.appConfigs().get("user.supplied.config"), equalTo("user-suppplied-value"));
     }
 
 
@@ -202,11 +198,9 @@ public class AbstractProcessorContextTest {
             return null;
         }
 
+        @SuppressWarnings("deprecation")
         @Override
-        @Deprecated
-        public Cancellable schedule(final long interval,
-                                    final PunctuationType type,
-                                    final Punctuator callback) {
+        public Cancellable schedule(final long interval, final PunctuationType type, final Punctuator callback) {
             return null;
         }
 
@@ -223,12 +217,12 @@ public class AbstractProcessorContextTest {
         @Override
         public <K, V> void forward(final K key, final V value, final To to) {}
 
+        @SuppressWarnings("deprecation")
         @Override
-        @Deprecated
         public <K, V> void forward(final K key, final V value, final int childIndex) {}
 
+        @SuppressWarnings("deprecation")
         @Override
-        @Deprecated
         public <K, V> void forward(final K key, final V value, final String childName) {}
 
         @Override

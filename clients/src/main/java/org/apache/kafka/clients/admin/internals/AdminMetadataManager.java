@@ -19,7 +19,6 @@ package org.apache.kafka.clients.admin.internals;
 
 import org.apache.kafka.clients.MetadataUpdater;
 import org.apache.kafka.common.Cluster;
-import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.requests.MetadataResponse;
@@ -105,7 +104,7 @@ public class AdminMetadataManager {
         }
 
         @Override
-        public void handleFatalException(KafkaException e) {
+        public void handleAuthenticationFailure(AuthenticationException e) {
             updateFailed(e);
         }
 

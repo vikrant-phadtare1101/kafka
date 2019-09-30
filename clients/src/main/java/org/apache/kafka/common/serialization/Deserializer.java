@@ -37,9 +37,7 @@ public interface Deserializer<T> extends Closeable {
      * @param configs configs in key/value pairs
      * @param isKey whether is for key or value
      */
-    default void configure(Map<String, ?> configs, boolean isKey) {
-        // intentionally left blank
-    }
+    void configure(Map<String, ?> configs, boolean isKey);
 
     /**
      * Deserialize a record value from a byte array into a value or object.
@@ -60,13 +58,6 @@ public interface Deserializer<T> extends Closeable {
         return deserialize(topic, data);
     }
 
-    /**
-     * Close this deserializer.
-     * <p>
-     * This method must be idempotent as it may be called multiple times.
-     */
     @Override
-    default void close() {
-        // intentionally left blank
-    }
+    void close();
 }

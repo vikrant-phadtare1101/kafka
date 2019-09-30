@@ -52,4 +52,9 @@ public class UUIDDeserializer implements Deserializer<UUID> {
             throw new SerializationException("Error parsing data into UUID", e);
         }
     }
+
+    @Override
+    public void close() {
+      // do nothing
+    }
 }

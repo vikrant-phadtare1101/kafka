@@ -102,8 +102,7 @@ public class StreamsResetter {
     private static OptionSpec<String> fromFileOption;
     private static OptionSpec<Long> shiftByOption;
     private static OptionSpecBuilder dryRunOption;
-    private static OptionSpec helpOption;
-    private static OptionSpec versionOption;
+    private static OptionSpecBuilder helpOption;
     private static OptionSpecBuilder executeOption;
     private static OptionSpec<String> commandConfigOption;
 
@@ -239,8 +238,7 @@ public class StreamsResetter {
             .describedAs("file name");
         executeOption = optionParser.accepts("execute", "Execute the command.");
         dryRunOption = optionParser.accepts("dry-run", "Display the actions that would be performed without executing the reset commands.");
-        helpOption = optionParser.accepts("help", "Print usage information.").forHelp();
-        versionOption = optionParser.accepts("version", "Print version information and exit.").forHelp();
+        helpOption = optionParser.accepts("help", "Print usage information.");
 
         // TODO: deprecated in 1.0; can be removed eventually: https://issues.apache.org/jira/browse/KAFKA-7606
         optionParser.accepts("zookeeper", "Zookeeper option is deprecated by bootstrap.servers, as the reset tool would no longer access Zookeeper directly.");
@@ -250,18 +248,16 @@ public class StreamsResetter {
             if (args.length == 0 || options.has(helpOption)) {
                 CommandLineUtils.printUsageAndDie(optionParser, usage);
             }
-            if (options.has(versionOption)) {
-                CommandLineUtils.printVersionAndDie();
-            }
         } catch (final OptionException e) {
-            CommandLineUtils.printUsageAndDie(optionParser, e.getMessage());
+            printHelp(optionParser);
+            throw e;
         }
 
         if (options.has(executeOption) && options.has(dryRunOption)) {
             CommandLineUtils.printUsageAndDie(optionParser, "Only one of --dry-run and --execute can be specified");
         }
 
-        final scala.collection.immutable.HashSet<OptionSpec<?>> allScenarioOptions = new scala.collection.immutable.HashSet<>();
+        final scala.collection.immutable.HashSet<OptionSpec<?>> allScenarioOptions = new scala.collection.immutable.HashSet<OptionSpec<?>>();
         allScenarioOptions.$plus(toOffsetOption);
         allScenarioOptions.$plus(toDatetimeOption);
         allScenarioOptions.$plus(byDurationOption);
@@ -660,12 +656,7 @@ public class StreamsResetter {
 
 
     private boolean isInternalTopic(final String topicName) {
-        // Specified input/intermediate topics might be named like internal topics (by chance).
-        // Even is this is not expected in general, we need to exclude those topics here
-        // and don't consider them as internal topics even if they follow the same naming schema.
-        // Cf. https://issues.apache.org/jira/browse/KAFKA-7930
-        return !isInputTopic(topicName) && !isIntermediateTopic(topicName)
-            && topicName.startsWith(options.valueOf(applicationIdOption) + "-")
+        return topicName.startsWith(options.valueOf(applicationIdOption) + "-")
             && (topicName.endsWith("-changelog") || topicName.endsWith("-repartition"));
     }
 

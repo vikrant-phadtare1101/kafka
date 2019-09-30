@@ -19,43 +19,36 @@ package kafka.server
 
 import kafka.network.SocketServer
 import kafka.utils._
-import org.apache.kafka.common.message.DeleteTopicsRequestData
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 import org.apache.kafka.common.requests.{DeleteTopicsRequest, DeleteTopicsResponse}
 import org.junit.Assert._
 import org.junit.Test
 
-import java.util.Collections
+import scala.collection.JavaConverters._
 
 class DeleteTopicsRequestWithDeletionDisabledTest extends BaseRequestTest {
 
-  override def brokerCount: Int = 1
+  override def numBrokers: Int = 1
 
   override def generateConfigs = {
-    val props = TestUtils.createBrokerConfigs(brokerCount, zkConnect,
+    val props = TestUtils.createBrokerConfigs(numBrokers, zkConnect,
       enableControlledShutdown = false, enableDeleteTopic = false,
       interBrokerSecurityProtocol = Some(securityProtocol),
       trustStoreFile = trustStoreFile, saslProperties = serverSaslProperties, logDirCount = logDirCount)
-    props.foreach(brokerPropertyOverrides)
+    props.foreach(propertyOverrides)
     props.map(KafkaConfig.fromProps)
   }
 
   @Test
   def testDeleteRecordsRequest() {
     val topic = "topic-1"
-    val request = new DeleteTopicsRequest.Builder(
-        new DeleteTopicsRequestData()
-          .setTopicNames(Collections.singletonList(topic))
-          .setTimeoutMs(1000)).build()
+    val request = new DeleteTopicsRequest.Builder(Set(topic).asJava, 1000).build()
     val response = sendDeleteTopicsRequest(request)
-    assertEquals(Errors.TOPIC_DELETION_DISABLED.code, response.data.responses.find(topic).errorCode)
+    assertEquals(Errors.TOPIC_DELETION_DISABLED, response.errors.get(topic))
 
-    val v2request = new DeleteTopicsRequest.Builder(
-        new DeleteTopicsRequestData()
-        .setTopicNames(Collections.singletonList(topic))
-        .setTimeoutMs(1000)).build(2)
+    val v2request = new DeleteTopicsRequest.Builder(Set(topic).asJava, 1000).build(2)
     val v2response = sendDeleteTopicsRequest(v2request)
-    assertEquals(Errors.INVALID_REQUEST.code, v2response.data.responses.find(topic).errorCode)
+    assertEquals(Errors.INVALID_REQUEST, v2response.errors.get(topic))
   }
 
   private def sendDeleteTopicsRequest(request: DeleteTopicsRequest, socketServer: SocketServer = controllerSocketServer): DeleteTopicsResponse = {

@@ -19,7 +19,6 @@ package org.apache.kafka.trogdor.workload;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.ClientDnsLookup;
 import org.apache.kafka.clients.ClientUtils;
@@ -37,7 +36,6 @@ import org.apache.kafka.common.network.ChannelBuilder;
 import org.apache.kafka.common.network.Selector;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
-import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.trogdor.common.JsonUtil;
 import org.apache.kafka.trogdor.common.Platform;
 import org.apache.kafka.trogdor.common.ThreadUtils;
@@ -53,8 +51,6 @@ import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -65,7 +61,7 @@ public class ConnectionStressWorker implements TaskWorker {
 
     private static final int THROTTLE_PERIOD_MS = 100;
 
-    private static final int REPORT_INTERVAL_MS = 5000;
+    private static final int REPORT_INTERVAL_MS = 20000;
 
     private final String id;
 
@@ -83,11 +79,11 @@ public class ConnectionStressWorker implements TaskWorker {
 
     private long startTimeMs;
 
-    private Future<?> statusUpdaterFuture;
+    private Throttle throttle;
+
+    private long nextReportTime;
 
     private ExecutorService workerExecutor;
-
-    private ScheduledExecutorService statusUpdaterExecutor;
 
     public ConnectionStressWorker(String id, ConnectionStressSpec spec) {
         this.id = id;
@@ -103,15 +99,12 @@ public class ConnectionStressWorker implements TaskWorker {
         log.info("{}: Activating ConnectionStressWorker with {}", id, spec);
         this.doneFuture = doneFuture;
         this.status = status;
-        synchronized (ConnectionStressWorker.this) {
-            this.totalConnections = 0;
-            this.totalFailedConnections = 0;
-            this.startTimeMs = TIME.milliseconds();
-        }
-        this.statusUpdaterExecutor = Executors.newScheduledThreadPool(1,
-            ThreadUtils.createThreadFactory("StatusUpdaterWorkerThread%d", false));
-        this.statusUpdaterFuture = this.statusUpdaterExecutor.scheduleAtFixedRate(
-            new StatusUpdater(), 0, REPORT_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        this.totalConnections = 0;
+        this.totalFailedConnections  = 0;
+        this.startTimeMs = TIME.milliseconds();
+        this.throttle = new ConnectStressThrottle(WorkerUtils.
+            perSecToPerPeriod(spec.targetConnectionsPerSec(), THROTTLE_PERIOD_MS));
+        this.nextReportTime = 0;
         this.workerExecutor = Executors.newFixedThreadPool(spec.numThreads(),
             ThreadUtils.createThreadFactory("ConnectionStressWorkerThread%d", false));
         for (int i = 0; i < spec.numThreads(); i++) {
@@ -125,61 +118,78 @@ public class ConnectionStressWorker implements TaskWorker {
         }
     }
 
-    interface Stressor extends AutoCloseable {
-        static Stressor fromSpec(ConnectionStressSpec spec) {
-            switch (spec.action()) {
-                case CONNECT:
-                    return new ConnectStressor(spec);
-                case FETCH_METADATA:
-                    return new FetchMetadataStressor(spec);
-            }
-            throw new RuntimeException("invalid spec.action " + spec.action());
-        }
-
-        boolean tryConnect();
-    }
-
-    static class ConnectStressor implements Stressor {
-        private final AdminClientConfig conf;
-        private final ManualMetadataUpdater updater;
-        private final ChannelBuilder channelBuilder;
-
-        ConnectStressor(ConnectionStressSpec spec) {
-            Properties props = new Properties();
-            props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, spec.bootstrapServers());
-            WorkerUtils.addConfigsToProperties(props, spec.commonClientConf(), spec.commonClientConf());
-            this.conf = new AdminClientConfig(props);
-            List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(
-                conf.getList(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG),
-                conf.getString(AdminClientConfig.CLIENT_DNS_LOOKUP_CONFIG));
-            this.updater = new ManualMetadataUpdater(Cluster.bootstrap(addresses).nodes());
-            this.channelBuilder = ClientUtils.createChannelBuilder(conf, TIME);
-        }
-
+    public class ConnectLoop implements Runnable {
         @Override
-        public boolean tryConnect() {
+        public void run() {
+            try {
+                Properties props = new Properties();
+                props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, spec.bootstrapServers());
+                WorkerUtils.addConfigsToProperties(props, spec.commonClientConf(), spec.commonClientConf());
+                AdminClientConfig conf = new AdminClientConfig(props);
+                List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(
+                        conf.getList(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG),
+                        conf.getString(AdminClientConfig.CLIENT_DNS_LOOKUP_CONFIG));
+                ManualMetadataUpdater updater = new ManualMetadataUpdater(Cluster.bootstrap(addresses).nodes());
+                while (true) {
+                    if (doneFuture.isDone()) {
+                        break;
+                    }
+                    throttle.increment();
+                    long lastTimeMs = throttle.lastTimeMs();
+                    boolean success = false;
+                    switch (spec.action()) {
+                        case CONNECT:
+                            success = attemptConnection(conf, updater);
+                            break;
+                        case FETCH_METADATA:
+                            success = attemptMetadataFetch(props);
+                            break;
+                    }
+                    synchronized (ConnectionStressWorker.this) {
+                        totalConnections++;
+                        if (!success) {
+                            totalFailedConnections++;
+                        }
+                        if (lastTimeMs > nextReportTime) {
+                            status.update(JsonUtil.JSON_SERDE.valueToTree(
+                                new StatusData(totalConnections,
+                                    totalFailedConnections,
+                                    (totalConnections * 1000.0) / (lastTimeMs - startTimeMs))));
+                            nextReportTime = lastTimeMs + REPORT_INTERVAL_MS;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                WorkerUtils.abort(log, "ConnectionStressRunnable", e, doneFuture);
+            }
+        }
+
+        private boolean attemptConnection(AdminClientConfig conf,
+                                          ManualMetadataUpdater updater) throws Exception {
             try {
                 List<Node> nodes = updater.fetchNodes();
                 Node targetNode = nodes.get(ThreadLocalRandom.current().nextInt(nodes.size()));
-                try (Metrics metrics = new Metrics()) {
-                    LogContext logContext = new LogContext();
-                    try (Selector selector = new Selector(conf.getLong(AdminClientConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG),
-                        metrics, TIME, "", channelBuilder, logContext)) {
-                        try (NetworkClient client = new NetworkClient(selector,
-                            updater,
-                            "ConnectionStressWorker",
-                            1,
-                            1000,
-                            1000,
-                            4096,
-                            4096,
-                            1000,
-                            ClientDnsLookup.forConfig(conf.getString(AdminClientConfig.CLIENT_DNS_LOOKUP_CONFIG)),
-                            TIME,
-                            false,
-                            new ApiVersions(),
-                            logContext)) {
-                            NetworkClientUtils.awaitReady(client, targetNode, TIME, 100);
+                try (ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(conf, TIME)) {
+                    try (Metrics metrics = new Metrics()) {
+                        LogContext logContext = new LogContext();
+                        try (Selector selector = new Selector(conf.getLong(AdminClientConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG),
+                            metrics, TIME, "", channelBuilder, logContext)) {
+                            try (NetworkClient client = new NetworkClient(selector,
+                                    updater,
+                                    "ConnectionStressWorker",
+                                    1,
+                                    1000,
+                                    1000,
+                                    4096,
+                                    4096,
+                                    1000,
+                                    ClientDnsLookup.forConfig(conf.getString(AdminClientConfig.CLIENT_DNS_LOOKUP_CONFIG)),
+                                    TIME,
+                                    false,
+                                    new ApiVersions(),
+                                    logContext)) {
+                                NetworkClientUtils.awaitReady(client, targetNode, TIME, 100);
+                            }
                         }
                     }
                 }
@@ -189,25 +199,8 @@ public class ConnectionStressWorker implements TaskWorker {
             }
         }
 
-        @Override
-        public void close() throws Exception {
-            Utils.closeQuietly(updater, "ManualMetadataUpdater");
-            Utils.closeQuietly(channelBuilder, "ChannelBuilder");
-        }
-    }
-
-    static class FetchMetadataStressor  implements Stressor {
-        private final Properties props;
-
-        FetchMetadataStressor(ConnectionStressSpec spec) {
-            this.props = new Properties();
-            this.props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, spec.bootstrapServers());
-            WorkerUtils.addConfigsToProperties(this.props, spec.commonClientConf(), spec.commonClientConf());
-        }
-
-        @Override
-        public boolean tryConnect() {
-            try (AdminClient client = AdminClient.create(this.props)) {
+        private boolean attemptMetadataFetch(Properties conf) {
+            try (AdminClient client = AdminClient.create(conf)) {
                 client.describeCluster().nodes().get();
             } catch (RuntimeException e) {
                 return false;
@@ -215,55 +208,6 @@ public class ConnectionStressWorker implements TaskWorker {
                 return false;
             }
             return true;
-        }
-
-        @Override
-        public void close() throws Exception {
-        }
-    }
-
-    public class ConnectLoop implements Runnable {
-        @Override
-        public void run() {
-            Stressor stressor = Stressor.fromSpec(spec);
-            int rate = WorkerUtils.perSecToPerPeriod(
-                ((float) spec.targetConnectionsPerSec()) / spec.numThreads(),
-                THROTTLE_PERIOD_MS);
-            Throttle throttle = new ConnectStressThrottle(rate);
-            try {
-                while (!doneFuture.isDone()) {
-                    throttle.increment();
-                    boolean success = stressor.tryConnect();
-                    synchronized (ConnectionStressWorker.this) {
-                        totalConnections++;
-                        if (!success) {
-                            totalFailedConnections++;
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                WorkerUtils.abort(log, "ConnectLoop", e, doneFuture);
-            } finally {
-                Utils.closeQuietly(stressor, "stressor");
-            }
-        }
-    }
-
-    private class StatusUpdater implements Runnable {
-        @Override
-        public void run() {
-            try {
-                long lastTimeMs = Time.SYSTEM.milliseconds();
-                JsonNode node = null;
-                synchronized (ConnectionStressWorker.this) {
-                    node = JsonUtil.JSON_SERDE.valueToTree(
-                        new StatusData(totalConnections, totalFailedConnections,
-                            (totalConnections * 1000.0) / (lastTimeMs - startTimeMs)));
-                }
-                status.update(node);
-            } catch (Exception e) {
-                WorkerUtils.abort(log, "StatusUpdater", e, doneFuture);
-            }
         }
     }
 
@@ -303,17 +247,6 @@ public class ConnectionStressWorker implements TaskWorker {
             throw new IllegalStateException("ConnectionStressWorker is not running.");
         }
         log.info("{}: Deactivating ConnectionStressWorker.", id);
-
-        // Shut down the periodic status updater and perform a final update on the
-        // statistics.  We want to do this first, before deactivating any threads.
-        // Otherwise, if some threads take a while to terminate, this could lead
-        // to a misleading rate getting reported.
-        this.statusUpdaterFuture.cancel(false);
-        this.statusUpdaterExecutor.shutdown();
-        this.statusUpdaterExecutor.awaitTermination(1, TimeUnit.DAYS);
-        this.statusUpdaterExecutor = null;
-        new StatusUpdater().run();
-
         doneFuture.complete("");
         workerExecutor.shutdownNow();
         workerExecutor.awaitTermination(1, TimeUnit.DAYS);

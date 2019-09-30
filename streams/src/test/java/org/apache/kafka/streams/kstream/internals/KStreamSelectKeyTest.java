@@ -19,10 +19,12 @@ package org.apache.kafka.streams.kstream.internals;
 import org.apache.kafka.common.serialization.IntegerSerializer;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.TopologyTestDriver;
-import org.apache.kafka.streams.kstream.Consumed;
+import org.apache.kafka.streams.kstream.ForeachAction;
 import org.apache.kafka.streams.kstream.KStream;
+import org.apache.kafka.streams.kstream.KeyValueMapper;
 import org.apache.kafka.streams.test.ConsumerRecordFactory;
 import org.apache.kafka.test.MockProcessorSupplier;
 import org.apache.kafka.test.StreamsTestUtils;
@@ -35,9 +37,10 @@ import java.util.Properties;
 import static org.junit.Assert.assertEquals;
 
 public class KStreamSelectKeyTest {
-    private final String topicName = "topic_key_select";
-    private final ConsumerRecordFactory<String, Integer> recordFactory =
-        new ConsumerRecordFactory<>(topicName, new StringSerializer(), new IntegerSerializer(), 0L);
+
+    private String topicName = "topic_key_select";
+
+    private final ConsumerRecordFactory<String, Integer> recordFactory = new ConsumerRecordFactory<>(topicName, new StringSerializer(), new IntegerSerializer());
     private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.String(), Serdes.Integer());
 
     @Test
@@ -49,13 +52,22 @@ public class KStreamSelectKeyTest {
         keyMap.put(2, "TWO");
         keyMap.put(3, "THREE");
 
-        final String[] expected = new String[]{"ONE:1 (ts: 0)", "TWO:2 (ts: 0)", "THREE:3 (ts: 0)"};
+
+        final KeyValueMapper<Object, Number, String> selector = new KeyValueMapper<Object, Number, String>() {
+            @Override
+            public String apply(final Object key, final Number value) {
+                return keyMap.get(value);
+            }
+        };
+
+        final String[] expected = new String[]{"ONE:1", "TWO:2", "THREE:3"};
         final int[] expectedValues = new int[]{1, 2, 3};
 
-        final KStream<String, Integer>  stream =
-            builder.stream(topicName, Consumed.with(Serdes.String(), Serdes.Integer()));
+        final KStream<String, Integer>  stream = builder.stream(topicName, Consumed.with(Serdes.String(), Serdes.Integer()));
+
         final MockProcessorSupplier<String, Integer> supplier = new MockProcessorSupplier<>();
-        stream.selectKey((key, value) -> keyMap.get(value)).process(supplier);
+
+        stream.selectKey(selector).process(supplier);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             for (final int expectedValue : expectedValues) {
@@ -64,6 +76,7 @@ public class KStreamSelectKeyTest {
         }
 
         assertEquals(3, supplier.theCapturedProcessor().processed.size());
+
         for (int i = 0; i < expected.length; i++) {
             assertEquals(expected[i], supplier.theCapturedProcessor().processed.get(i));
         }
@@ -72,8 +85,13 @@ public class KStreamSelectKeyTest {
 
     @Test
     public void testTypeVariance() {
+        final ForeachAction<Number, Object> consume = new ForeachAction<Number, Object>() {
+            @Override
+            public void apply(final Number key, final Object value) {}
+        };
+
         new StreamsBuilder()
             .<Integer, String>stream("empty")
-            .foreach((key, value) -> { });
+            .foreach(consume);
     }
 }

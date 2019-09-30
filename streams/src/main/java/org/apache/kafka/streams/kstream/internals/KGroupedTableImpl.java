@@ -88,7 +88,8 @@ public class KGroupedTableImpl<K, V> extends AbstractStream<K, V> implements KGr
         final StatefulProcessorNode statefulProcessorNode = new StatefulProcessorNode<>(
             funcName,
             new ProcessorParameters<>(aggregateSupplier, funcName),
-            new TimestampedKeyValueStoreMaterializer<>(materialized).materialize()
+            new KeyValueStoreMaterializer<>(materialized).materialize(),
+            false
         );
 
         // now the repartition node must be the parent of the StateProcessorNode

@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.streams.kstream.internals;
 
+import org.apache.kafka.common.annotation.InterfaceStability;
 import org.apache.kafka.streams.kstream.Window;
 
 /**
@@ -28,6 +29,7 @@ import org.apache.kafka.streams.kstream.Window;
  * @see org.apache.kafka.streams.kstream.SessionWindows
  * @see org.apache.kafka.streams.processor.TimestampExtractor
  */
+@InterfaceStability.Unstable
 public final class SessionWindow extends Window {
 
     /**
