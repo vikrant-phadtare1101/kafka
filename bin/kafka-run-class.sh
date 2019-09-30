@@ -48,7 +48,7 @@ should_include_file() {
 base_dir=$(dirname $0)/..
 
 if [ -z "$SCALA_VERSION" ]; then
-  SCALA_VERSION=2.12.8
+  SCALA_VERSION=2.12.9
 fi
 
 if [ -z "$SCALA_BINARY_VERSION" ]; then
@@ -57,10 +57,12 @@ fi
 
 # run ./gradlew copyDependantLibs to get all dependant jars in a local dir
 shopt -s nullglob
-for dir in "$base_dir"/core/build/dependant-libs-${SCALA_VERSION}*;
-do
-  CLASSPATH="$CLASSPATH:$dir/*"
-done
+if [ -z "$UPGRADE_KAFKA_STREAMS_TEST_VERSION" ]; then
+  for dir in "$base_dir"/core/build/dependant-libs-${SCALA_VERSION}*;
+  do
+    CLASSPATH="$CLASSPATH:$dir/*"
+  done
+fi
 
 for file in "$base_dir"/examples/build/libs/kafka-examples*.jar;
 do
@@ -110,6 +112,14 @@ else
       CLASSPATH="$file":"$CLASSPATH"
     fi
   done
+  if [ "$SHORT_VERSION_NO_DOTS" = "0100" ]; then
+    CLASSPATH="/opt/kafka-$UPGRADE_KAFKA_STREAMS_TEST_VERSION/libs/zkclient-0.8.jar":"$CLASSPATH"
+    CLASSPATH="/opt/kafka-$UPGRADE_KAFKA_STREAMS_TEST_VERSION/libs/zookeeper-3.4.6.jar":"$CLASSPATH"
+  fi
+  if [ "$SHORT_VERSION_NO_DOTS" = "0101" ]; then
+    CLASSPATH="/opt/kafka-$UPGRADE_KAFKA_STREAMS_TEST_VERSION/libs/zkclient-0.9.jar":"$CLASSPATH"
+    CLASSPATH="/opt/kafka-$UPGRADE_KAFKA_STREAMS_TEST_VERSION/libs/zookeeper-3.4.8.jar":"$CLASSPATH"
+  fi
 fi
 
 for file in "$rocksdb_lib_dir"/rocksdb*.jar;
@@ -276,7 +286,7 @@ if [ "x$GC_LOG_ENABLED" = "xtrue" ]; then
   # 10 -> java version "10" 2018-03-20
   # 10.0.1 -> java version "10.0.1" 2018-04-17
   # We need to match to the end of the line to prevent sed from printing the characters that do not match
-  JAVA_MAJOR_VERSION=$($JAVA -version 2>&1 | sed -E -n 's/.* version "([0-9]*).*$/\1/p')
+  JAVA_MAJOR_VERSION=$($JAVA -version 2>&1 | sed -n '1p'|awk -F '.' '{print $2}')
   if [[ "$JAVA_MAJOR_VERSION" -ge "9" ]] ; then
     KAFKA_GC_LOG_OPTS="-Xlog:gc*:file=$LOG_DIR/$GC_LOG_FILE_NAME:time,tags:filecount=10,filesize=102400"
   else
