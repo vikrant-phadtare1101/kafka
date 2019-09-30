@@ -31,7 +31,7 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Headers;
-import org.apache.kafka.common.requests.UpdateMetadataRequest;
+import org.apache.kafka.common.message.UpdateMetadataRequestData.UpdateMetadataPartitionState;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.streams.KafkaStreams;
@@ -79,25 +79,18 @@ public class IntegrationTestUtils {
      * Records state transition for StreamThread
      */
     public static class StateListenerStub implements StreamThread.StateListener {
-        boolean startingToRevokedSeen = false;
-        boolean revokedToPendingShutdownSeen = false;
+        boolean toPendingShutdownSeen = false;
         @Override
         public void onChange(final Thread thread,
                              final ThreadStateTransitionValidator newState,
                              final ThreadStateTransitionValidator oldState) {
-            if (oldState == StreamThread.State.STARTING && newState == StreamThread.State.PARTITIONS_REVOKED) {
-                startingToRevokedSeen = true;
-            } else if (oldState == StreamThread.State.PARTITIONS_REVOKED && newState == StreamThread.State.PENDING_SHUTDOWN) {
-                revokedToPendingShutdownSeen = true;
+            if (newState == StreamThread.State.PENDING_SHUTDOWN) {
+                toPendingShutdownSeen = true;
             }
         }
 
-        public boolean revokedToPendingShutdownSeen() {
-            return revokedToPendingShutdownSeen;
-        }
-
-        public boolean createdToRevokedSeen() {
-            return startingToRevokedSeen;
+        public boolean transitToPendingShutdownSeen() {
+            return toPendingShutdownSeen;
         }
     }
 
@@ -712,13 +705,13 @@ public class IntegrationTestUtils {
         TestUtils.waitForCondition(() -> {
             for (final KafkaServer server : servers) {
                 final MetadataCache metadataCache = server.dataPlaneRequestProcessor().metadataCache();
-                final Option<UpdateMetadataRequest.PartitionState> partitionInfo =
+                final Option<UpdateMetadataPartitionState> partitionInfo =
                         metadataCache.getPartitionInfo(topic, partition);
                 if (partitionInfo.isEmpty()) {
                     return false;
                 }
-                final UpdateMetadataRequest.PartitionState metadataPartitionState = partitionInfo.get();
-                if (!Request.isValidBrokerId(metadataPartitionState.basePartitionState.leader)) {
+                final UpdateMetadataPartitionState metadataPartitionState = partitionInfo.get();
+                if (!Request.isValidBrokerId(metadataPartitionState.leader())) {
                     return false;
                 }
             }

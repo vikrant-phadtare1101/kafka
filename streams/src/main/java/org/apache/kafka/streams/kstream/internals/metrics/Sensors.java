@@ -19,10 +19,10 @@ package org.apache.kafka.streams.kstream.internals.metrics;
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.metrics.stats.Avg;
+import org.apache.kafka.common.metrics.stats.CumulativeSum;
 import org.apache.kafka.common.metrics.stats.Max;
 import org.apache.kafka.common.metrics.stats.Rate;
-import org.apache.kafka.common.metrics.stats.Sum;
-import org.apache.kafka.common.metrics.stats.Total;
+import org.apache.kafka.common.metrics.stats.WindowedSum;
 import org.apache.kafka.streams.processor.internals.InternalProcessorContext;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
 
@@ -38,16 +38,25 @@ public class Sensors {
 
     public static Sensor lateRecordDropSensor(final InternalProcessorContext context) {
         final StreamsMetricsImpl metrics = context.metrics();
+        final String threadId = Thread.currentThread().getName();
+
         final Sensor sensor = metrics.nodeLevelSensor(
+            threadId,
             context.taskId().toString(),
             context.currentNode().name(),
             LATE_RECORD_DROP,
             Sensor.RecordingLevel.INFO
         );
-        StreamsMetricsImpl.addInvocationRateAndCount(
+        StreamsMetricsImpl.addInvocationRateAndCountToSensor(
             sensor,
             PROCESSOR_NODE_METRICS_GROUP,
-            metrics.tagMap("task-id", context.taskId().toString(), PROCESSOR_NODE_ID_TAG, context.currentNode().name()),
+            metrics.tagMap(
+                threadId,
+                "task-id",
+                context.taskId().toString(),
+                PROCESSOR_NODE_ID_TAG,
+                context.currentNode().name()
+            ),
             LATE_RECORD_DROP
         );
         return sensor;
@@ -55,15 +64,19 @@ public class Sensors {
 
     public static Sensor recordLatenessSensor(final InternalProcessorContext context) {
         final StreamsMetricsImpl metrics = context.metrics();
+        final String threadId = Thread.currentThread().getName();
 
         final Sensor sensor = metrics.taskLevelSensor(
+            threadId,
             context.taskId().toString(),
             "record-lateness",
             Sensor.RecordingLevel.DEBUG
         );
 
         final Map<String, String> tags = metrics.tagMap(
-            "task-id", context.taskId().toString()
+            threadId,
+            "task-id",
+            context.taskId().toString()
         );
         sensor.add(
             new MetricName(
@@ -86,8 +99,10 @@ public class Sensors {
 
     public static Sensor suppressionEmitSensor(final InternalProcessorContext context) {
         final StreamsMetricsImpl metrics = context.metrics();
+        final String threadId = Thread.currentThread().getName();
 
         final Sensor sensor = metrics.nodeLevelSensor(
+            threadId,
             context.taskId().toString(),
             context.currentNode().name(),
             "suppression-emit",
@@ -95,8 +110,11 @@ public class Sensors {
         );
 
         final Map<String, String> tags = metrics.tagMap(
-            "task-id", context.taskId().toString(),
-            PROCESSOR_NODE_ID_TAG, context.currentNode().name()
+            threadId,
+            "task-id",
+            context.taskId().toString(),
+            PROCESSOR_NODE_ID_TAG,
+            context.currentNode().name()
         );
 
         sensor.add(
@@ -106,7 +124,7 @@ public class Sensors {
                 "The average number of occurrence of suppression-emit operation per second.",
                 tags
             ),
-            new Rate(TimeUnit.SECONDS, new Sum())
+            new Rate(TimeUnit.SECONDS, new WindowedSum())
         );
         sensor.add(
             new MetricName(
@@ -115,7 +133,7 @@ public class Sensors {
                 "The total number of occurrence of suppression-emit operations.",
                 tags
             ),
-            new Total()
+            new CumulativeSum()
         );
         return sensor;
     }

@@ -34,13 +34,14 @@ import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.kafka.common.metrics.Sensor.RecordingLevel.DEBUG;
+import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.ROLLUP_VALUE;
 import static org.apache.kafka.streams.state.internals.metrics.Sensors.createTaskAndStoreLatencyAndThroughputSensors;
 
 public class MeteredSessionStore<K, V>
     extends WrappedStateStore<SessionStore<Bytes, byte[]>, Windowed<K>, V>
     implements SessionStore<K, V> {
 
-    private final String metricScope;
+    private final String metricsScope;
     private final Serde<K> keySerde;
     private final Serde<V> valueSerde;
     private final Time time;
@@ -51,14 +52,16 @@ public class MeteredSessionStore<K, V>
     private Sensor flushTime;
     private Sensor removeTime;
     private String taskName;
+    private final String threadId;
 
     MeteredSessionStore(final SessionStore<Bytes, byte[]> inner,
-                        final String metricScope,
+                        final String metricsScope,
                         final Serde<K> keySerde,
                         final Serde<V> valueSerde,
                         final Time time) {
         super(inner);
-        this.metricScope = metricScope;
+        threadId = Thread.currentThread().getName();
+        this.metricsScope = metricsScope;
         this.keySerde = keySerde;
         this.valueSerde = valueSerde;
         this.time = time;
@@ -76,15 +79,67 @@ public class MeteredSessionStore<K, V>
         metrics = (StreamsMetricsImpl) context.metrics();
 
         taskName = context.taskId().toString();
-        final String metricsGroup = "stream-" + metricScope + "-metrics";
-        final Map<String, String> taskTags = metrics.tagMap("task-id", taskName, metricScope + "-id", "all");
-        final Map<String, String> storeTags = metrics.tagMap("task-id", taskName, metricScope + "-id", name());
+        final String metricsGroup = "stream-" + metricsScope + "-state-metrics";
+        final Map<String, String> taskTags =
+            metrics.storeLevelTagMap(threadId, taskName, metricsScope, ROLLUP_VALUE);
+        final Map<String, String> storeTags =
+            metrics.storeLevelTagMap(threadId, taskName, metricsScope, name());
 
-        putTime = createTaskAndStoreLatencyAndThroughputSensors(DEBUG, "put", metrics, metricsGroup, taskName, name(), taskTags, storeTags);
-        fetchTime = createTaskAndStoreLatencyAndThroughputSensors(DEBUG, "fetch", metrics, metricsGroup, taskName, name(), taskTags, storeTags);
-        flushTime = createTaskAndStoreLatencyAndThroughputSensors(DEBUG, "flush", metrics, metricsGroup, taskName, name(), taskTags, storeTags);
-        removeTime = createTaskAndStoreLatencyAndThroughputSensors(DEBUG, "remove", metrics, metricsGroup, taskName, name(), taskTags, storeTags);
-        final Sensor restoreTime = createTaskAndStoreLatencyAndThroughputSensors(DEBUG, "restore", metrics, metricsGroup, taskName, name(), taskTags, storeTags);
+        putTime = createTaskAndStoreLatencyAndThroughputSensors(
+            DEBUG,
+            "put",
+            metrics,
+            metricsGroup,
+            threadId,
+            taskName,
+            name(),
+            taskTags,
+            storeTags
+        );
+        fetchTime = createTaskAndStoreLatencyAndThroughputSensors(
+            DEBUG,
+            "fetch",
+            metrics,
+            metricsGroup,
+            threadId,
+            taskName,
+            name(),
+            taskTags,
+            storeTags
+        );
+        flushTime = createTaskAndStoreLatencyAndThroughputSensors(
+            DEBUG,
+            "flush",
+            metrics,
+            metricsGroup,
+            threadId,
+            taskName,
+            name(),
+            taskTags,
+            storeTags
+        );
+        removeTime = createTaskAndStoreLatencyAndThroughputSensors(
+            DEBUG,
+            "remove",
+            metrics,
+            metricsGroup,
+            threadId,
+            taskName,
+            name(),
+            taskTags,
+            storeTags
+        );
+        final Sensor restoreTime = createTaskAndStoreLatencyAndThroughputSensors(
+            DEBUG,
+            "restore",
+            metrics,
+            metricsGroup,
+            threadId,
+            taskName,
+            name(),
+            taskTags,
+            storeTags
+        );
 
         // register and possibly restore the state from the logs
         final long startNs = time.nanoseconds();
@@ -239,7 +294,7 @@ public class MeteredSessionStore<K, V>
     @Override
     public void close() {
         super.close();
-        metrics.removeAllStoreLevelSensors(taskName, name());
+        metrics.removeAllStoreLevelSensors(threadId, taskName, name());
     }
 
     private Bytes keyBytes(final K key) {
