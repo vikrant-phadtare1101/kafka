@@ -32,6 +32,7 @@ import org.apache.kafka.common.errors.TransactionalIdAuthorizationException;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.message.FindCoordinatorRequestData;
 import org.apache.kafka.common.message.InitProducerIdRequestData;
+import org.apache.kafka.common.message.TxnOffsetCommitRequestData;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.record.DefaultRecordBatch;
 import org.apache.kafka.common.record.RecordBatch;
@@ -54,6 +55,7 @@ import org.apache.kafka.common.requests.TxnOffsetCommitRequest;
 import org.apache.kafka.common.requests.TxnOffsetCommitRequest.CommittedOffset;
 import org.apache.kafka.common.requests.TxnOffsetCommitResponse;
 import org.apache.kafka.common.utils.LogContext;
+import org.apache.kafka.common.utils.PrimitiveRef;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
@@ -68,7 +70,6 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -338,8 +339,6 @@ public class TransactionManager {
     }
 
     public synchronized void maybeAddPartitionToTransaction(TopicPartition topicPartition) {
-        failIfNotReadyForSend();
-
         if (isPartitionAdded(topicPartition) || isPartitionPendingAdd(topicPartition))
             return;
 
@@ -352,7 +351,7 @@ public class TransactionManager {
         return lastError;
     }
 
-    synchronized void failIfNotReadyForSend() {
+    public synchronized void failIfNotReadyForSend() {
         if (hasError())
             throw new KafkaException("Cannot perform send because at least one previous transactional or " +
                     "idempotent request has failed with errors.", lastError);
@@ -655,15 +654,15 @@ public class TransactionManager {
     }
 
     private void startSequencesAtBeginning(TopicPartition topicPartition) {
-        final AtomicInteger sequence = new AtomicInteger(0);
+        final PrimitiveRef.IntRef sequence = PrimitiveRef.ofInt(0);
         topicPartitionBookkeeper.getPartition(topicPartition).resetSequenceNumbers(inFlightBatch -> {
             log.info("Resetting sequence number of batch with current sequence {} for partition {} to {}",
-                    inFlightBatch.baseSequence(), inFlightBatch.topicPartition, sequence.get());
+                    inFlightBatch.baseSequence(), inFlightBatch.topicPartition, sequence.value);
             inFlightBatch.resetProducerState(new ProducerIdAndEpoch(inFlightBatch.producerId(),
-                    inFlightBatch.producerEpoch()), sequence.get(), inFlightBatch.isTransactional());
-            sequence.getAndAdd(inFlightBatch.recordCount);
+                    inFlightBatch.producerEpoch()), sequence.value, inFlightBatch.isTransactional());
+            sequence.value += inFlightBatch.recordCount;
         });
-        setNextSequence(topicPartition, sequence.get());
+        setNextSequence(topicPartition, sequence.value);
         topicPartitionBookkeeper.getPartition(topicPartition).lastAckedSequence = NO_LAST_ACKED_SEQUENCE_NUMBER;
     }
 
@@ -988,8 +987,14 @@ public class TransactionManager {
                     offsetAndMetadata.metadata(), offsetAndMetadata.leaderEpoch());
             pendingTxnOffsetCommits.put(entry.getKey(), committedOffset);
         }
-        TxnOffsetCommitRequest.Builder builder = new TxnOffsetCommitRequest.Builder(transactionalId, consumerGroupId,
-                producerIdAndEpoch.producerId, producerIdAndEpoch.epoch, pendingTxnOffsetCommits);
+        TxnOffsetCommitRequest.Builder builder = new TxnOffsetCommitRequest.Builder(
+            new TxnOffsetCommitRequestData()
+                .setTransactionalId(transactionalId)
+                .setGroupId(consumerGroupId)
+                .setProducerId(producerIdAndEpoch.producerId)
+                .setProducerEpoch(producerIdAndEpoch.epoch)
+                .setTopics(TxnOffsetCommitRequest.getTopics(pendingTxnOffsetCommits))
+        );
         return new TxnOffsetCommitHandler(result, builder);
     }
 
@@ -1302,7 +1307,7 @@ public class TransactionManager {
             } else if (error == Errors.TRANSACTIONAL_ID_AUTHORIZATION_FAILED) {
                 fatalError(error.exception());
             } else if (findCoordinatorResponse.error() == Errors.GROUP_AUTHORIZATION_FAILED) {
-                abortableError(new GroupAuthorizationException(builder.data().key()));
+                abortableError(GroupAuthorizationException.forGroupId(builder.data().key()));
             } else {
                 fatalError(new KafkaException(String.format("Could not find a coordinator with type %s with key %s due to" +
                         "unexpected error: %s", coordinatorType, builder.data().key(),
@@ -1401,7 +1406,7 @@ public class TransactionManager {
             } else if (error == Errors.TRANSACTIONAL_ID_AUTHORIZATION_FAILED) {
                 fatalError(error.exception());
             } else if (error == Errors.GROUP_AUTHORIZATION_FAILED) {
-                abortableError(new GroupAuthorizationException(builder.consumerGroupId()));
+                abortableError(GroupAuthorizationException.forGroupId(builder.consumerGroupId()));
             } else {
                 fatalError(new KafkaException("Unexpected error in AddOffsetsToTxnResponse: " + error.message()));
             }
@@ -1434,7 +1439,7 @@ public class TransactionManager {
 
         @Override
         String coordinatorKey() {
-            return builder.consumerGroupId();
+            return builder.data.groupId();
         }
 
         @Override
@@ -1443,7 +1448,7 @@ public class TransactionManager {
             boolean coordinatorReloaded = false;
             Map<TopicPartition, Errors> errors = txnOffsetCommitResponse.errors();
 
-            log.debug("Received TxnOffsetCommit response for consumer group {}: {}", builder.consumerGroupId(),
+            log.debug("Received TxnOffsetCommit response for consumer group {}: {}", builder.data.groupId(),
                     errors);
 
             for (Map.Entry<TopicPartition, Errors> entry : errors.entrySet()) {
@@ -1456,14 +1461,14 @@ public class TransactionManager {
                         || error == Errors.REQUEST_TIMED_OUT) {
                     if (!coordinatorReloaded) {
                         coordinatorReloaded = true;
-                        lookupCoordinator(FindCoordinatorRequest.CoordinatorType.GROUP, builder.consumerGroupId());
+                        lookupCoordinator(FindCoordinatorRequest.CoordinatorType.GROUP, builder.data.groupId());
                     }
                 } else if (error == Errors.UNKNOWN_TOPIC_OR_PARTITION
                         || error == Errors.COORDINATOR_LOAD_IN_PROGRESS) {
                     // If the topic is unknown or the coordinator is loading, retry with the current coordinator
                     continue;
                 } else if (error == Errors.GROUP_AUTHORIZATION_FAILED) {
-                    abortableError(new GroupAuthorizationException(builder.consumerGroupId()));
+                    abortableError(GroupAuthorizationException.forGroupId(builder.data.groupId()));
                     break;
                 } else if (error == Errors.TRANSACTIONAL_ID_AUTHORIZATION_FAILED
                         || error == Errors.INVALID_PRODUCER_EPOCH
