@@ -48,6 +48,7 @@ object Defaults {
   val MinCompactionLagMs = kafka.server.Defaults.LogCleanerMinCompactionLagMs
   val MaxCompactionLagMs = kafka.server.Defaults.LogCleanerMaxCompactionLagMs
   val MinCleanableDirtyRatio = kafka.server.Defaults.LogCleanerMinCleanRatio
+  val CompactionPolicy = kafka.server.Defaults.CompactionPolicy
 
   @deprecated(message = "This is a misleading variable name as it actually refers to the 'delete' cleanup policy. Use " +
                         "`CleanupPolicy` instead.", since = "1.0.0")
@@ -91,6 +92,7 @@ case class LogConfig(props: java.util.Map[_, _], overriddenConfigs: Set[String] 
   val compact = getList(LogConfig.CleanupPolicyProp).asScala.map(_.toLowerCase(Locale.ROOT)).contains(LogConfig.Compact)
   val delete = getList(LogConfig.CleanupPolicyProp).asScala.map(_.toLowerCase(Locale.ROOT)).contains(LogConfig.Delete)
   val uncleanLeaderElectionEnable = getBoolean(LogConfig.UncleanLeaderElectionEnableProp)
+  val compactionPolicy = getString(LogConfig.CompactionPolicyProp).toLowerCase(Locale.ROOT)
   val minInSyncReplicas = getInt(LogConfig.MinInSyncReplicasProp)
   val compressionType = getString(LogConfig.CompressionTypeProp).toLowerCase(Locale.ROOT)
   val preallocate = getBoolean(LogConfig.PreAllocateEnableProp)
@@ -104,7 +106,7 @@ case class LogConfig(props: java.util.Map[_, _], overriddenConfigs: Set[String] 
   def randomSegmentJitter: Long =
     if (segmentJitterMs == 0) 0 else Utils.abs(scala.util.Random.nextInt()) % math.min(segmentJitterMs, segmentMs)
 
-  def maxSegmentMs :Long = {
+  def maxSegmentMs: Long = {
     if (compact && maxCompactionLagMs > 0) math.min(maxCompactionLagMs, segmentMs)
     else segmentMs
   }
@@ -112,7 +114,7 @@ case class LogConfig(props: java.util.Map[_, _], overriddenConfigs: Set[String] 
 
 object LogConfig {
 
-  def main(args: Array[String]) {
+  def main(args: Array[String]): Unit = {
     println(configDef.toHtmlTable)
   }
 
@@ -134,6 +136,7 @@ object LogConfig {
   val CleanupPolicyProp = TopicConfig.CLEANUP_POLICY_CONFIG
   val Delete = TopicConfig.CLEANUP_POLICY_DELETE
   val Compact = TopicConfig.CLEANUP_POLICY_COMPACT
+  val CompactionPolicyProp = TopicConfig.COMPACTION_POLICY_CONFIG
   val UncleanLeaderElectionEnableProp = TopicConfig.UNCLEAN_LEADER_ELECTION_ENABLE_CONFIG
   val MinInSyncReplicasProp = TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG
   val CompressionTypeProp = TopicConfig.COMPRESSION_TYPE_CONFIG
@@ -163,6 +166,7 @@ object LogConfig {
   val MaxCompactionLagMsDoc = TopicConfig.MAX_COMPACTION_LAG_MS_DOC
   val MinCleanableRatioDoc = TopicConfig.MIN_CLEANABLE_DIRTY_RATIO_DOC
   val CompactDoc = TopicConfig.CLEANUP_POLICY_DOC
+  val CompactionPolicyDoc = TopicConfig.COMPACTION_POLICY_DOC
   val UncleanLeaderElectionEnableDoc = TopicConfig.UNCLEAN_LEADER_ELECTION_ENABLE_DOC
   val MinInSyncReplicasDoc = TopicConfig.MIN_IN_SYNC_REPLICAS_DOC
   val CompressionTypeDoc = TopicConfig.COMPRESSION_TYPE_DOC
@@ -181,9 +185,17 @@ object LogConfig {
     "[PartitionId]:[BrokerId],[PartitionId]:[BrokerId]:... or alternatively the wildcard '*' can be used to throttle " +
     "all replicas for this topic."
 
-  private class LogConfigDef extends ConfigDef {
+  private[log] val ServerDefaultHeaderName = "Server Default Property"
+
+  // Package private for testing
+  private[log] class LogConfigDef(base: ConfigDef) extends ConfigDef(base) {
+    def this() = this(new ConfigDef)
 
     private final val serverDefaultConfigNames = mutable.Map[String, String]()
+    base match {
+      case b: LogConfigDef => serverDefaultConfigNames ++= b.serverDefaultConfigNames
+      case _ =>
+    }
 
     def define(name: String, defType: ConfigDef.Type, defaultValue: Any, validator: Validator,
                importance: ConfigDef.Importance, doc: String, serverDefaultConfigName: String): LogConfigDef = {
@@ -206,11 +218,12 @@ object LogConfig {
       this
     }
 
-    override def headers = List("Name", "Description", "Type", "Default", "Valid Values", "Server Default Property", "Importance").asJava
+    override def headers = List("Name", "Description", "Type", "Default", "Valid Values", ServerDefaultHeaderName,
+      "Importance").asJava
 
     override def getConfigValue(key: ConfigKey, headerName: String): String = {
       headerName match {
-        case "Server Default Property" => serverDefaultConfigNames.get(key.name).get
+        case ServerDefaultHeaderName => serverDefaultConfigNames.getOrElse(key.name, null)
         case _ => super.getConfigValue(key, headerName)
       }
     }
@@ -218,11 +231,15 @@ object LogConfig {
     def serverConfigName(configName: String): Option[String] = serverDefaultConfigNames.get(configName)
   }
 
+  // Package private for testing, return a copy since it's a mutable global variable
+  private[log] def configDefCopy: LogConfigDef = new LogConfigDef(configDef)
+
   private val configDef: LogConfigDef = {
     import org.apache.kafka.common.config.ConfigDef.Importance._
     import org.apache.kafka.common.config.ConfigDef.Range._
     import org.apache.kafka.common.config.ConfigDef.Type._
     import org.apache.kafka.common.config.ConfigDef.ValidString._
+    import org.apache.kafka.common.config.ConfigDef.NonEmptyString._
 
     new LogConfigDef()
       .define(SegmentBytesProp, INT, Defaults.SegmentSize, atLeast(LegacyRecord.RECORD_OVERHEAD_V0), MEDIUM,
@@ -259,6 +276,8 @@ object LogConfig {
         MinCleanableRatioDoc, KafkaConfig.LogCleanerMinCleanRatioProp)
       .define(CleanupPolicyProp, LIST, Defaults.CleanupPolicy, ValidList.in(LogConfig.Compact, LogConfig.Delete), MEDIUM, CompactDoc,
         KafkaConfig.LogCleanupPolicyProp)
+      .define(CompactionPolicyProp, STRING, Defaults.CompactionPolicy, nonEmptyString(), MEDIUM, CompactionPolicyDoc,
+        KafkaConfig.LogCleanerCompactionPolicy)
       .define(UncleanLeaderElectionEnableProp, BOOLEAN, Defaults.UncleanLeaderElectionEnable,
         MEDIUM, UncleanLeaderElectionEnableDoc, KafkaConfig.UncleanLeaderElectionEnableProp)
       .define(MinInSyncReplicasProp, INT, Defaults.MinInSyncReplicas, atLeast(1), MEDIUM, MinInSyncReplicasDoc,
@@ -301,7 +320,7 @@ object LogConfig {
   /**
    * Check that property names are valid
    */
-  def validateNames(props: Properties) {
+  def validateNames(props: Properties): Unit = {
     val names = configNames
     for(name <- props.asScala.keys)
       if (!names.contains(name))
@@ -322,7 +341,7 @@ object LogConfig {
   /**
    * Check that the given properties contain only valid log config names and that all values can be parsed and are valid
    */
-  def validate(props: Properties) {
+  def validate(props: Properties): Unit = {
     validateNames(props)
     val valueMaps = configDef.parse(props)
     validateValues(valueMaps)

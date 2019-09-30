@@ -116,7 +116,7 @@ public class TopicConfig {
         "the log by duplicates (at 50% at most 50% of the log could be duplicates). A " +
         "higher ratio will mean fewer, more efficient cleanings but will mean more wasted " +
         "space in the log. If the " + MAX_COMPACTION_LAG_MS_CONFIG + " or the " + MIN_COMPACTION_LAG_MS_CONFIG +
-        " configurations are also specified, then the log compactor considers the log eligible for compaction " +
+        " configurations are also specified, then the log compactor considers the log to be eligible for compaction " +
         "as soon as either: (i) the dirty ratio threshold has been met and the log has had dirty (uncompacted) " +
         "records for at least the " + MIN_COMPACTION_LAG_MS_CONFIG + " duration, or (ii) if the log has had " +
         "dirty (uncompacted) records for at most the " + MAX_COMPACTION_LAG_MS_CONFIG + " period.";
@@ -124,11 +124,20 @@ public class TopicConfig {
     public static final String CLEANUP_POLICY_CONFIG = "cleanup.policy";
     public static final String CLEANUP_POLICY_COMPACT = "compact";
     public static final String CLEANUP_POLICY_DELETE = "delete";
+
     public static final String CLEANUP_POLICY_DOC = "A string that is either \"" + CLEANUP_POLICY_DELETE +
         "\" or \"" + CLEANUP_POLICY_COMPACT + "\" or both. This string designates the retention policy to use on " +
         "old log segments. The default policy (\"delete\") will discard old segments when their retention " +
         "time or size limit has been reached. The \"compact\" setting will enable <a href=\"#compaction\">log " +
         "compaction</a> on the topic.";
+
+    public static final String COMPACTION_POLICY_CONFIG = "compaction.policy";
+    public static final String COMPACTION_POLICY_OFFSET = "offset";
+    public static final String COMPACTION_POLICY_SEQUENCE = "sequence";
+    public static final String COMPACTION_POLICY_TIMESTAMP = "timestamp";
+    public static final String COMPACTION_POLICY_DOC = "This configuration enables the advanced log compaction" +
+            "The default compaction strategy should be useoffset, one additional compaction strategy is supported: " +
+            "usesequence ";
 
     public static final String UNCLEAN_LEADER_ELECTION_ENABLE_CONFIG = "unclean.leader.election.enable";
     public static final String UNCLEAN_LEADER_ELECTION_ENABLE_DOC = "Indicates whether to enable replicas " +
