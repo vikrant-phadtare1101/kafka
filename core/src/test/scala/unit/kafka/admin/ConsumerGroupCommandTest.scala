@@ -25,14 +25,15 @@ import kafka.admin.ConsumerGroupCommand.{ConsumerGroupCommandOptions, ConsumerGr
 import kafka.integration.KafkaServerTestHarness
 import kafka.server.KafkaConfig
 import kafka.utils.TestUtils
+import org.apache.kafka.clients.admin.AdminClientConfig
 import org.apache.kafka.clients.consumer.{KafkaConsumer, RangeAssignor}
-import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.common.{PartitionInfo, TopicPartition}
 import org.apache.kafka.common.errors.WakeupException
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.junit.{After, Before}
 
-import scala.collection.mutable.ArrayBuffer
 import scala.collection.JavaConverters._
+import scala.collection.mutable.ArrayBuffer
 
 class ConsumerGroupCommandTest extends KafkaServerTestHarness {
   import ConsumerGroupCommandTest._
@@ -51,7 +52,7 @@ class ConsumerGroupCommandTest extends KafkaServerTestHarness {
   }
 
   @Before
-  override def setUp() {
+  override def setUp(): Unit = {
     super.setUp()
     createTopic(topic, 1, 1)
   }
@@ -69,14 +70,10 @@ class ConsumerGroupCommandTest extends KafkaServerTestHarness {
     props.put("group.id", group)
     val consumer = new KafkaConsumer(props, new StringDeserializer, new StringDeserializer)
     try {
-      consumer.partitionsFor(topic).asScala.flatMap { partitionInfo =>
-        val tp = new TopicPartition(partitionInfo.topic, partitionInfo.partition)
-        val committed = consumer.committed(tp)
-        if (committed == null)
-          None
-        else
-          Some(tp -> committed.offset)
-      }.toMap
+      val partitions: Set[TopicPartition] = consumer.partitionsFor(topic)
+        .asScala.toSet.map {partitionInfo : PartitionInfo => new TopicPartition(partitionInfo.topic, partitionInfo.partition)}
+
+      consumer.committed(partitions.asJava).asScala.mapValues(_.offset()).toMap
     } finally {
       consumer.close()
     }
@@ -84,7 +81,7 @@ class ConsumerGroupCommandTest extends KafkaServerTestHarness {
 
   def getConsumerGroupService(args: Array[String]): ConsumerGroupService = {
     val opts = new ConsumerGroupCommandOptions(args)
-    val service = new ConsumerGroupService(opts)
+    val service = new ConsumerGroupService(opts, Map(AdminClientConfig.RETRIES_CONFIG -> Int.MaxValue.toString))
     consumerGroupService = service :: consumerGroupService
     service
   }
@@ -130,7 +127,7 @@ object ConsumerGroupCommandTest {
 
     def subscribe(): Unit
 
-    def run() {
+    def run(): Unit = {
       try {
         subscribe()
         while (true)
@@ -142,7 +139,7 @@ object ConsumerGroupCommandTest {
       }
     }
 
-    def shutdown() {
+    def shutdown(): Unit = {
       consumer.wakeup()
     }
   }
@@ -172,12 +169,12 @@ object ConsumerGroupCommandTest {
     private val executor: ExecutorService = Executors.newFixedThreadPool(numThreads)
     private val consumers = new ArrayBuffer[AbstractConsumerRunnable]()
 
-    def submit(consumerThread: AbstractConsumerRunnable) {
+    def submit(consumerThread: AbstractConsumerRunnable): Unit = {
       consumers += consumerThread
       executor.submit(consumerThread)
     }
 
-    def shutdown() {
+    def shutdown(): Unit = {
       consumers.foreach(_.shutdown())
       executor.shutdown()
       executor.awaitTermination(5000, TimeUnit.MILLISECONDS)
