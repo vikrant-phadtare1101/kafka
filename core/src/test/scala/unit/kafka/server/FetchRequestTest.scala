@@ -44,7 +44,7 @@ class FetchRequestTest extends BaseRequestTest {
 
   private var producer: KafkaProducer[String, String] = null
 
-  override def tearDown() {
+  override def tearDown(): Unit = {
     if (producer != null)
       producer.close()
     super.tearDown()
@@ -205,7 +205,7 @@ class FetchRequestTest extends BaseRequestTest {
       Seq(topicPartition))).build()
     val fetchResponse = sendFetchRequest(nonReplicaId, fetchRequest)
     val partitionData = fetchResponse.responseData.get(topicPartition)
-    assertEquals(Errors.NOT_LEADER_FOR_PARTITION, partitionData.error)
+    assertEquals(Errors.REPLICA_NOT_AVAILABLE, partitionData.error)
   }
 
   @Test
@@ -238,8 +238,8 @@ class FetchRequestTest extends BaseRequestTest {
 
     // Check follower error codes
     val followerId = TestUtils.findFollowerId(topicPartition, servers)
-    assertResponseErrorForEpoch(Errors.NOT_LEADER_FOR_PARTITION, followerId, Optional.empty())
-    assertResponseErrorForEpoch(Errors.NOT_LEADER_FOR_PARTITION, followerId, Optional.of(secondLeaderEpoch))
+    assertResponseErrorForEpoch(Errors.NONE, followerId, Optional.empty())
+    assertResponseErrorForEpoch(Errors.NONE, followerId, Optional.of(secondLeaderEpoch))
     assertResponseErrorForEpoch(Errors.UNKNOWN_LEADER_EPOCH, followerId, Optional.of(secondLeaderEpoch + 1))
     assertResponseErrorForEpoch(Errors.FENCED_LEADER_EPOCH, followerId, Optional.of(secondLeaderEpoch - 1))
   }
@@ -279,7 +279,7 @@ class FetchRequestTest extends BaseRequestTest {
 
       val socket = connect(brokerSocketServer(leaderId))
       try {
-        send(fetchRequest, ApiKeys.FETCH, socket)
+        send(fetchRequest, ApiKeys.FETCH, socket, fetchRequest.api.headerVersion(fetchRequest.version()))
         if (closeAfterPartialResponse) {
           // read some data to ensure broker has muted this channel and then close socket
           val size = new DataInputStream(socket.getInputStream).readInt()
@@ -290,7 +290,7 @@ class FetchRequestTest extends BaseRequestTest {
               size > maxPartitionBytes - batchSize)
           None
         } else {
-          Some(FetchResponse.parse(receive(socket), version))
+          Some(FetchResponse.parse(receive(socket, ApiKeys.FETCH.headerVersion(version)), version))
         }
       } finally {
         socket.close()
