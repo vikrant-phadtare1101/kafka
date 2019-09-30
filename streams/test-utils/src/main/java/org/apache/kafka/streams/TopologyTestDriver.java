@@ -27,14 +27,14 @@ import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.annotation.InterfaceStability;
+import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.metrics.MetricConfig;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.metrics.Sensor;
-import org.apache.kafka.common.metrics.stats.Count;
+import org.apache.kafka.common.metrics.stats.CumulativeSum;
 import org.apache.kafka.common.metrics.stats.Rate;
-import org.apache.kafka.common.metrics.stats.Total;
+import org.apache.kafka.common.metrics.stats.WindowedCount;
 import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.Deserializer;
@@ -75,14 +75,15 @@ import org.apache.kafka.streams.state.TimestampedWindowStore;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
 import org.apache.kafka.streams.state.WindowStore;
 import org.apache.kafka.streams.state.internals.ThreadCache;
-import org.apache.kafka.streams.test.ConsumerRecordFactory;
-import org.apache.kafka.streams.test.OutputVerifier;
+import org.apache.kafka.streams.state.internals.metrics.RocksDBMetricsRecordingTrigger;
+import org.apache.kafka.streams.test.TestRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -91,6 +92,8 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.Queue;
 import java.util.Set;
@@ -107,13 +110,15 @@ import java.util.regex.Pattern;
  * Best of all, the class works without a real Kafka broker, so the tests execute very quickly with very little overhead.
  * <p>
  * Using the {@code TopologyTestDriver} in tests is easy: simply instantiate the driver and provide a {@link Topology}
- * (cf. {@link StreamsBuilder#build()}) and {@link Properties configs}, use the driver to supply an
- * input message to the topology, and then use the driver to read and verify any messages output by the topology.
+ * (cf. {@link StreamsBuilder#build()}) and {@link Properties configs}, create {@link #createInputTopic(String, Serializer, Serializer)}
+ * and use the {@link TestInputTopic} to supply an input message to the topology,
+ * and then create {@link #createOutputTopic(String, Deserializer, Deserializer)} and use the {@link TestOutputTopic} to read and
+ * verify any messages output by the topology.
  * <p>
  * Although the driver doesn't use a real Kafka broker, it does simulate Kafka {@link Consumer consumers} and
  * {@link Producer producers} that read and write raw {@code byte[]} messages.
- * You can either deal with messages that have {@code byte[]} keys and values or you use {@link ConsumerRecordFactory}
- * and {@link OutputVerifier} that work with regular Java objects instead of raw bytes.
+ * You can let {@link TestInputTopic} and {@link TestOutputTopic} to handle conversion
+ * form regular Java objects to raw bytes.
  *
  * <h2>Driver setup</h2>
  * In order to create a {@code TopologyTestDriver} instance, you need a {@link Topology} and a {@link Properties config}.
@@ -138,32 +143,31 @@ import java.util.regex.Pattern;
  * This test driver simulates single-partitioned input topics.
  * Here's an example of an input message on the topic named {@code input-topic}:
  *
- * <pre>
- * ConsumerRecordFactory factory = new ConsumerRecordFactory(strSerializer, strSerializer);
- * driver.pipeInput(factory.create("input-topic","key1", "value1"));
- * </pre>
+ * <pre>{@code
+ * TestInputTopic<String, String> inputTopic = driver.createInputTopic("input-topic", stringSerde, stringSerde);
+ * inputTopic.pipeInput("key1", "value1");
+ * }</pre>
  *
- * When {@code #pipeInput()} is called, the driver passes the input message through to the appropriate source that
+ * When {@link TestInputTopic#pipeInput(Object, Object)} is called, the driver passes the input message through to the appropriate source that
  * consumes the named topic, and will invoke the processor(s) downstream of the source.
  * If your topology's processors forward messages to sinks, your test can then consume these output messages to verify
  * they match the expected outcome.
  * For example, if our topology should have generated 2 messages on {@code output-topic-1} and 1 message on
  * {@code output-topic-2}, then our test can obtain these messages using the
- * {@link #readOutput(String, Deserializer, Deserializer)} method:
+ * {@link TestOutputTopic#readKeyValue()}  method:
  *
  * <pre>{@code
- * ProducerRecord<String, String> record1 = driver.readOutput("output-topic-1", strDeserializer, strDeserializer);
- * ProducerRecord<String, String> record2 = driver.readOutput("output-topic-1", strDeserializer, strDeserializer);
- * ProducerRecord<String, String> record3 = driver.readOutput("output-topic-2", strDeserializer, strDeserializer);
+ * TestOutputTopic<String, String> outputTopic1 = driver.createOutputTopic("output-topic-1", stringSerde, stringSerde);
+ * TestOutputTopic<String, String> outputTopic2 = driver.createOutputTopic("output-topic-2", stringSerde, stringSerde);
+ *
+ * KeyValue<String, String> record1 = outputTopic1.readKeyValue();
+ * KeyValue<String, String> record2 = outputTopic1.readKeyValue();
+ * KeyValue<String, String> record3 = outputTopic1.readKeyValue();
  * }</pre>
  *
  * Again, our example topology generates messages with string keys and values, so we supply our string deserializer
  * instance for use on both the keys and values. Your test logic can then verify whether these output records are
  * correct.
- * Note, that calling {@link ProducerRecord#equals(Object)} compares all attributes including key, value, timestamp,
- * topic, partition, and headers.
- * If you only want to compare key and value (and maybe timestamp), using {@link OutputVerifier} instead of
- * {@link ProducerRecord#equals(Object)} can simplify your code as you can ignore attributes you are not interested in.
  * <p>
  * Note, that calling {@code pipeInput()} will also trigger {@link PunctuationType#STREAM_TIME event-time} base
  * {@link ProcessorContext#schedule(Duration, PunctuationType, Punctuator) punctuation} callbacks.
@@ -183,10 +187,9 @@ import java.util.regex.Pattern;
  * Or, our test might have pre-populated some state <em>before</em> submitting the input message, and verified afterward
  * that the processor(s) correctly updated the state.
  *
- * @see ConsumerRecordFactory
- * @see OutputVerifier
+ * @see TestInputTopic
+ * @see TestOutputTopic
  */
-@InterfaceStability.Evolving
 public class TopologyTestDriver implements Closeable {
 
     private static final Logger log = LoggerFactory.getLogger(TopologyTestDriver.class);
@@ -225,7 +228,7 @@ public class TopologyTestDriver implements Closeable {
     @SuppressWarnings("WeakerAccess")
     public TopologyTestDriver(final Topology topology,
                               final Properties config) {
-        this(topology, config, System.currentTimeMillis());
+        this(topology, config, (Instant) null);
     }
 
     /**
@@ -236,11 +239,27 @@ public class TopologyTestDriver implements Closeable {
      * @param initialWallClockTimeMs the initial value of internally mocked wall-clock time
      */
     @SuppressWarnings("WeakerAccess")
+    @Deprecated
     public TopologyTestDriver(final Topology topology,
                               final Properties config,
                               final long initialWallClockTimeMs) {
         this(topology.internalTopologyBuilder, config, initialWallClockTimeMs);
     }
+
+    /**
+     * Create a new test diver instance.
+     *
+     * @param topology               the topology to be tested
+     * @param config                 the configuration for the topology
+     * @param initialWallClockTime   the initial value of internally mocked wall-clock time
+     */
+    @SuppressWarnings("WeakerAccess")
+    public TopologyTestDriver(final Topology topology,
+                              final Properties config,
+                              final Instant initialWallClockTime) {
+        this(topology.internalTopologyBuilder, config, initialWallClockTime == null ? System.currentTimeMillis() : initialWallClockTime.toEpochMilli());
+    }
+
 
     /**
      * Create a new test diver instance.
@@ -282,19 +301,24 @@ public class TopologyTestDriver implements Closeable {
         metrics = new Metrics(metricConfig, mockWallClockTime);
 
         final String threadName = "topology-test-driver-virtual-thread";
-        final StreamsMetricsImpl streamsMetrics = new StreamsMetricsImpl(metrics, threadName);
+        final StreamsMetricsImpl streamsMetrics = new StreamsMetricsImpl(
+            metrics,
+            threadName,
+            StreamsConfig.METRICS_LATEST
+        );
+        streamsMetrics.setRocksDBMetricsRecordingTrigger(new RocksDBMetricsRecordingTrigger());
         final Sensor skippedRecordsSensor = streamsMetrics.threadLevelSensor("skipped-records", Sensor.RecordingLevel.INFO);
         final String threadLevelGroup = "stream-metrics";
         skippedRecordsSensor.add(new MetricName("skipped-records-rate",
                                                 threadLevelGroup,
                                                 "The average per-second number of skipped records",
                                                 streamsMetrics.tagMap()),
-                                 new Rate(TimeUnit.SECONDS, new Count()));
+                                 new Rate(TimeUnit.SECONDS, new WindowedCount()));
         skippedRecordsSensor.add(new MetricName("skipped-records-total",
                                                 threadLevelGroup,
                                                 "The total number of skipped records",
                                                 streamsMetrics.tagMap()),
-                                 new Total());
+                                 new CumulativeSum());
         final ThreadCache cache = new ThreadCache(
             new LogContext("topology-test-driver "),
             Math.max(0, streamsConfig.getLong(StreamsConfig.CACHE_MAX_BYTES_BUFFERING_CONFIG)),
@@ -406,27 +430,36 @@ public class TopologyTestDriver implements Closeable {
      * @param consumerRecord the record to be processed
      */
     @SuppressWarnings("WeakerAccess")
+    @Deprecated
     public void pipeInput(final ConsumerRecord<byte[], byte[]> consumerRecord) {
-        final String topicName = consumerRecord.topic();
+        pipeRecord(consumerRecord.topic(), consumerRecord.timestamp(), consumerRecord.key(), consumerRecord.value(), consumerRecord.headers());
+    }
+
+    private void pipeRecord(final ProducerRecord<byte[], byte[]> record) {
+        pipeRecord(record.topic(), record.timestamp(), record.key(), record.value(), record.headers());
+    }
+
+    private void pipeRecord(final String topic, final Long timestamp, final byte[] key, final byte[] value, final Headers headers) {
+        final String topicName = topic;
 
         if (!internalTopologyBuilder.getSourceTopicNames().isEmpty()) {
-            validateSourceTopicNameRegexPattern(consumerRecord.topic());
+            validateSourceTopicNameRegexPattern(topic);
         }
         final TopicPartition topicPartition = getTopicPartition(topicName);
         if (topicPartition != null) {
             final long offset = offsetsByTopicPartition.get(topicPartition).incrementAndGet() - 1;
             task.addRecords(topicPartition, Collections.singleton(new ConsumerRecord<>(
-                topicName,
-                topicPartition.partition(),
-                offset,
-                consumerRecord.timestamp(),
-                consumerRecord.timestampType(),
-                (long) ConsumerRecord.NULL_CHECKSUM,
-                consumerRecord.serializedKeySize(),
-                consumerRecord.serializedValueSize(),
-                consumerRecord.key(),
-                consumerRecord.value(),
-                consumerRecord.headers())));
+                    topicName,
+                    topicPartition.partition(),
+                    offset,
+                    timestamp,
+                    TimestampType.CREATE_TIME,
+                    (long) ConsumerRecord.NULL_CHECKSUM,
+                    key == null ? 0 : key.length,
+                    value == null ? 0 : value.length,
+                    key,
+                    value,
+                    headers)));
 
             // Process the record ...
             task.process();
@@ -440,20 +473,21 @@ public class TopologyTestDriver implements Closeable {
             }
             final long offset = offsetsByTopicPartition.get(globalTopicPartition).incrementAndGet() - 1;
             globalStateTask.update(new ConsumerRecord<>(
-                globalTopicPartition.topic(),
-                globalTopicPartition.partition(),
-                offset,
-                consumerRecord.timestamp(),
-                consumerRecord.timestampType(),
-                (long) ConsumerRecord.NULL_CHECKSUM,
-                consumerRecord.serializedKeySize(),
-                consumerRecord.serializedValueSize(),
-                consumerRecord.key(),
-                consumerRecord.value(),
-                consumerRecord.headers()));
+                    globalTopicPartition.topic(),
+                    globalTopicPartition.partition(),
+                    offset,
+                    timestamp,
+                    TimestampType.CREATE_TIME,
+                    (long) ConsumerRecord.NULL_CHECKSUM,
+                    key == null ? 0 : key.length,
+                    value == null ? 0 : value.length,
+                    key,
+                    value,
+                    headers));
             globalStateTask.flushState();
         }
     }
+
 
     private void validateSourceTopicNameRegexPattern(final String inputRecordTopic) {
         for (final String sourceTopicName : internalTopologyBuilder.getSourceTopicNames()) {
@@ -492,22 +526,7 @@ public class TopologyTestDriver implements Closeable {
             final String outputTopicName = record.topic();
             if (internalTopics.contains(outputTopicName) || processorTopology.sourceTopics().contains(outputTopicName)
                 || globalPartitionsByTopic.containsKey(outputTopicName)) {
-
-                final byte[] serializedKey = record.key();
-                final byte[] serializedValue = record.value();
-
-                pipeInput(new ConsumerRecord<>(
-                    outputTopicName,
-                    -1,
-                    -1L,
-                    record.timestamp(),
-                    TimestampType.CREATE_TIME,
-                    0L,
-                    serializedKey == null ? 0 : serializedKey.length,
-                    serializedValue == null ? 0 : serializedValue.length,
-                    serializedKey,
-                    serializedValue,
-                    record.headers()));
+                pipeRecord(record);
             }
         }
     }
@@ -518,6 +537,7 @@ public class TopologyTestDriver implements Closeable {
      * @param records a list of records to be processed
      */
     @SuppressWarnings("WeakerAccess")
+    @Deprecated
     public void pipeInput(final List<ConsumerRecord<byte[], byte[]>> records) {
         for (final ConsumerRecord<byte[], byte[]> record : records) {
             pipeInput(record);
@@ -532,8 +552,22 @@ public class TopologyTestDriver implements Closeable {
      * @param advanceMs the amount of time to advance wall-clock time in milliseconds
      */
     @SuppressWarnings("WeakerAccess")
+    @Deprecated
     public void advanceWallClockTime(final long advanceMs) {
-        mockWallClockTime.sleep(advanceMs);
+        advanceWallClockTime(Duration.ofMillis(advanceMs));
+    }
+
+    /**
+     * Advances the internally mocked wall-clock time.
+     * This might trigger a {@link PunctuationType#WALL_CLOCK_TIME wall-clock} type
+     * {@link ProcessorContext#schedule(Duration, PunctuationType, Punctuator) punctuations}.
+     *
+     * @param advance the amount of time to advance wall-clock time
+     */
+    @SuppressWarnings("WeakerAccess")
+    public void advanceWallClockTime(final Duration advance) {
+        Objects.requireNonNull(advance, "advance cannot be null");
+        mockWallClockTime.sleep(advance.toMillis());
         if (task != null) {
             task.maybePunctuateSystemTime();
             task.commit();
@@ -549,6 +583,7 @@ public class TopologyTestDriver implements Closeable {
      * @return the next record on that topic, or {@code null} if there is no record available
      */
     @SuppressWarnings("WeakerAccess")
+    @Deprecated
     public ProducerRecord<byte[], byte[]> readOutput(final String topic) {
         final Queue<ProducerRecord<byte[], byte[]>> outputRecords = outputRecordsByTopic.get(topic);
         if (outputRecords == null) {
@@ -567,6 +602,7 @@ public class TopologyTestDriver implements Closeable {
      * @return the next record on that topic, or {@code null} if there is no record available
      */
     @SuppressWarnings("WeakerAccess")
+    @Deprecated
     public <K, V> ProducerRecord<K, V> readOutput(final String topic,
                                                   final Deserializer<K> keyDeserializer,
                                                   final Deserializer<V> valueDeserializer) {
@@ -578,6 +614,160 @@ public class TopologyTestDriver implements Closeable {
         final V value = valueDeserializer.deserialize(record.topic(), record.value());
         return new ProducerRecord<>(record.topic(), record.partition(), record.timestamp(), key, value, record.headers());
     }
+
+
+    final private Queue<ProducerRecord<byte[], byte[]>> getRecordsQueue(final String topicName) {
+        final Queue<ProducerRecord<byte[], byte[]>> outputRecords = outputRecordsByTopic.get(topicName);
+        if (outputRecords == null) {
+            if (!processorTopology.sinkTopics().contains(topicName)) {
+                throw new IllegalArgumentException("Unknown topic: " + topicName);
+            }
+        }
+        return outputRecords;
+    }
+
+    /**
+     * Create {@link TestInputTopic} to be used for piping records to topic
+     * Uses current system time as start timestamp for records.
+     * Auto-advance is disabled.
+     *
+     * @param topicName             the name of the topic
+     * @param keySerializer   the Serializer for the key type
+     * @param valueSerializer the Serializer for the value type
+     * @param <K> the key type
+     * @param <V> the value type
+     * @return {@link TestInputTopic} object
+     */
+    public final <K, V> TestInputTopic<K, V> createInputTopic(final String topicName,
+                                                              final Serializer<K> keySerializer,
+                                                              final Serializer<V> valueSerializer) {
+        return new TestInputTopic<K, V>(this, topicName, keySerializer, valueSerializer);
+    }
+
+    /**
+     * Create {@link TestInputTopic} to be used for piping records to topic
+     * Uses provided start timestamp and autoAdvance parameter for records
+     *
+     * @param topicName             the name of the topic
+     * @param keySerializer   the Serializer for the key type
+     * @param valueSerializer the Serializer for the value type
+     * @param startTimestamp Start timestamp for auto-generated record time
+     * @param autoAdvance autoAdvance duration for auto-generated record time
+     * @param <K> the key type
+     * @param <V> the value type
+     * @return {@link TestInputTopic} object
+     */
+    public final <K, V> TestInputTopic<K, V> createInputTopic(final String topicName,
+                                                              final Serializer<K> keySerializer,
+                                                              final Serializer<V> valueSerializer,
+                                                              final Instant startTimestamp,
+                                                              final Duration autoAdvance) {
+        return new TestInputTopic<K, V>(this, topicName, keySerializer, valueSerializer, startTimestamp, autoAdvance);
+    }
+
+    /**
+     * Create {@link TestOutputTopic} to be used for reading records from topic
+     *
+     * @param topicName             the name of the topic
+     * @param keyDeserializer   the Deserializer for the key type
+     * @param valueDeserializer the Deserializer for the value type
+     * @param <K> the key type
+     * @param <V> the value type
+     * @return {@link TestOutputTopic} object
+     */
+    public final <K, V> TestOutputTopic<K, V> createOutputTopic(final String topicName,
+                                                                final Deserializer<K> keyDeserializer,
+                                                                final Deserializer<V> valueDeserializer) {
+        return new TestOutputTopic<K, V>(this, topicName, keyDeserializer, valueDeserializer);
+    }
+
+    /**
+     * Read the next record from the given topic.
+     * These records were output by the topology during the previous calls to {@link #pipeInput(ConsumerRecord)}.
+     *
+     * @param topic the name of the topic
+     * @return the next record on that topic, or {@code null} if there is no record available
+     */
+    @SuppressWarnings("WeakerAccess")
+    ProducerRecord<byte[], byte[]> readRecord(final String topic) {
+        final Queue<? extends ProducerRecord<byte[], byte[]>> outputRecords = getRecordsQueue(topic);
+        if (outputRecords == null) {
+            return null;
+        }
+        return outputRecords.poll();
+    }
+
+    /**
+     * Read the next record from the given topic.
+     * These records were output by the topology during the previous calls to {@link #pipeInput(ConsumerRecord)}.
+     *
+     * @param topic             the name of the topic
+     * @param keyDeserializer   the deserializer for the key type
+     * @param valueDeserializer the deserializer for the value type
+     * @param <K> the key type
+     * @param <V> the value type
+     * @return the next record on that topic, or {@code null} if there is no record available
+     */
+    @SuppressWarnings("WeakerAccess")
+    <K, V> TestRecord<K, V> readRecord(final String topic,
+                                         final Deserializer<K> keyDeserializer,
+                                         final Deserializer<V> valueDeserializer) {
+        final Queue<? extends ProducerRecord<byte[], byte[]>> outputRecords = getRecordsQueue(topic);
+        if (outputRecords == null) {
+            throw new NoSuchElementException("Uninitialized topic: " + topic);
+        }
+        final ProducerRecord<byte[], byte[]> record = outputRecords.poll();
+        if (record == null) {
+            throw new NoSuchElementException("Empty topic: " + topic);
+        }
+        final K key = keyDeserializer.deserialize(record.topic(), record.key());
+        final V value = valueDeserializer.deserialize(record.topic(), record.value());
+        return new TestRecord<>(key, value, record.headers(), record.timestamp());
+    }
+
+    /**
+     * Serialize an input recond and send on the specified topic to the topology and then
+     * commit the messages.
+     *
+     * @param topic           the name of the topic
+     * @param record          TestRecord to be send
+     * @param keySerializer   the key serializer
+     * @param valueSerializer the value serializer
+     * @param <K> the key type
+     * @param <V> the value type*
+     * @param time            timestamp to override the record timestamp
+     */
+    @SuppressWarnings("WeakerAccess")
+    <K, V> void pipeRecord(final String topic,
+                           final TestRecord<K, V> record,
+                           final Serializer<K> keySerializer,
+                           final Serializer<V> valueSerializer,
+                           final Instant time) {
+        final byte[] serializedKey = keySerializer.serialize(topic, record.headers(), record.key());
+        final byte[] serializedValue = valueSerializer.serialize(topic, record.headers(), record.value());
+        //final Long timestamp = (time != null) ? time.toEpochMilli() : record.timestamp();
+        long timestamp = 0;
+        if (time != null)
+            timestamp = time.toEpochMilli();
+        else if (record.timestamp() != null)
+            timestamp = record.timestamp();
+
+        pipeRecord(topic, timestamp, serializedKey, serializedValue, record.headers());
+    }
+
+    final long getQueueSize(final String topic) {
+        final Queue<ProducerRecord<byte[], byte[]>> queue = getRecordsQueue(topic);
+        if (queue == null) {
+            //Return 0 if not initialized, getRecordsQueue throw exception if non existing topic
+            return 0;
+        }
+        return queue.size();
+    }
+
+    final boolean isEmpty(final String topic) {
+        return getQueueSize(topic) == 0;
+    }
+
 
     /**
      * Get all {@link StateStore StateStores} from the topology.
