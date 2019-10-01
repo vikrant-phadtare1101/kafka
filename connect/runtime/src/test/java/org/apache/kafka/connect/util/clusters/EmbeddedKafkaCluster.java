@@ -19,11 +19,12 @@ package org.apache.kafka.connect.util.clusters;
 import kafka.server.KafkaConfig;
 import kafka.server.KafkaConfig$;
 import kafka.server.KafkaServer;
+import kafka.server.RunningAsBroker;
 import kafka.utils.CoreUtils;
 import kafka.utils.TestUtils;
 import kafka.zk.EmbeddedZookeeper;
 import org.apache.kafka.clients.CommonClientConfigs;
-import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -65,6 +66,7 @@ import static org.apache.kafka.clients.consumer.ConsumerConfig.BOOTSTRAP_SERVERS
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.MAX_POLL_RECORDS_CONFIG;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG;
 
 /**
@@ -197,6 +199,18 @@ public class EmbeddedKafkaCluster extends ExternalResource {
         return "127.0.0.1:" + zookeeper.port();
     }
 
+    public boolean allBrokersRunning() {
+        return countBrokersIn(RunningAsBroker.state()) == brokers.length;
+    }
+
+    protected long countBrokersIn(byte expectedState) {
+        return Arrays.stream(brokers)
+                     .map(KafkaServer::brokerState)
+                     .filter(brokerState -> brokerState.currentState() == expectedState)
+                     .count();
+    }
+
+
     /**
      * Create a Kafka topic with 1 partition and a replication factor of 1.
      *
@@ -234,7 +248,7 @@ public class EmbeddedKafkaCluster extends ExternalResource {
         final NewTopic newTopic = new NewTopic(topic, partitions, (short) replication);
         newTopic.configs(topicConfig);
 
-        try (final AdminClient adminClient = createAdminClient()) {
+        try (final Admin adminClient = createAdminClient()) {
             adminClient.createTopics(Collections.singletonList(newTopic)).all().get();
         } catch (final InterruptedException | ExecutionException e) {
             throw new RuntimeException(e);
@@ -258,7 +272,7 @@ public class EmbeddedKafkaCluster extends ExternalResource {
         }
     }
 
-    public AdminClient createAdminClient() {
+    public Admin createAdminClient() {
         final Properties adminClientConfig = new Properties();
         adminClientConfig.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers());
         final Object listeners = brokerConfig.get(KafkaConfig$.MODULE$.ListenersProp());
@@ -267,7 +281,7 @@ public class EmbeddedKafkaCluster extends ExternalResource {
             adminClientConfig.put(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG, ((Password) brokerConfig.get(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG)).value());
             adminClientConfig.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SSL");
         }
-        return AdminClient.create(adminClientConfig);
+        return Admin.create(adminClientConfig);
     }
 
     /**
@@ -279,11 +293,13 @@ public class EmbeddedKafkaCluster extends ExternalResource {
      * @return a {@link ConsumerRecords} collection containing at least n records.
      */
     public ConsumerRecords<byte[], byte[]> consume(int n, long maxDuration, String... topics) {
+        log.debug("Consuming from {} for total of {} millis.", Arrays.toString(topics), maxDuration);
         Map<TopicPartition, List<ConsumerRecord<byte[], byte[]>>> records = new HashMap<>();
         int consumedRecords = 0;
-        try (KafkaConsumer<byte[], byte[]> consumer = createConsumerAndSubscribeTo(Collections.emptyMap(), topics)) {
+        Map<String, Object> consumerProps = Collections.singletonMap(MAX_POLL_RECORDS_CONFIG, 10);
+        try (KafkaConsumer<byte[], byte[]> consumer = createConsumerAndSubscribeTo(consumerProps, topics)) {
             final long startMillis = System.currentTimeMillis();
-            long allowedDuration = maxDuration;
+            long allowedDuration = Math.max(10L, maxDuration / 10);
             while (allowedDuration > 0) {
                 log.debug("Consuming from {} for {} millis.", Arrays.toString(topics), allowedDuration);
                 ConsumerRecords<byte[], byte[]> rec = consumer.poll(Duration.ofMillis(allowedDuration));

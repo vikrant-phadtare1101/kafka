@@ -24,9 +24,9 @@ import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.metrics.stats.Avg;
+import org.apache.kafka.common.metrics.stats.CumulativeSum;
 import org.apache.kafka.common.metrics.stats.Max;
 import org.apache.kafka.common.metrics.stats.Rate;
-import org.apache.kafka.common.metrics.stats.Total;
 import org.apache.kafka.common.metrics.stats.Value;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.connect.errors.ConnectException;
@@ -171,6 +171,7 @@ class WorkerSourceTask extends WorkerTask {
 
     @Override
     public void stop() {
+        log.debug("{} Source task requested to stop", this);
         super.stop();
         stopRequestedLatch.countDown();
         synchronized (this) {
@@ -183,6 +184,7 @@ class WorkerSourceTask extends WorkerTask {
 
     private synchronized void tryStop() {
         if (!stopped) {
+            log.debug("{} Attempting to stop the source task", this);
             try {
                 task.stop();
                 stopped = true;
@@ -216,7 +218,7 @@ class WorkerSourceTask extends WorkerTask {
                 }
 
                 if (toSend == null) {
-                    log.trace("{} Nothing to send to Kafka. Polling source for additional records", this);
+                    log.debug("{} Nothing to send to Kafka. Polling source for additional records", this);
                     long start = time.milliseconds();
                     toSend = poll();
                     if (toSend != null) {
@@ -225,17 +227,20 @@ class WorkerSourceTask extends WorkerTask {
                 }
                 if (toSend == null)
                     continue;
-                log.debug("{} About to send " + toSend.size() + " records to Kafka", this);
+                log.trace("{} About to send {} records to Kafka", this, toSend.size());
                 if (!sendRecords())
                     stopRequestedLatch.await(SEND_FAILED_BACKOFF_MS, TimeUnit.MILLISECONDS);
             }
+            log.debug("{} Source task is stopping execution", this);
         } catch (InterruptedException e) {
+            log.debug("{} Source task execution is interrupted", this, e);
             // Ignore and allow to exit.
         } finally {
             // It should still be safe to commit offsets since any exception would have
             // simply resulted in not getting more records but all the existing records should be ok to flush
             // and commit offsets. Worst case, task.flush() will also throw an exception causing the offset commit
             // to fail.
+            log.debug("{} Source task committing offsets prior to stopping", this);
             commitOffsets();
         }
     }
@@ -284,6 +289,7 @@ class WorkerSourceTask extends WorkerTask {
      * @return true if all messages were sent, false if some need to be retried
      */
     private boolean sendRecords() {
+        log.trace("{} Sending {} records", this, toSend.size());
         int processed = 0;
         recordBatch(toSend.size());
         final SourceRecordWriteCounter counter = new SourceRecordWriteCounter(toSend.size(), sourceTaskMetricsGroup);
@@ -327,7 +333,7 @@ class WorkerSourceTask extends WorkerTask {
                                     // timeouts, callbacks with exceptions should never be invoked in practice. If the
                                     // user overrode these settings, the best we can do is notify them of the failure via
                                     // logging.
-                                    log.error("{} failed to send record to {}: {}", WorkerSourceTask.this, topic, e);
+                                    log.error("{} failed to send record to {}:", WorkerSourceTask.this, topic, e);
                                     log.debug("{} Failed record: {}", WorkerSourceTask.this, preTransformRecord);
                                 } else {
                                     log.trace("{} Wrote record successfully: topic {} partition {} offset {}",
@@ -591,11 +597,11 @@ class WorkerSourceTask extends WorkerTask {
 
             sourceRecordPoll = metricGroup.sensor("source-record-poll");
             sourceRecordPoll.add(metricGroup.metricName(registry.sourceRecordPollRate), new Rate());
-            sourceRecordPoll.add(metricGroup.metricName(registry.sourceRecordPollTotal), new Total());
+            sourceRecordPoll.add(metricGroup.metricName(registry.sourceRecordPollTotal), new CumulativeSum());
 
             sourceRecordWrite = metricGroup.sensor("source-record-write");
             sourceRecordWrite.add(metricGroup.metricName(registry.sourceRecordWriteRate), new Rate());
-            sourceRecordWrite.add(metricGroup.metricName(registry.sourceRecordWriteTotal), new Total());
+            sourceRecordWrite.add(metricGroup.metricName(registry.sourceRecordWriteTotal), new CumulativeSum());
 
             pollTime = metricGroup.sensor("poll-batch-time");
             pollTime.add(metricGroup.metricName(registry.sourceRecordPollBatchTimeMax), new Max());

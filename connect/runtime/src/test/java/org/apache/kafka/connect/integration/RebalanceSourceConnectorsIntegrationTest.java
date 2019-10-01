@@ -36,6 +36,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -61,9 +62,10 @@ public class RebalanceSourceConnectorsIntegrationTest {
     private static final Logger log = LoggerFactory.getLogger(RebalanceSourceConnectorsIntegrationTest.class);
 
     private static final int NUM_TOPIC_PARTITIONS = 3;
-    private static final int CONNECTOR_SETUP_DURATION_MS = 30_000;
-    private static final int WORKER_SETUP_DURATION_MS = 30_000;
+    private static final long CONNECTOR_SETUP_DURATION_MS = TimeUnit.SECONDS.toMillis(90);
+    private static final long WORKER_SETUP_DURATION_MS = TimeUnit.SECONDS.toMillis(90);
     private static final int NUM_TASKS = 4;
+    private static final int NUM_WORKERS = 3;
     private static final String CONNECTOR_NAME = "seq-source1";
     private static final String TOPIC_NAME = "sequential-topic";
 
@@ -83,7 +85,7 @@ public class RebalanceSourceConnectorsIntegrationTest {
         // build a Connect cluster backed by Kafka and Zk
         connect = new EmbeddedConnectCluster.Builder()
                 .name("connect-cluster")
-                .numWorkers(3)
+                .numWorkers(NUM_WORKERS)
                 .numBrokers(1)
                 .workerProps(workerProps)
                 .brokerProps(brokerProps)
@@ -121,12 +123,14 @@ public class RebalanceSourceConnectorsIntegrationTest {
                 CONNECTOR_SETUP_DURATION_MS, "Connector tasks did not start in time.");
 
         // start a source connector
-        connect.configureConnector("another-source", props);
+        String connectorName2 = "another-source";
+        int numTasks2 = NUM_TASKS;
+        connect.configureConnector(connectorName2, props);
 
         waitForCondition(() -> this.assertConnectorAndTasksRunning(CONNECTOR_NAME, NUM_TASKS).orElse(false),
                 CONNECTOR_SETUP_DURATION_MS, "Connector tasks did not start in time.");
 
-        waitForCondition(() -> this.assertConnectorAndTasksRunning("another-source", 4).orElse(false),
+        waitForCondition(() -> this.assertConnectorAndTasksRunning(connectorName2, numTasks2).orElse(false),
                 CONNECTOR_SETUP_DURATION_MS, "Connector tasks did not start in time.");
     }
 
@@ -156,25 +160,40 @@ public class RebalanceSourceConnectorsIntegrationTest {
                 CONNECTOR_SETUP_DURATION_MS, "Connector tasks did not start in time.");
 
         int numRecordsProduced = 100;
-        int recordTransferDurationMs = 5000;
+        long recordWriteDurationMs = TimeUnit.SECONDS.toMillis(60);
+        long recordTransferDurationMs = TimeUnit.SECONDS.toMillis(60);
 
         // consume all records from the source topic or fail, to ensure that they were correctly produced
         int recordNum = connect.kafka().consume(numRecordsProduced, recordTransferDurationMs, TOPIC_NAME).count();
         assertTrue("Not enough records produced by source connector. Expected at least: " + numRecordsProduced + " + but got " + recordNum,
                 recordNum >= numRecordsProduced);
 
-        // Reconfigure the source connector by changing the Kafka topic used as output
+        // expect that we're going to restart the connector and its tasks
+        StartAndStopLatch restartLatch = connectorHandle.expectedStarts(1);
+
+        // expect that the connector will write the records to a new topic
+        connectorHandle.expectedRecords(anotherTopic, numRecordsProduced);
+
+        // Reconfigure the source connector by changing the Kafka topic used as output,
+        // which will restart the connector and tasks
         props.put(TOPIC_CONFIG, anotherTopic);
         connect.configureConnector(CONNECTOR_NAME, props);
 
+        assertTrue(connect.kafka().allBrokersRunning());
+
+        // Wait for the connector *and tasks* to be restarted
+        assertTrue("Failed to alter connector configuration and see connector and tasks restart "
+                   + "within " + CONNECTOR_SETUP_DURATION_MS + "ms",
+                restartLatch.await(CONNECTOR_SETUP_DURATION_MS, TimeUnit.MILLISECONDS));
+
+        // And wait for Connect to show the connectors and tasks are running
         waitForCondition(() -> this.assertConnectorAndTasksRunning(CONNECTOR_NAME, NUM_TASKS).orElse(false),
                 CONNECTOR_SETUP_DURATION_MS, "Connector tasks did not start in time.");
 
-        // expect all records to be produced by the connector
-        connectorHandle.expectedRecords(numRecordsProduced);
+        assertTrue(connect.kafka().allBrokersRunning());
 
-        // expect all records to be produced by the connector
-        connectorHandle.expectedCommits(numRecordsProduced);
+        // wait for the connector's tasks to have produced records
+        connectorHandle.awaitRecords(anotherTopic, recordWriteDurationMs);
 
         // consume all records from the source topic or fail, to ensure that they were correctly produced
         recordNum = connect.kafka().consume(numRecordsProduced, recordTransferDurationMs, anotherTopic).count();
@@ -197,7 +216,7 @@ public class RebalanceSourceConnectorsIntegrationTest {
         props.put(KEY_CONVERTER_CLASS_CONFIG, StringConverter.class.getName());
         props.put(VALUE_CONVERTER_CLASS_CONFIG, StringConverter.class.getName());
 
-        waitForCondition(() -> this.assertWorkersUp(3),
+        waitForCondition(() -> this.assertWorkersUp(NUM_WORKERS),
                 WORKER_SETUP_DURATION_MS, "Connect workers did not start in time.");
 
         // start a source connector
@@ -238,7 +257,7 @@ public class RebalanceSourceConnectorsIntegrationTest {
         props.put(KEY_CONVERTER_CLASS_CONFIG, StringConverter.class.getName());
         props.put(VALUE_CONVERTER_CLASS_CONFIG, StringConverter.class.getName());
 
-        waitForCondition(() -> this.assertWorkersUp(3),
+        waitForCondition(() -> this.assertWorkersUp(NUM_WORKERS),
                 WORKER_SETUP_DURATION_MS, "Connect workers did not start in time.");
 
         // start a source connector
@@ -255,8 +274,9 @@ public class RebalanceSourceConnectorsIntegrationTest {
                 CONNECTOR_SETUP_DURATION_MS, "Connector tasks did not start in time.");
 
         connect.addWorker();
+        int numWorkers = NUM_WORKERS + 1;
 
-        waitForCondition(() -> this.assertWorkersUp(4),
+        waitForCondition(() -> this.assertWorkersUp(numWorkers),
                 WORKER_SETUP_DURATION_MS, "Connect workers did not start in time.");
 
         waitForCondition(() -> this.assertConnectorAndTasksRunning(CONNECTOR_NAME + 3, NUM_TASKS).orElse(false),
@@ -281,7 +301,7 @@ public class RebalanceSourceConnectorsIntegrationTest {
         props.put(KEY_CONVERTER_CLASS_CONFIG, StringConverter.class.getName());
         props.put(VALUE_CONVERTER_CLASS_CONFIG, StringConverter.class.getName());
 
-        waitForCondition(() -> this.assertWorkersUp(3),
+        waitForCondition(() -> this.assertWorkersUp(NUM_WORKERS),
                 WORKER_SETUP_DURATION_MS, "Connect workers did not start in time.");
 
         // start a source connector
@@ -298,8 +318,9 @@ public class RebalanceSourceConnectorsIntegrationTest {
                 CONNECTOR_SETUP_DURATION_MS, "Connector tasks did not start in time.");
 
         connect.removeWorker();
+        int numWorker = NUM_WORKERS - 1;
 
-        waitForCondition(() -> this.assertWorkersUp(2),
+        waitForCondition(() -> this.assertWorkersUp(numWorker),
                 WORKER_SETUP_DURATION_MS, "Connect workers did not start in time.");
 
         waitForCondition(this::assertConnectorAndTasksAreUnique,
@@ -320,6 +341,7 @@ public class RebalanceSourceConnectorsIntegrationTest {
                     && info.tasks().size() == numTasks
                     && info.connector().state().equals(AbstractStatus.State.RUNNING.toString())
                     && info.tasks().stream().allMatch(s -> s.state().equals(AbstractStatus.State.RUNNING.toString()));
+            log.debug("Found connector and tasks running: {}", result);
             return Optional.of(result);
         } catch (Exception e) {
             log.error("Could not check connector state info.", e);
