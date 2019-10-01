@@ -33,8 +33,7 @@ import java.util.Set;
 
 import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.PROCESSOR_NODE_ID_TAG;
 import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.PROCESSOR_NODE_METRICS_GROUP;
-import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.addAvgMaxLatency;
-import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.addInvocationRateAndCount;
+import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.addAvgAndMaxLatencyToSensor;
 
 public class ProcessorNode<K, V> {
 
@@ -114,7 +113,19 @@ public class ProcessorNode<K, V> {
 
     public void process(final K key, final V value) {
         final long startNs = time.nanoseconds();
-        processor.process(key, value);
+        try {
+            processor.process(key, value);
+        } catch (final ClassCastException e) {
+            final String keyClass = key == null ? "unknown because key is null" : key.getClass().getName();
+            final String valueClass = value == null ? "unknown because value is null" : value.getClass().getName();
+            throw new StreamsException(String.format("ClassCastException invoking Processor. Do the Processor's "
+                    + "input types match the deserialized types? Check the Serde setup and change the default Serdes in "
+                    + "StreamConfig or provide correct Serdes via method parameters. Make sure the Processor can accept "
+                    + "the deserialized input of type key: %s, and value: %s",
+                    keyClass,
+                    valueClass),
+                e);
+        }
         nodeMetrics.nodeProcessTimeSensor.record(time.nanoseconds() - startNs);
     }
 
@@ -232,12 +243,14 @@ public class ProcessorNode<K, V> {
                                                                            final Map<String, String> taskTags,
                                                                            final Map<String, String> nodeTags) {
             final Sensor parent = metrics.taskLevelSensor(taskName, operation, Sensor.RecordingLevel.DEBUG);
-            addAvgMaxLatency(parent, PROCESSOR_NODE_METRICS_GROUP, taskTags, operation);
-            addInvocationRateAndCount(parent, PROCESSOR_NODE_METRICS_GROUP, taskTags, operation);
+            addAvgAndMaxLatencyToSensor(parent, PROCESSOR_NODE_METRICS_GROUP, taskTags, operation);
+            StreamsMetricsImpl
+                .addInvocationRateAndCountToSensor(parent, PROCESSOR_NODE_METRICS_GROUP, taskTags, operation);
 
             final Sensor sensor = metrics.nodeLevelSensor(taskName, processorNodeName, operation, Sensor.RecordingLevel.DEBUG, parent);
-            addAvgMaxLatency(sensor, PROCESSOR_NODE_METRICS_GROUP, nodeTags, operation);
-            addInvocationRateAndCount(sensor, PROCESSOR_NODE_METRICS_GROUP, nodeTags, operation);
+            addAvgAndMaxLatencyToSensor(sensor, PROCESSOR_NODE_METRICS_GROUP, nodeTags, operation);
+            StreamsMetricsImpl
+                .addInvocationRateAndCountToSensor(sensor, PROCESSOR_NODE_METRICS_GROUP, nodeTags, operation);
 
             return sensor;
         }
