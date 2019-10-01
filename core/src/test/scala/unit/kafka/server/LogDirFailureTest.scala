@@ -51,19 +51,19 @@ class LogDirFailureTest extends IntegrationTestHarness {
   this.serverConfig.setProperty(KafkaConfig.NumReplicaFetchersProp, "1")
 
   @Before
-  override def setUp() {
+  override def setUp(): Unit = {
     super.setUp()
     createTopic(topic, partitionNum, brokerCount)
   }
 
   @Test
-  def testIOExceptionDuringLogRoll() {
+  def testIOExceptionDuringLogRoll(): Unit = {
     testProduceAfterLogDirFailureOnLeader(Roll)
   }
 
   @Test
   // Broker should halt on any log directory failure if inter-broker protocol < 1.0
-  def brokerWithOldInterBrokerProtocolShouldHaltOnLogDirFailure() {
+  def brokerWithOldInterBrokerProtocolShouldHaltOnLogDirFailure(): Unit = {
     @volatile var statusCodeOption: Option[Int] = None
     Exit.setHaltProcedure { (statusCode, _) =>
       statusCodeOption = Some(statusCode)
@@ -92,12 +92,12 @@ class LogDirFailureTest extends IntegrationTestHarness {
   }
 
   @Test
-  def testIOExceptionDuringCheckpoint() {
+  def testIOExceptionDuringCheckpoint(): Unit = {
     testProduceAfterLogDirFailureOnLeader(Checkpoint)
   }
 
   @Test
-  def testReplicaFetcherThreadAfterLogDirFailureOnFollower() {
+  def testReplicaFetcherThreadAfterLogDirFailureOnFollower(): Unit = {
     this.producerConfig.setProperty(ProducerConfig.RETRIES_CONFIG, "0")
     val producer = createProducer()
     val partition = new TopicPartition(topic, 0)
@@ -113,7 +113,7 @@ class LogDirFailureTest extends IntegrationTestHarness {
     // so that ReplicaFetcherThread on the follower will get response from leader immediately
     val anotherPartitionWithTheSameLeader = (1 until partitionNum).find { i =>
       leaderServer.replicaManager.nonOfflinePartition(new TopicPartition(topic, i))
-        .flatMap(_.leaderReplicaIfLocal).isDefined
+        .flatMap(_.leaderLogIfLocal).isDefined
     }.get
     val record = new ProducerRecord[Array[Byte], Array[Byte]](topic, anotherPartitionWithTheSameLeader, topic.getBytes, "message".getBytes)
     // When producer.send(...).get returns, it is guaranteed that ReplicaFetcherThread on the follower
@@ -121,13 +121,13 @@ class LogDirFailureTest extends IntegrationTestHarness {
     producer.send(record).get
 
     assertEquals(brokerCount, leaderServer.replicaManager.nonOfflinePartition(new TopicPartition(topic, anotherPartitionWithTheSameLeader))
-      .get.inSyncReplicas.size)
+      .get.inSyncReplicaIds.size)
     followerServer.replicaManager.replicaFetcherManager.fetcherThreadMap.values.foreach { thread =>
       assertFalse("ReplicaFetcherThread should still be working if its partition count > 0", thread.isShutdownComplete)
     }
   }
 
-  def testProduceAfterLogDirFailureOnLeader(failureType: LogDirFailureType) {
+  def testProduceAfterLogDirFailureOnLeader(failureType: LogDirFailureType): Unit = {
     val consumer = createConsumer()
     subscribeAndWaitForAssignment(topic, consumer)
 
@@ -145,8 +145,8 @@ class LogDirFailureTest extends IntegrationTestHarness {
     TestUtils.consumeRecords(consumer, 1)
 
     // Make log directory of the partition on the leader broker inaccessible by replacing it with a file
-    val replica = leaderServer.replicaManager.localReplicaOrException(partition)
-    val logDir = replica.log.get.dir.getParentFile
+    val localLog = leaderServer.replicaManager.localLogOrException(partition)
+    val logDir = localLog.dir.getParentFile
     CoreUtils.swallow(Utils.delete(logDir), this)
     logDir.createNewFile()
     assertTrue(logDir.isFile)
@@ -164,7 +164,7 @@ class LogDirFailureTest extends IntegrationTestHarness {
 
     // Wait for ReplicaHighWatermarkCheckpoint to happen so that the log directory of the topic will be offline
     TestUtils.waitUntilTrue(() => !leaderServer.logManager.isLogDirOnline(logDir.getAbsolutePath), "Expected log directory offline", 3000L)
-    assertTrue(leaderServer.replicaManager.localReplica(partition).isEmpty)
+    assertTrue(leaderServer.replicaManager.localLog(partition).isEmpty)
 
     // The second send() should fail due to either KafkaStorageException or NotLeaderForPartitionException
     try {
@@ -200,7 +200,7 @@ class LogDirFailureTest extends IntegrationTestHarness {
     assertTrue(offlineReplicas.contains(PartitionAndReplica(new TopicPartition(topic, 0), leaderServerId)))
   }
 
-  private def subscribeAndWaitForAssignment(topic: String, consumer: KafkaConsumer[Array[Byte], Array[Byte]]) {
+  private def subscribeAndWaitForAssignment(topic: String, consumer: KafkaConsumer[Array[Byte], Array[Byte]]): Unit = {
     consumer.subscribe(Collections.singletonList(topic))
     TestUtils.pollUntilTrue(consumer, () => !consumer.assignment.isEmpty, "Expected non-empty assignment")
   }
