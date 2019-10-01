@@ -17,11 +17,14 @@
 
 package org.apache.kafka.connect.runtime.isolation;
 
+import java.util.Collections;
+import java.util.Map.Entry;
 import org.apache.kafka.common.Configurable;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaAndValue;
+import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.json.JsonConverter;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.apache.kafka.connect.rest.ConnectRestExtension;
@@ -34,7 +37,6 @@ import org.apache.kafka.connect.storage.ConverterType;
 import org.apache.kafka.connect.storage.HeaderConverter;
 import org.apache.kafka.connect.storage.SimpleHeaderConverter;
 import org.junit.Before;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -49,7 +51,6 @@ import static org.junit.Assert.assertTrue;
 
 public class PluginsTest {
 
-    private static Map<String, String> pluginProps;
     private static Plugins plugins;
     private Map<String, String> props;
     private AbstractConfig config;
@@ -57,19 +58,14 @@ public class PluginsTest {
     private TestHeaderConverter headerConverter;
     private TestInternalConverter internalConverter;
 
-    @BeforeClass
-    public static void beforeAll() {
-        pluginProps = new HashMap<>();
-
-        // Set up the plugins to have no additional plugin directories.
-        // This won't allow us to test classpath isolation, but it will allow us to test some of the utility methods.
-        pluginProps.put(WorkerConfig.PLUGIN_PATH_CONFIG, "");
-        plugins = new Plugins(pluginProps);
-    }
-
     @SuppressWarnings("deprecation")
     @Before
     public void setup() {
+        Map<String, String> pluginProps = new HashMap<>();
+
+        // Set up the plugins with some test plugins to test isolation
+        pluginProps.put(WorkerConfig.PLUGIN_PATH_CONFIG, String.join(",", TestPlugins.pluginPath()));
+        plugins = new Plugins(pluginProps);
         props = new HashMap<>(pluginProps);
         props.put(WorkerConfig.KEY_CONVERTER_CLASS_CONFIG, TestConverter.class.getName());
         props.put(WorkerConfig.VALUE_CONVERTER_CLASS_CONFIG, TestConverter.class.getName());
@@ -183,6 +179,104 @@ public class PluginsTest {
                                                      ClassLoaderUsage.PLUGINS);
         assertNotNull(headerConverter);
         assertTrue(headerConverter instanceof SimpleHeaderConverter);
+    }
+
+    @Test(expected = ConnectException.class)
+    public void shouldThrowIfPluginThrows() {
+        TestPlugins.assertInitialized();
+
+        plugins.newPlugin(
+            TestPlugins.ALWAYS_THROW_EXCEPTION,
+            new AbstractConfig(new ConfigDef(), Collections.emptyMap()),
+            Converter.class
+        );
+    }
+
+    @Test
+    public void shouldShareStaticValuesBetweenSamePlugin() {
+        // Plugins are not isolated from other instances of their own class.
+        TestPlugins.assertInitialized();
+        Converter firstPlugin = plugins.newPlugin(
+            TestPlugins.SAMPLING,
+            new AbstractConfig(new ConfigDef(), Collections.emptyMap()),
+            Converter.class
+        );
+
+        assertTrue(firstPlugin instanceof SamplingTestPlugin);
+
+        // The plugin should have only been initialized a single time (in the above call)
+        assertEquals(1, ((SamplingTestPlugin) firstPlugin).dynamicInitializations());
+
+        Converter secondPlugin = plugins.newPlugin(
+            TestPlugins.SAMPLING,
+            new AbstractConfig(new ConfigDef(), Collections.emptyMap()),
+            Converter.class
+        );
+
+        assertTrue(secondPlugin instanceof SamplingTestPlugin);
+
+        // The shared static value for all instances of the SAMPLING plugin should be incremented
+        assertEquals(2, ((SamplingTestPlugin) secondPlugin).dynamicInitializations());
+
+        // This value changes because secondPlugin's instantiation incremented it.
+        assertEquals(2, ((SamplingTestPlugin) firstPlugin).dynamicInitializations());
+    }
+
+    @Test
+    public void shouldPerformServiceLoadingWithPluginClassloader() {
+        TestPlugins.assertInitialized();
+        Converter plugin = plugins.newPlugin(
+            TestPlugins.SERVICE_LOADER,
+            new AbstractConfig(new ConfigDef(), Collections.emptyMap()),
+            Converter.class
+        );
+
+        assertTrue(plugin instanceof SamplingTestPlugin);
+        SamplingTestPlugin samplingPlugin = (SamplingTestPlugin) plugin;
+        for (Entry<String, SamplingTestPlugin> e : samplingPlugin.otherSamples().entrySet()) {
+            String message = e.getKey() + "was not initialized properly";
+            SamplingTestPlugin sample = e.getValue();
+            assertTrue(message, sample.staticClassloader() instanceof PluginClassLoader);
+            assertTrue(message, sample.classloader() instanceof PluginClassLoader);
+            assertEquals(message, sample.staticClassloader(), sample.classloader());
+        }
+        Map<String, SamplingTestPlugin> samples = samplingPlugin.otherSamples();
+        // Initialized once per (static, dynamic, static subclass, dynamic subclass)
+        assertEquals(
+            4,
+            samples.get("static:test.plugins.ServiceLoadedClass").dynamicInitializations()
+        );
+        assertEquals(
+            4,
+            samples.get("dynamic:test.plugins.ServiceLoadedClass").dynamicInitializations()
+        );
+        // Initialized once per (static subclass, dynamic subclass)
+        assertEquals(
+            2,
+            samples.get("static:test.plugins.ServiceLoadedSubclass").dynamicInitializations()
+        );
+        assertEquals(
+            2,
+            samples.get("dynamic:test.plugins.ServiceLoadedSubclass").dynamicInitializations()
+        );
+    }
+
+    @Test
+    public void shouldLoadPluginWithPluginClassloader() {
+        TestPlugins.assertInitialized();
+        Converter plugin = plugins.newPlugin(
+            TestPlugins.SAMPLING,
+            new AbstractConfig(new ConfigDef(), Collections.emptyMap()),
+            Converter.class
+        );
+
+        assertTrue(plugin instanceof SamplingTestPlugin);
+        SamplingTestPlugin samplingPlugin = (SamplingTestPlugin) plugin;
+
+        assertTrue(samplingPlugin.staticClassloader() instanceof PluginClassLoader);
+        assertTrue(samplingPlugin.classloader() instanceof PluginClassLoader);
+        assertEquals(samplingPlugin.staticClassloader(), samplingPlugin.classloader());
+        assertEquals(samplingPlugin.staticClassloader(), samplingPlugin.getClass().getClassLoader());
     }
 
     protected void instantiateAndConfigureConverter(String configPropName, ClassLoaderUsage classLoaderUsage) {

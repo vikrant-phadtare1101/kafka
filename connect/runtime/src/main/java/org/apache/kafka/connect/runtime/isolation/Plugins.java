@@ -71,11 +71,24 @@ public class Plugins {
         return Utils.join(plugins, ", ");
     }
 
-    protected static <T> T newPlugin(Class<T> klass) {
+    protected <T> T newPlugin(Class<T> klass) {
+        ClassLoader classLoader = delegatingLoader.pluginClassLoader(klass.getName());
+        if (classLoader == null) {
+            classLoader = delegatingLoader;
+        }
+        return newPlugin(classLoader, klass);
+    }
+
+    protected static <T> T newPlugin(ClassLoader classLoader, Class<T> klass) {
+        // KAFKA-8340: The thread classloader is used during static initialization and must be
+        // set to the plugin's classloader during instantiation
+        ClassLoader savedLoader = compareAndSwapLoaders(classLoader);
         try {
             return Utils.newInstance(klass);
         } catch (Throwable t) {
             throw new ConnectException("Instantiation error", t);
+        } finally {
+            compareAndSwapLoaders(savedLoader);
         }
     }
 
