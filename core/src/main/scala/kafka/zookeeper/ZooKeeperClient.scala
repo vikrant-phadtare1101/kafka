@@ -35,6 +35,7 @@ import org.apache.zookeeper.data.{ACL, Stat}
 import org.apache.zookeeper._
 
 import scala.collection.JavaConverters._
+import scala.collection.Seq
 import scala.collection.mutable.Set
 
 /**
@@ -334,7 +335,7 @@ class ZooKeeperClient(connectString: String,
     stateChangeHandlers.remove(name)
   }
 
-  def close(): Unit = {
+  private def close(timeoutMs: Option[Int]): Boolean = {
     info("Closing.")
 
     // Shutdown scheduler outside of lock to avoid deadlock if scheduler
@@ -343,13 +344,33 @@ class ZooKeeperClient(connectString: String,
     expiryScheduler.shutdown()
 
     inWriteLock(initializationLock) {
+      var zkClosed = false
       zNodeChangeHandlers.clear()
       zNodeChildChangeHandlers.clear()
       stateChangeHandlers.clear()
-      zooKeeper.close()
+      timeoutMs match {
+        case Some(timeout) => {
+          zooKeeper.close(timeout)
+          zkClosed = true
+        }
+        case None => zooKeeper.close()
+      }
       metricNames.foreach(removeMetric(_))
+      info("Closed.")
+      zkClosed
     }
-    info("Closed.")
+  }
+
+  def close(): Unit = {
+    close(None)
+  }
+
+  /**
+   * Wait up to the provided timeoutMs this ZooKeeperClient to close.
+   * Supplying a timeoutMs of 0 means to wait forever.
+   */
+  def closeAndWait(timeoutMs: Int): Boolean = {
+    close(Some(timeoutMs))
   }
 
   def sessionId: Long = inReadLock(initializationLock) {

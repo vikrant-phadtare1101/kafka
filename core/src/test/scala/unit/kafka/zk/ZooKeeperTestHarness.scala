@@ -20,6 +20,7 @@ package kafka.zk
 import javax.security.auth.login.Configuration
 
 import kafka.utils.{CoreUtils, Logging, TestUtils}
+import org.apache.kafka.test.TestUtils.DEFAULT_MAX_WAIT_MS
 import org.junit.{After, AfterClass, Before, BeforeClass}
 import org.junit.Assert._
 import org.apache.kafka.common.security.JaasUtils
@@ -53,7 +54,7 @@ abstract class ZooKeeperTestHarness extends Logging {
   def zkConnect: String = s"127.0.0.1:$zkPort"
   
   @Before
-  def setUp() {
+  def setUp(): Unit = {
     zookeeper = new EmbeddedZookeeper()
     zkClient = KafkaZkClient(zkConnect, zkAclsEnabled.getOrElse(JaasUtils.isZkSecurityEnabled), zkSessionTimeout,
       zkConnectionTimeout, zkMaxInFlightRequests, Time.SYSTEM)
@@ -61,9 +62,10 @@ abstract class ZooKeeperTestHarness extends Logging {
   }
 
   @After
-  def tearDown() {
-    if (zkClient != null)
-     zkClient.close()
+  def tearDown(): Unit = {
+    if (zkClient != null) {
+      assertTrue(s"Failed to close zkClient after ${DEFAULT_MAX_WAIT_MS}ms", zkClient.closeAndWait(Math.toIntExact(DEFAULT_MAX_WAIT_MS)))
+    }
     if (zookeeper != null)
       CoreUtils.swallow(zookeeper.shutdown(), this)
     Configuration.setConfiguration(null)
@@ -101,7 +103,7 @@ object ZooKeeperTestHarness {
    * which is true for core tests where this harness is used.
    */
   @BeforeClass
-  def setUpClass() {
+  def setUpClass(): Unit = {
     verifyNoUnexpectedThreads("@BeforeClass")
   }
 
@@ -109,7 +111,7 @@ object ZooKeeperTestHarness {
    * Verify that tests from the current test class using ZooKeeperTestHarness haven't left behind an unexpected thread
    */
   @AfterClass
-  def tearDownClass() {
+  def tearDownClass(): Unit = {
     verifyNoUnexpectedThreads("@AfterClass")
   }
 
@@ -117,7 +119,7 @@ object ZooKeeperTestHarness {
    * Verifies that threads which are known to cause transient failures in subsequent tests
    * have been shutdown.
    */
-  def verifyNoUnexpectedThreads(context: String) {
+  def verifyNoUnexpectedThreads(context: String): Unit = {
     def allThreads = Thread.getAllStackTraces.keySet.asScala.map(thread => thread.getName)
     val (threads, noUnexpected) = TestUtils.computeUntilTrue(allThreads) { threads =>
       threads.forall(t => unexpectedThreadNames.forall(s => !t.contains(s)))
