@@ -195,6 +195,7 @@ public class FetchRequest extends AbstractRequest {
     // V10 bumped up to indicate ZStandard capability. (see KIP-110)
     private static final Schema FETCH_REQUEST_V10 = FETCH_REQUEST_V9;
 
+    // V11 added rack ID to support read from followers (KIP-392)
     private static final Schema FETCH_REQUEST_V11 = new Schema(
             REPLICA_ID,
             MAX_WAIT_TIME,
@@ -311,9 +312,12 @@ public class FetchRequest extends AbstractRequest {
                 CONSUMER_REPLICA_ID, maxWait, minBytes, fetchData);
         }
 
-        public static Builder forReplica(short allowedVersion, int replicaId, int maxWait, int minBytes,
+        public static Builder forReplica(int replicaId,
+                                         int maxWait,
+                                         int minBytes,
                                          Map<TopicPartition, PartitionData> fetchData) {
-            return new Builder(allowedVersion, allowedVersion, replicaId, maxWait, minBytes, fetchData);
+            return new Builder(ApiKeys.FETCH.oldestVersion(), ApiKeys.FETCH.latestVersion(),
+                    replicaId, maxWait, minBytes, fetchData);
         }
 
         public Builder(short minVersion, short maxVersion, int replicaId, int maxWait, int minBytes,
@@ -360,6 +364,8 @@ public class FetchRequest extends AbstractRequest {
 
         @Override
         public FetchRequest build(short version) {
+            ensureSupportedVersion(version);
+
             if (version < 3) {
                 maxBytes = DEFAULT_RESPONSE_MAX_BYTES;
             }

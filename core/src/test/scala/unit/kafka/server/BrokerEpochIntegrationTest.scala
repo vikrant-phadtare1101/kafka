@@ -26,7 +26,7 @@ import kafka.zk.ZooKeeperTestHarness
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.network.ListenerName
-import org.apache.kafka.common.protocol.{ApiKeys, Errors}
+import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.requests.UpdateMetadataRequest.EndPoint
 import org.apache.kafka.common.requests._
 import org.apache.kafka.common.security.auth.SecurityProtocol
@@ -43,7 +43,7 @@ class BrokerEpochIntegrationTest extends ZooKeeperTestHarness {
   var servers: Seq[KafkaServer] = Seq.empty[KafkaServer]
 
   @Before
-  override def setUp() {
+  override def setUp(): Unit = {
     super.setUp()
     val configs = Seq(
       TestUtils.createBrokerConfig(brokerId1, zkConnect),
@@ -57,7 +57,7 @@ class BrokerEpochIntegrationTest extends ZooKeeperTestHarness {
   }
 
   @After
-  override def tearDown() {
+  override def tearDown(): Unit = {
     TestUtils.shutdownServers(servers)
     super.tearDown()
   }
@@ -92,16 +92,16 @@ class BrokerEpochIntegrationTest extends ZooKeeperTestHarness {
   }
 
   @Test
-  def testControlRequestWithCorrectBrokerEpoch() {
+  def testControlRequestWithCorrectBrokerEpoch(): Unit = {
     testControlRequestWithBrokerEpoch(false)
   }
 
   @Test
-  def testControlRequestWithStaleBrokerEpoch() {
+  def testControlRequestWithStaleBrokerEpoch(): Unit = {
     testControlRequestWithBrokerEpoch(true)
   }
 
-  private def testControlRequestWithBrokerEpoch(isEpochInRequestStale: Boolean) {
+  private def testControlRequestWithBrokerEpoch(isEpochInRequestStale: Boolean): Unit = {
     val tp = new TopicPartition("new-topic", 0)
 
     // create topic with 1 partition, 2 replicas, one on each broker
@@ -137,9 +137,7 @@ class BrokerEpochIntegrationTest extends ZooKeeperTestHarness {
             Seq(brokerId1, brokerId2).map(Integer.valueOf).asJava, LeaderAndIsr.initialZKVersion,
             Seq(0, 1).map(Integer.valueOf).asJava, false)
         )
-        val requestBuilder = new LeaderAndIsrRequest.Builder(
-          ApiKeys.LEADER_AND_ISR.latestVersion, controllerId, controllerEpoch,
-          epochInRequest,
+        val requestBuilder = new LeaderAndIsrRequest.Builder(controllerId, controllerEpoch, epochInRequest,
           partitionStates.asJava, nodes.toSet.asJava)
 
         if (isEpochInRequestStale) {
@@ -166,10 +164,8 @@ class BrokerEpochIntegrationTest extends ZooKeeperTestHarness {
           val endPoints = Seq(new EndPoint(node.host, node.port, securityProtocol, listenerName))
           new UpdateMetadataRequest.Broker(broker.id, endPoints.asJava, broker.rack.orNull)
         }
-        val requestBuilder = new UpdateMetadataRequest.Builder(
-          ApiKeys.UPDATE_METADATA.latestVersion, controllerId, controllerEpoch,
-          epochInRequest,
-          partitionStates.asJava, liverBrokers.toSet.asJava)
+        val requestBuilder = new UpdateMetadataRequest.Builder(controllerId, controllerEpoch,
+          epochInRequest, partitionStates.asJava, liverBrokers.toSet.asJava)
 
         if (isEpochInRequestStale) {
           sendAndVerifyStaleBrokerEpochInResponse(controllerChannelManager, requestBuilder)
@@ -184,8 +180,7 @@ class BrokerEpochIntegrationTest extends ZooKeeperTestHarness {
 
       // Send StopReplica request with correct broker epoch
       {
-        val requestBuilder = new StopReplicaRequest.Builder(
-          ApiKeys.STOP_REPLICA.latestVersion, controllerId, controllerEpoch,
+        val requestBuilder = new StopReplicaRequest.Builder(controllerId, controllerEpoch,
           epochInRequest, // Correct broker epoch
           true, Set(tp).asJava)
 

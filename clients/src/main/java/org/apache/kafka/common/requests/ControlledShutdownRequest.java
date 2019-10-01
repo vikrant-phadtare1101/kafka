@@ -24,20 +24,20 @@ import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
 
-
 public class ControlledShutdownRequest extends AbstractRequest {
 
     public static class Builder extends AbstractRequest.Builder<ControlledShutdownRequest> {
 
         private final ControlledShutdownRequestData data;
 
-        public Builder(ControlledShutdownRequestData data, short desiredVersion) {
-            super(ApiKeys.CONTROLLED_SHUTDOWN, desiredVersion);
+        public Builder(ControlledShutdownRequestData data) {
+            super(ApiKeys.CONTROLLED_SHUTDOWN);
             this.data = data;
         }
 
         @Override
         public ControlledShutdownRequest build(short version) {
+            ensureSupportedVersion(version);
             return new ControlledShutdownRequest(data, version);
         }
 

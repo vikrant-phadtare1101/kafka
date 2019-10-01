@@ -18,7 +18,6 @@ package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.Errors;
 import org.junit.Test;
 
@@ -38,8 +37,8 @@ public class LeaderAndIsrResponseTest {
                 Collections.singletonList(10), 20, Collections.singletonList(10), false));
         partitionStates.put(new TopicPartition("foo", 1), new LeaderAndIsrRequest.PartitionState(15, 1, 10,
                 Collections.singletonList(10), 20, Collections.singletonList(10), false));
-        LeaderAndIsrRequest request = new LeaderAndIsrRequest.Builder(ApiKeys.LEADER_AND_ISR.latestVersion(),
-                15, 20, 0, partitionStates, Collections.<Node>emptySet()).build();
+        LeaderAndIsrRequest request = new LeaderAndIsrRequest.Builder(15, 20, 0,
+                partitionStates, Collections.<Node>emptySet()).build();
         LeaderAndIsrResponse response = request.getErrorResponse(0, Errors.CLUSTER_AUTHORIZATION_FAILED.exception());
         assertEquals(Collections.singletonMap(Errors.CLUSTER_AUTHORIZATION_FAILED, 2), response.errorCounts());
     }

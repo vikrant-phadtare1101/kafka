@@ -32,7 +32,6 @@ import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
 import org.apache.kafka.common.errors.KafkaStorageException
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.network.ListenerName
-import org.apache.kafka.common.protocol.ApiKeys
 import org.apache.kafka.common.requests.LeaderAndIsrRequest
 import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.serialization.{IntegerDeserializer, IntegerSerializer, StringDeserializer, StringSerializer}
@@ -51,14 +50,14 @@ class ServerShutdownTest extends ZooKeeperTestHarness {
   val sent2 = List("more", "messages")
 
   @Before
-  override def setUp() {
+  override def setUp(): Unit = {
     super.setUp()
     val props = TestUtils.createBrokerConfig(0, zkConnect)
     config = KafkaConfig.fromProps(props)
   }
 
   @Test
-  def testCleanShutdown() {
+  def testCleanShutdown(): Unit = {
 
     def createProducer(server: KafkaServer): KafkaProducer[Integer, String] =
       TestUtils.createProducer(
@@ -122,7 +121,7 @@ class ServerShutdownTest extends ZooKeeperTestHarness {
   }
 
   @Test
-  def testCleanShutdownWithDeleteTopicEnabled() {
+  def testCleanShutdownWithDeleteTopicEnabled(): Unit = {
     val newProps = TestUtils.createBrokerConfig(0, zkConnect)
     newProps.setProperty("delete.topic.enable", "true")
     val newConfig = KafkaConfig.fromProps(newProps)
@@ -135,7 +134,7 @@ class ServerShutdownTest extends ZooKeeperTestHarness {
   }
 
   @Test
-  def testCleanShutdownAfterFailedStartup() {
+  def testCleanShutdownAfterFailedStartup(): Unit = {
     val newProps = TestUtils.createBrokerConfig(0, zkConnect)
     newProps.setProperty(KafkaConfig.ZkConnectionTimeoutMsProp, "50")
     newProps.setProperty(KafkaConfig.ZkConnectProp, "some.invalid.hostname.foo.bar.local:65535")
@@ -144,7 +143,7 @@ class ServerShutdownTest extends ZooKeeperTestHarness {
   }
 
   @Test
-  def testCleanShutdownAfterFailedStartupDueToCorruptLogs() {
+  def testCleanShutdownAfterFailedStartupDueToCorruptLogs(): Unit = {
     val server = new KafkaServer(config)
     server.startup()
     createTopic(zkClient, topic, numPartitions = 1, replicationFactor = 1, servers = Seq(server))
@@ -157,7 +156,7 @@ class ServerShutdownTest extends ZooKeeperTestHarness {
     verifyCleanShutdownAfterFailedStartup[KafkaStorageException](config)
   }
 
-  private def verifyCleanShutdownAfterFailedStartup[E <: Exception](config: KafkaConfig)(implicit exceptionClassTag: ClassTag[E]) {
+  private def verifyCleanShutdownAfterFailedStartup[E <: Exception](config: KafkaConfig)(implicit exceptionClassTag: ClassTag[E]): Unit = {
     val server = new KafkaServer(config, threadNamePrefix = Option(this.getClass.getName))
     try {
       server.startup()
@@ -184,14 +183,14 @@ class ServerShutdownTest extends ZooKeeperTestHarness {
     !t.isDaemon && t.isAlive && t.getName.startsWith(this.getClass.getName)
   }
 
-  def verifyNonDaemonThreadsStatus() {
+  def verifyNonDaemonThreadsStatus(): Unit = {
     assertEquals(0, Thread.getAllStackTraces.keySet.toArray
       .map(_.asInstanceOf[Thread])
       .count(isNonDaemonKafkaThread))
   }
 
   @Test
-  def testConsecutiveShutdown(){
+  def testConsecutiveShutdown(): Unit = {
     val server = new KafkaServer(config)
     server.startup()
     server.shutdown()
@@ -232,8 +231,8 @@ class ServerShutdownTest extends ZooKeeperTestHarness {
       controllerChannelManager.startup()
 
       // Initiate a sendRequest and wait until connection is established and one byte is received by the peer
-      val requestBuilder = new LeaderAndIsrRequest.Builder(ApiKeys.LEADER_AND_ISR.latestVersion,
-        controllerId, 1, 0L, Map.empty.asJava, brokerAndEpochs.keys.map(_.node(listenerName)).toSet.asJava)
+      val requestBuilder = new LeaderAndIsrRequest.Builder(controllerId, 1, 0L,
+        Map.empty.asJava, brokerAndEpochs.keys.map(_.node(listenerName)).toSet.asJava)
       controllerChannelManager.sendRequest(1, requestBuilder)
       receiveFuture.get(10, TimeUnit.SECONDS)
 

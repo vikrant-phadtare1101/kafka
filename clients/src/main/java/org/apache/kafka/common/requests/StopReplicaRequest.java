@@ -73,15 +73,20 @@ public class StopReplicaRequest extends AbstractControlRequest {
         private final boolean deletePartitions;
         private final Collection<TopicPartition> partitions;
 
-        public Builder(short version, int controllerId, int controllerEpoch, long brokerEpoch, boolean deletePartitions,
+        public Builder(int controllerId,
+                       int controllerEpoch,
+                       long brokerEpoch,
+                       boolean deletePartitions,
                        Collection<TopicPartition> partitions) {
-            super(ApiKeys.STOP_REPLICA, version, controllerId, controllerEpoch, brokerEpoch);
+            super(ApiKeys.STOP_REPLICA, controllerId, controllerEpoch, brokerEpoch);
             this.deletePartitions = deletePartitions;
             this.partitions = partitions;
         }
 
+
         @Override
         public StopReplicaRequest build(short version) {
+            ensureSupportedVersion(version);
             return new StopReplicaRequest(controllerId, controllerEpoch, brokerEpoch,
                     deletePartitions, partitions, version);
         }

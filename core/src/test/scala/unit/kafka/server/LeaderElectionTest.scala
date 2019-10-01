@@ -30,7 +30,7 @@ import kafka.utils.TestUtils._
 import kafka.zk.ZooKeeperTestHarness
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.network.ListenerName
-import org.apache.kafka.common.protocol.{ApiKeys, Errors}
+import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.utils.Time
 import org.junit.{After, Before, Test}
@@ -44,7 +44,7 @@ class LeaderElectionTest extends ZooKeeperTestHarness {
   var staleControllerEpochDetected = false
 
   @Before
-  override def setUp() {
+  override def setUp(): Unit = {
     super.setUp()
 
     val configProps1 = TestUtils.createBrokerConfig(brokerId1, zkConnect, enableControlledShutdown = false)
@@ -60,7 +60,7 @@ class LeaderElectionTest extends ZooKeeperTestHarness {
   }
 
   @After
-  override def tearDown() {
+  override def tearDown(): Unit = {
     TestUtils.shutdownServers(servers)
     super.tearDown()
   }
@@ -111,7 +111,7 @@ class LeaderElectionTest extends ZooKeeperTestHarness {
   }
 
   @Test
-  def testLeaderElectionWithStaleControllerEpoch() {
+  def testLeaderElectionWithStaleControllerEpoch(): Unit = {
     // start 2 brokers
     val topic = "new-topic"
     val partitionId = 0
@@ -150,8 +150,8 @@ class LeaderElectionTest extends ZooKeeperTestHarness {
           Seq(brokerId1, brokerId2).map(Integer.valueOf).asJava, LeaderAndIsr.initialZKVersion,
           Seq(0, 1).map(Integer.valueOf).asJava, false)
       )
-      val requestBuilder = new LeaderAndIsrRequest.Builder(
-        ApiKeys.LEADER_AND_ISR.latestVersion, controllerId, staleControllerEpoch, servers(brokerId2).kafkaController.brokerEpoch ,partitionStates.asJava, nodes.toSet.asJava)
+      val requestBuilder = new LeaderAndIsrRequest.Builder(controllerId, staleControllerEpoch,
+        servers(brokerId2).kafkaController.brokerEpoch ,partitionStates.asJava, nodes.toSet.asJava)
 
       controllerChannelManager.sendRequest(brokerId2, requestBuilder, staleControllerEpochCallback)
       TestUtils.waitUntilTrue(() => staleControllerEpochDetected, "Controller epoch should be stale")
