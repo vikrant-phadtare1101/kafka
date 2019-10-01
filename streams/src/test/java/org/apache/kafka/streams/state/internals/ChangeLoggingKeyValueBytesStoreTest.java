@@ -42,9 +42,10 @@ import static org.hamcrest.MatcherAssert.assertThat;
 
 public class ChangeLoggingKeyValueBytesStoreTest {
 
-    private final InMemoryKeyValueStore inner = new InMemoryKeyValueStore("kv");
+    private InternalMockProcessorContext context;
+    private final InMemoryKeyValueStore<Bytes, byte[]> inner = new InMemoryKeyValueStore<>("kv", Serdes.Bytes(), Serdes.ByteArray());
     private final ChangeLoggingKeyValueBytesStore store = new ChangeLoggingKeyValueBytesStore(inner);
-    private final Map<Object, Object> sent = new HashMap<>();
+    private final Map sent = new HashMap<>();
     private final Bytes hi = Bytes.wrap("hi".getBytes());
     private final Bytes hello = Bytes.wrap("hello".getBytes());
     private final byte[] there = "there".getBytes();
@@ -55,17 +56,17 @@ public class ChangeLoggingKeyValueBytesStoreTest {
         final NoOpRecordCollector collector = new NoOpRecordCollector() {
             @Override
             public <K, V> void send(final String topic,
-                                    final K key,
-                                    final V value,
-                                    final Headers headers,
-                                    final Integer partition,
-                                    final Long timestamp,
-                                    final Serializer<K> keySerializer,
-                                    final Serializer<V> valueSerializer) {
+                                    K key,
+                                    V value,
+                                    Headers headers,
+                                    Integer partition,
+                                    Long timestamp,
+                                    Serializer<K> keySerializer,
+                                    Serializer<V> valueSerializer) {
                 sent.put(key, value);
             }
         };
-        final InternalMockProcessorContext context = new InternalMockProcessorContext(
+        context = new InternalMockProcessorContext(
             TestUtils.tempDirectory(),
             Serdes.String(),
             Serdes.Long(),
@@ -89,7 +90,7 @@ public class ChangeLoggingKeyValueBytesStoreTest {
     @Test
     public void shouldLogChangeOnPut() {
         store.put(hi, there);
-        assertThat(sent.get(hi), equalTo(there));
+        assertThat((byte[]) sent.get(hi), equalTo(there));
     }
 
     @Test
@@ -104,8 +105,8 @@ public class ChangeLoggingKeyValueBytesStoreTest {
     public void shouldLogChangesOnPutAll() {
         store.putAll(Arrays.asList(KeyValue.pair(hi, there),
                                    KeyValue.pair(hello, world)));
-        assertThat(sent.get(hi), equalTo(there));
-        assertThat(sent.get(hello), equalTo(world));
+        assertThat((byte[]) sent.get(hi), equalTo(there));
+        assertThat((byte[]) sent.get(hello), equalTo(world));
     }
 
     @Test
@@ -146,14 +147,14 @@ public class ChangeLoggingKeyValueBytesStoreTest {
     @Test
     public void shouldWriteToChangelogOnPutIfAbsentWhenNoPreviousValue() {
         store.putIfAbsent(hi, there);
-        assertThat(sent.get(hi), equalTo(there));
+        assertThat((byte[]) sent.get(hi), equalTo(there));
     }
 
     @Test
     public void shouldNotWriteToChangeLogOnPutIfAbsentWhenValueForKeyExists() {
         store.put(hi, there);
         store.putIfAbsent(hi, world);
-        assertThat(sent.get(hi), equalTo(there));
+        assertThat((byte[]) sent.get(hi), equalTo(there));
     }
 
     @Test

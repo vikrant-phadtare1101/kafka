@@ -35,28 +35,10 @@ public class ThreadMetadata {
 
     private final Set<TaskMetadata> standbyTasks;
 
-    private final String mainConsumerClientId;
-
-    private final String restoreConsumerClientId;
-
-    private final Set<String> producerClientIds;
-
-    // the admin client should be shared among all threads, so the client id should be the same;
-    // we keep it at the thread-level for user's convenience and possible extensions in the future
-    private final String adminClientId;
-
     public ThreadMetadata(final String threadName,
                           final String threadState,
-                          final String mainConsumerClientId,
-                          final String restoreConsumerClientId,
-                          final Set<String> producerClientIds,
-                          final String adminClientId,
                           final Set<TaskMetadata> activeTasks,
                           final Set<TaskMetadata> standbyTasks) {
-        this.mainConsumerClientId = mainConsumerClientId;
-        this.restoreConsumerClientId = restoreConsumerClientId;
-        this.producerClientIds = producerClientIds;
-        this.adminClientId = adminClientId;
         this.threadName = threadName;
         this.threadState = threadState;
         this.activeTasks = Collections.unmodifiableSet(activeTasks);
@@ -79,52 +61,24 @@ public class ThreadMetadata {
         return standbyTasks;
     }
 
-    public String consumerClientId() {
-        return mainConsumerClientId;
-    }
-
-    public String restoreConsumerClientId() {
-        return restoreConsumerClientId;
-    }
-
-    public Set<String> producerClientIds() {
-        return producerClientIds;
-    }
-
-    public String adminClientId() {
-        return adminClientId;
-    }
-
     @Override
-    public boolean equals(final Object o) {
+    public boolean equals(Object o) {
         if (this == o) {
             return true;
         }
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        final ThreadMetadata that = (ThreadMetadata) o;
+        ThreadMetadata that = (ThreadMetadata) o;
         return Objects.equals(threadName, that.threadName) &&
                Objects.equals(threadState, that.threadState) &&
                Objects.equals(activeTasks, that.activeTasks) &&
-               Objects.equals(standbyTasks, that.standbyTasks) &&
-               mainConsumerClientId.equals(that.mainConsumerClientId) &&
-               restoreConsumerClientId.equals(that.restoreConsumerClientId) &&
-               Objects.equals(producerClientIds, that.producerClientIds) &&
-               adminClientId.equals(that.adminClientId);
+               Objects.equals(standbyTasks, that.standbyTasks);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(
-            threadName,
-            threadState,
-            activeTasks,
-            standbyTasks,
-            mainConsumerClientId,
-            restoreConsumerClientId,
-            producerClientIds,
-            adminClientId);
+        return Objects.hash(threadName, threadState, activeTasks, standbyTasks);
     }
 
     @Override
@@ -134,10 +88,6 @@ public class ThreadMetadata {
                 ", threadState=" + threadState +
                 ", activeTasks=" + activeTasks +
                 ", standbyTasks=" + standbyTasks +
-                ", consumerClientId=" + mainConsumerClientId +
-                ", restoreConsumerClientId=" + restoreConsumerClientId +
-                ", producerClientIds=" + producerClientIds +
-                ", adminClientId=" + adminClientId +
                 '}';
     }
 }

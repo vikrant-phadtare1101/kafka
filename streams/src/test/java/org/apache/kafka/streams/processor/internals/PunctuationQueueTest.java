@@ -44,9 +44,9 @@ public class PunctuationQueueTest {
 
         queue.schedule(sched);
 
-        final ProcessorNodePunctuator processorNodePunctuator = new ProcessorNodePunctuator() {
+        ProcessorNodePunctuator processorNodePunctuator = new ProcessorNodePunctuator() {
             @Override
-            public void punctuate(final ProcessorNode node, final long time, final PunctuationType type, final Punctuator punctuator) {
+            public void punctuate(ProcessorNode node, long time, PunctuationType type, Punctuator punctuator) {
                 punctuator.punctuate(time);
             }
         };
@@ -83,9 +83,9 @@ public class PunctuationQueueTest {
 
         queue.schedule(sched);
 
-        final ProcessorNodePunctuator processorNodePunctuator = new ProcessorNodePunctuator() {
+        ProcessorNodePunctuator processorNodePunctuator = new ProcessorNodePunctuator() {
             @Override
-            public void punctuate(final ProcessorNode node, final long time, final PunctuationType type, final Punctuator punctuator) {
+            public void punctuate(ProcessorNode node, long time, PunctuationType type, Punctuator punctuator) {
                 punctuator.punctuate(time);
             }
         };
@@ -122,9 +122,9 @@ public class PunctuationQueueTest {
 
         final Cancellable cancellable = queue.schedule(sched);
 
-        final ProcessorNodePunctuator processorNodePunctuator = new ProcessorNodePunctuator() {
+        ProcessorNodePunctuator processorNodePunctuator = new ProcessorNodePunctuator() {
             @Override
-            public void punctuate(final ProcessorNode node, final long time, final PunctuationType type, final Punctuator punctuator) {
+            public void punctuate(ProcessorNode node, long time, PunctuationType type, Punctuator punctuator) {
                 punctuator.punctuate(time);
                 // simulate scheduler cancelled from within punctuator
                 cancellable.cancel();
@@ -144,10 +144,10 @@ public class PunctuationQueueTest {
     private static class TestProcessor extends AbstractProcessor<String, String> {
 
         @Override
-        public void init(final ProcessorContext context) {}
+        public void init(ProcessorContext context) {}
 
         @Override
-        public void process(final String key, final String value) {}
+        public void process(String key, String value) {}
 
         @Override
         public void close() {}

@@ -33,9 +33,9 @@ import org.apache.kafka.common.utils.{MockTime, Utils}
 import org.easymock.EasyMock
 import org.junit.Assert._
 import org.junit.{After, Before, Test}
-import org.scalatest.Assertions.{assertThrows, fail}
+import org.scalatest.junit.JUnitSuite
 
-class ProducerStateManagerTest {
+class ProducerStateManagerTest extends JUnitSuite {
   var logDir: File = null
   var stateManager: ProducerStateManager = null
   val partition = new TopicPartition("test", 0)
@@ -230,8 +230,7 @@ class ProducerStateManagerTest {
         partition,
         producerId,
         ProducerStateEntry.empty(producerId),
-        ValidationType.Full
-      )
+        ValidationType.Full)
       producerAppendInfo.append(producerEpoch, 0, 0, time.milliseconds(), startOffset, startOffset, isTransactional = true)
       val logOffsetMetadata = LogOffsetMetadata(messageOffset = startOffset, segmentBaseOffset = segmentBaseOffset,
         relativePositionInSegment = 50 * relativeOffset)
@@ -826,7 +825,7 @@ class ProducerStateManagerTest {
     val producerEpoch = 145.toShort
     val baseOffset = 15
 
-    val batch: RecordBatch = EasyMock.createMock(classOf[RecordBatch])
+    val batch = EasyMock.createMock(classOf[RecordBatch])
     EasyMock.expect(batch.isControlBatch).andReturn(true).once
     EasyMock.expect(batch.iterator).andReturn(Collections.emptyIterator[Record]).once
     EasyMock.replay(batch)

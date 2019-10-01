@@ -69,7 +69,7 @@ public class JsonConverterTest {
 
     @Before
     public void setUp() {
-        converter.configure(Collections.emptyMap(), false);
+        converter.configure(Collections.EMPTY_MAP, false);
     }
 
     // Schema metadata
@@ -591,7 +591,7 @@ public class JsonConverterTest {
     }
 
     @Test
-    public void dateToJson() {
+    public void dateToJson() throws IOException {
         GregorianCalendar calendar = new GregorianCalendar(1970, Calendar.JANUARY, 1, 0, 0, 0);
         calendar.setTimeZone(TimeZone.getTimeZone("UTC"));
         calendar.add(Calendar.DATE, 10000);
@@ -607,7 +607,7 @@ public class JsonConverterTest {
     }
 
     @Test
-    public void timeToJson() {
+    public void timeToJson() throws IOException {
         GregorianCalendar calendar = new GregorianCalendar(1970, Calendar.JANUARY, 1, 0, 0, 0);
         calendar.setTimeZone(TimeZone.getTimeZone("UTC"));
         calendar.add(Calendar.MILLISECOND, 14400000);
@@ -623,7 +623,7 @@ public class JsonConverterTest {
     }
 
     @Test
-    public void timestampToJson() {
+    public void timestampToJson() throws IOException {
         GregorianCalendar calendar = new GregorianCalendar(1970, Calendar.JANUARY, 1, 0, 0, 0);
         calendar.setTimeZone(TimeZone.getTimeZone("UTC"));
         calendar.add(Calendar.MILLISECOND, 2000000000);
@@ -774,7 +774,7 @@ public class JsonConverterTest {
     // The following simply verify that the delegation works.
 
     @Test
-    public void testStringHeaderToJson() {
+    public void testStringHeaderToJson() throws UnsupportedEncodingException {
         JsonNode converted = parse(converter.fromConnectHeader(TOPIC, "headerName", Schema.STRING_SCHEMA, "test-string"));
         validateEnvelope(converted);
         assertEquals(parse("{ \"type\": \"string\", \"optional\": false }"), converted.get(JsonSchema.ENVELOPE_SCHEMA_FIELD_NAME));

@@ -16,10 +16,8 @@
  */
 package org.apache.kafka.streams.processor;
 
-import java.time.Duration;
-
 /**
- * Cancellable interface returned in {@link ProcessorContext#schedule(Duration, PunctuationType, Punctuator)}.
+ * Cancellable interface returned in {@link ProcessorContext#schedule(long, PunctuationType, Punctuator)}.
  *
  * @see Punctuator
  */

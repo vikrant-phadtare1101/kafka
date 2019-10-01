@@ -19,20 +19,21 @@
  */
 package org.apache.kafka.streams.scala
 
-import org.apache.kafka.common.serialization.Serde
-import org.apache.kafka.streams.KeyValue
 import org.apache.kafka.streams.kstream.{
   KGroupedStream => KGroupedStreamJ,
   KGroupedTable => KGroupedTableJ,
   KStream => KStreamJ,
   KTable => KTableJ,
   SessionWindowedKStream => SessionWindowedKStreamJ,
-  TimeWindowedKStream => TimeWindowedKStreamJ
+  TimeWindowedKStream => TimeWindowedKStreamJ,
+  _
 }
-import org.apache.kafka.streams.processor.StateStore
 import org.apache.kafka.streams.scala.kstream._
-
+import org.apache.kafka.streams.KeyValue
+import org.apache.kafka.common.serialization.Serde
 import scala.language.implicitConversions
+
+import org.apache.kafka.streams.processor.StateStore
 
 /**
  * Implicit conversions between the Scala wrapper objects and the underlying Java
@@ -61,23 +62,23 @@ object ImplicitConversions {
   implicit def tuple2ToKeyValue[K, V](tuple: (K, V)): KeyValue[K, V] = new KeyValue(tuple._1, tuple._2)
 
   // we would also like to allow users implicit serdes
-  // and these implicits will convert them to `Grouped`, `Produced` or `Consumed`
+  // and these implicits will convert them to `Serialized`, `Produced` or `Consumed`
 
-  implicit def groupedFromSerde[K, V](implicit keySerde: Serde[K], valueSerde: Serde[V]): Grouped[K, V] =
-    Grouped.`with`[K, V]
+  implicit def serializedFromSerde[K, V](implicit keySerde: Serde[K], valueSerde: Serde[V]): Serialized[K, V] =
+    Serialized.`with`(keySerde, valueSerde)
 
   implicit def consumedFromSerde[K, V](implicit keySerde: Serde[K], valueSerde: Serde[V]): Consumed[K, V] =
-    Consumed.`with`[K, V]
+    Consumed.`with`(keySerde, valueSerde)
 
   implicit def producedFromSerde[K, V](implicit keySerde: Serde[K], valueSerde: Serde[V]): Produced[K, V] =
-    Produced.`with`[K, V]
+    Produced.`with`(keySerde, valueSerde)
 
   implicit def materializedFromSerde[K, V, S <: StateStore](implicit keySerde: Serde[K],
                                                             valueSerde: Serde[V]): Materialized[K, V, S] =
-    Materialized.`with`[K, V, S]
+    Materialized.`with`[K, V, S](keySerde, valueSerde)
 
   implicit def joinedFromKeyValueOtherSerde[K, V, VO](implicit keySerde: Serde[K],
                                                       valueSerde: Serde[V],
                                                       otherValueSerde: Serde[VO]): Joined[K, V, VO] =
-    Joined.`with`[K, V, VO]
+    Joined.`with`(keySerde, valueSerde, otherValueSerde)
 }

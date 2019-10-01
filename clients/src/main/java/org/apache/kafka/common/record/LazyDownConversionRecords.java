@@ -44,9 +44,6 @@ public class LazyDownConversionRecords implements BaseRecords {
      * @param firstOffset The starting offset for down-converted records. This only impacts some cases. See
      *                    {@link RecordsUtil#downConvert(Iterable, byte, long, Time)} for an explanation.
      * @param time The time instance to use
-     *
-     * @throws org.apache.kafka.common.errors.UnsupportedCompressionTypeException If the first batch to down-convert
-     *    has a compression type which we do not support down-conversion for.
      */
     public LazyDownConversionRecords(TopicPartition topicPartition, Records records, byte toMagic, long firstOffset, Time time) {
         this.topicPartition = Objects.requireNonNull(topicPartition);
@@ -59,7 +56,7 @@ public class LazyDownConversionRecords implements BaseRecords {
         // need to make sure that we are able to accommodate one full batch of down-converted messages. The way we achieve
         // this is by having sizeInBytes method factor in the size of the first down-converted batch and return at least
         // its size.
-        java.util.Iterator<ConvertedRecords<?>> it = iterator(0);
+        java.util.Iterator<ConvertedRecords> it = iterator(0);
         if (it.hasNext()) {
             firstConvertedBatch = it.next();
             sizeInBytes = Math.max(records.sizeInBytes(), firstConvertedBatch.records().sizeInBytes());
@@ -100,13 +97,13 @@ public class LazyDownConversionRecords implements BaseRecords {
     @Override
     public int hashCode() {
         int result = toMagic;
-        result = 31 * result + Long.hashCode(firstOffset);
+        result = 31 * result + (int) (firstOffset ^ (firstOffset >>> 32));
         result = 31 * result + topicPartition.hashCode();
         result = 31 * result + records.hashCode();
         return result;
     }
 
-    public java.util.Iterator<ConvertedRecords<?>> iterator(long maximumReadSize) {
+    public java.util.Iterator<ConvertedRecords> iterator(long maximumReadSize) {
         // We typically expect only one iterator instance to be created, so null out the first converted batch after
         // first use to make it available for GC.
         ConvertedRecords firstBatch = firstConvertedBatch;
@@ -119,7 +116,7 @@ public class LazyDownConversionRecords implements BaseRecords {
      * it as memory-efficient as possible by not having to maintain all down-converted records in-memory. Maintains
      * a view into batches of down-converted records.
      */
-    private class Iterator extends AbstractIterator<ConvertedRecords<?>> {
+    private class Iterator extends AbstractIterator<ConvertedRecords> {
         private final AbstractIterator<? extends RecordBatch> batchIterator;
         private final long maximumReadSize;
         private ConvertedRecords firstConvertedBatch;
@@ -130,7 +127,7 @@ public class LazyDownConversionRecords implements BaseRecords {
          *                        {@link #makeNext()}. This is a soft limit as {@link #makeNext()} will always convert
          *                        and return at least one full message batch.
          */
-        private Iterator(Records recordsToDownConvert, long maximumReadSize, ConvertedRecords<?> firstConvertedBatch) {
+        private Iterator(Records recordsToDownConvert, long maximumReadSize, ConvertedRecords firstConvertedBatch) {
             this.batchIterator = recordsToDownConvert.batchIterator();
             this.maximumReadSize = maximumReadSize;
             this.firstConvertedBatch = firstConvertedBatch;
@@ -153,7 +150,7 @@ public class LazyDownConversionRecords implements BaseRecords {
             }
 
             while (batchIterator.hasNext()) {
-                final List<RecordBatch> batches = new ArrayList<>();
+                List<RecordBatch> batches = new ArrayList<>();
                 boolean isFirstBatch = true;
                 long sizeSoFar = 0;
 
@@ -165,7 +162,6 @@ public class LazyDownConversionRecords implements BaseRecords {
                     sizeSoFar += currentBatch.sizeInBytes();
                     isFirstBatch = false;
                 }
-
                 ConvertedRecords convertedRecords = RecordsUtil.downConvert(batches, toMagic, firstOffset, time);
                 // During conversion, it is possible that we drop certain batches because they do not have an equivalent
                 // representation in the message format we want to convert to. For example, V0 and V1 message formats

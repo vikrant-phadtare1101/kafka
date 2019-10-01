@@ -19,12 +19,10 @@ package org.apache.kafka.connect.runtime.rest;
 import com.fasterxml.jackson.jaxrs.json.JacksonJsonProvider;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.connect.errors.ConnectException;
-import org.apache.kafka.connect.health.ConnectClusterDetails;
 import org.apache.kafka.connect.rest.ConnectRestExtension;
 import org.apache.kafka.connect.rest.ConnectRestExtensionContext;
 import org.apache.kafka.connect.runtime.Herder;
 import org.apache.kafka.connect.runtime.WorkerConfig;
-import org.apache.kafka.connect.runtime.health.ConnectClusterDetailsImpl;
 import org.apache.kafka.connect.runtime.health.ConnectClusterStateImpl;
 import org.apache.kafka.connect.runtime.rest.errors.ConnectExceptionMapper;
 import org.apache.kafka.connect.runtime.rest.resources.ConnectorPluginsResource;
@@ -32,11 +30,10 @@ import org.apache.kafka.connect.runtime.rest.resources.ConnectorsResource;
 import org.apache.kafka.connect.runtime.rest.resources.RootResource;
 import org.apache.kafka.connect.runtime.rest.util.SSLUtils;
 import org.eclipse.jetty.server.Connector;
-import org.eclipse.jetty.server.CustomRequestLog;
 import org.eclipse.jetty.server.Handler;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.server.Slf4jRequestLogWriter;
+import org.eclipse.jetty.server.Slf4jRequestLog;
 import org.eclipse.jetty.server.handler.ContextHandlerCollection;
 import org.eclipse.jetty.server.handler.DefaultHandler;
 import org.eclipse.jetty.server.handler.RequestLogHandler;
@@ -80,7 +77,7 @@ public class RestServer {
     private ContextHandlerCollection handlers;
     private Server jettyServer;
 
-    private List<ConnectRestExtension> connectRestExtensions = Collections.emptyList();
+    private List<ConnectRestExtension> connectRestExtensions = Collections.EMPTY_LIST;
 
     /**
      * Create a REST server for this herder using the specified configs.
@@ -96,7 +93,6 @@ public class RestServer {
         createConnectors(listeners);
     }
 
-    @SuppressWarnings("deprecation")
     List<String> parseListeners() {
         List<String> listeners = config.getList(WorkerConfig.LISTENERS_CONFIG);
         if (listeners == null || listeners.size() == 0) {
@@ -148,7 +144,7 @@ public class RestServer {
         ServerConnector connector;
 
         if (PROTOCOL_HTTPS.equals(protocol)) {
-            SslContextFactory ssl = SSLUtils.createServerSideSslContextFactory(config);
+            SslContextFactory ssl = SSLUtils.createSslContextFactory(config);
             connector = new ServerConnector(jettyServer, ssl);
             connector.setName(String.format("%s_%s%d", PROTOCOL_HTTPS, hostname, port));
         } else {
@@ -183,6 +179,7 @@ public class RestServer {
         log.info("REST server listening at " + jettyServer.getURI() + ", advertising URL " + advertisedUrl());
     }
 
+    @SuppressWarnings("deprecation")
     public void initializeResources(Herder herder) {
         log.info("Initializing REST resources");
 
@@ -218,9 +215,9 @@ public class RestServer {
         }
 
         RequestLogHandler requestLogHandler = new RequestLogHandler();
-        Slf4jRequestLogWriter slf4jRequestLogWriter = new Slf4jRequestLogWriter();
-        slf4jRequestLogWriter.setLoggerName(RestServer.class.getCanonicalName());
-        CustomRequestLog requestLog = new CustomRequestLog(slf4jRequestLogWriter, CustomRequestLog.EXTENDED_NCSA_FORMAT + " %msT");
+        Slf4jRequestLog requestLog = new Slf4jRequestLog();
+        requestLog.setLoggerName(RestServer.class.getCanonicalName());
+        requestLog.setLogLatency(true);
         requestLogHandler.setRequestLog(requestLog);
 
         handlers.setHandlers(new Handler[]{context, new DefaultHandler(), requestLogHandler});
@@ -330,14 +327,10 @@ public class RestServer {
             herderRequestTimeoutMs = Math.min(herderRequestTimeoutMs, rebalanceTimeoutMs.longValue());
         }
 
-        ConnectClusterDetails connectClusterDetails = new ConnectClusterDetailsImpl(
-            herder.kafkaClusterId()
-        );
-
         ConnectRestExtensionContext connectRestExtensionContext =
             new ConnectRestExtensionContextImpl(
                 new ConnectRestConfigurable(resourceConfig),
-                new ConnectClusterStateImpl(herderRequestTimeoutMs, connectClusterDetails, herder)
+                new ConnectClusterStateImpl(herderRequestTimeoutMs, herder)
             );
         for (ConnectRestExtension connectRestExtension : connectRestExtensions) {
             connectRestExtension.register(connectRestExtensionContext);

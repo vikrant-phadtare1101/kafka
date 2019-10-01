@@ -44,7 +44,7 @@ public class TimeWindowedDeserializerTest {
     @Test
     public void testWindowedKeyDeserializerNoArgConstructors() {
         timeWindowedDeserializer.configure(props, true);
-        final Deserializer<?> inner = timeWindowedDeserializer.innerDeserializer();
+        Deserializer<?> inner = timeWindowedDeserializer.innerDeserializer();
         assertNotNull("Inner deserializer should be not null", inner);
         assertTrue("Inner deserializer type should be StringDeserializer", inner instanceof StringDeserializer);
     }
@@ -52,7 +52,7 @@ public class TimeWindowedDeserializerTest {
     @Test
     public void testWindowedValueDeserializerNoArgConstructors() {
         timeWindowedDeserializer.configure(props, false);
-        final Deserializer<?> inner = timeWindowedDeserializer.innerDeserializer();
+        Deserializer<?> inner = timeWindowedDeserializer.innerDeserializer();
         assertNotNull("Inner deserializer should be not null", inner);
         assertTrue("Inner deserializer type should be ByteArrayDeserializer", inner instanceof ByteArrayDeserializer);
     }

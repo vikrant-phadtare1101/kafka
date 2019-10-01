@@ -19,7 +19,6 @@ package org.apache.kafka.connect.runtime.isolation;
 import org.apache.kafka.common.config.provider.ConfigProvider;
 import org.apache.kafka.connect.components.Versioned;
 import org.apache.kafka.connect.connector.Connector;
-import org.apache.kafka.connect.connector.policy.ConnectorClientConfigOverridePolicy;
 import org.apache.kafka.connect.rest.ConnectRestExtension;
 import org.apache.kafka.connect.storage.Converter;
 import org.apache.kafka.connect.storage.HeaderConverter;
@@ -73,8 +72,8 @@ public class DelegatingClassLoader extends URLClassLoader {
     private final SortedSet<PluginDesc<Transformation>> transformations;
     private final SortedSet<PluginDesc<ConfigProvider>> configProviders;
     private final SortedSet<PluginDesc<ConnectRestExtension>> restExtensions;
-    private final SortedSet<PluginDesc<ConnectorClientConfigOverridePolicy>> connectorClientConfigPolicies;
     private final List<String> pluginPaths;
+    private final Map<Path, PluginClassLoader> activePaths;
 
     private static final String MANIFEST_PREFIX = "META-INF/services/";
     private static final Class[] SERVICE_LOADER_PLUGINS = new Class[] {ConnectRestExtension.class, ConfigProvider.class};
@@ -87,13 +86,13 @@ public class DelegatingClassLoader extends URLClassLoader {
         this.pluginPaths = pluginPaths;
         this.pluginLoaders = new HashMap<>();
         this.aliases = new HashMap<>();
+        this.activePaths = new HashMap<>();
         this.connectors = new TreeSet<>();
         this.converters = new TreeSet<>();
         this.headerConverters = new TreeSet<>();
         this.transformations = new TreeSet<>();
         this.configProviders = new TreeSet<>();
         this.restExtensions = new TreeSet<>();
-        this.connectorClientConfigPolicies = new TreeSet<>();
     }
 
     public DelegatingClassLoader(List<String> pluginPaths) {
@@ -128,10 +127,6 @@ public class DelegatingClassLoader extends URLClassLoader {
         return restExtensions;
     }
 
-    public Set<PluginDesc<ConnectorClientConfigOverridePolicy>> connectorClientConfigPolicies() {
-        return connectorClientConfigPolicies;
-    }
-
     public ClassLoader connectorLoader(Connector connector) {
         return connectorLoader(connector.getClass().getName());
     }
@@ -158,8 +153,13 @@ public class DelegatingClassLoader extends URLClassLoader {
             final URL[] urls,
             final ClassLoader parent
     ) {
-        return AccessController.doPrivileged(
-                (PrivilegedAction<PluginClassLoader>) () -> new PluginClassLoader(pluginLocation, urls, parent)
+        return (PluginClassLoader) AccessController.doPrivileged(
+                new PrivilegedAction() {
+                    @Override
+                    public Object run() {
+                        return new PluginClassLoader(pluginLocation, urls, parent);
+                    }
+                }
         );
     }
 
@@ -244,6 +244,10 @@ public class DelegatingClassLoader extends URLClassLoader {
         PluginScanResult plugins = scanPluginPath(loader, urls);
         log.info("Registered loader: {}", loader);
         if (!plugins.isEmpty()) {
+            if (loader instanceof PluginClassLoader) {
+                activePaths.put(pluginLocation, (PluginClassLoader) loader);
+            }
+
             addPlugins(plugins.connectors(), loader);
             connectors.addAll(plugins.connectors());
             addPlugins(plugins.converters(), loader);
@@ -256,8 +260,6 @@ public class DelegatingClassLoader extends URLClassLoader {
             configProviders.addAll(plugins.configProviders());
             addPlugins(plugins.restExtensions(), loader);
             restExtensions.addAll(plugins.restExtensions());
-            addPlugins(plugins.connectorClientConfigPolicies(), loader);
-            connectorClientConfigPolicies.addAll(plugins.connectorClientConfigPolicies());
         }
 
         loadJdbcDrivers(loader);
@@ -313,8 +315,7 @@ public class DelegatingClassLoader extends URLClassLoader {
                 getPluginDesc(reflections, HeaderConverter.class, loader),
                 getPluginDesc(reflections, Transformation.class, loader),
                 getServiceLoaderPluginDesc(ConfigProvider.class, loader),
-                getServiceLoaderPluginDesc(ConnectRestExtension.class, loader),
-                getServiceLoaderPluginDesc(ConnectorClientConfigOverridePolicy.class, loader)
+                getServiceLoaderPluginDesc(ConnectRestExtension.class, loader)
         );
     }
 
@@ -336,7 +337,6 @@ public class DelegatingClassLoader extends URLClassLoader {
         return result;
     }
 
-    @SuppressWarnings("unchecked")
     private <T> Collection<PluginDesc<T>> getServiceLoaderPluginDesc(Class<T> klass, ClassLoader loader) {
         ServiceLoader<T> serviceLoader = ServiceLoader.load(klass, loader);
         Collection<PluginDesc<T>> result = new ArrayList<>();
@@ -381,7 +381,6 @@ public class DelegatingClassLoader extends URLClassLoader {
         addAliases(headerConverters);
         addAliases(transformations);
         addAliases(restExtensions);
-        addAliases(connectorClientConfigPolicies);
     }
 
     private <S> void addAliases(Collection<PluginDesc<S>> plugins) {

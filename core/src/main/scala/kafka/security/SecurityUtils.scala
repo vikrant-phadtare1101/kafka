@@ -22,7 +22,8 @@ import org.apache.kafka.common.acl.{AccessControlEntry, AclBinding, AclBindingFi
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.requests.ApiError
 import org.apache.kafka.common.resource.ResourcePattern
-import org.apache.kafka.common.utils.SecurityUtils._
+import org.apache.kafka.common.security.auth.KafkaPrincipal
+
 import scala.util.{Failure, Success, Try}
 
 
@@ -31,7 +32,7 @@ object SecurityUtils {
   def convertToResourceAndAcl(filter: AclBindingFilter): Either[ApiError, (Resource, Acl)] = {
     (for {
       resourceType <- Try(ResourceType.fromJava(filter.patternFilter.resourceType))
-      principal <- Try(parseKafkaPrincipal(filter.entryFilter.principal))
+      principal <- Try(KafkaPrincipal.fromString(filter.entryFilter.principal))
       operation <- Try(Operation.fromJava(filter.entryFilter.operation))
       permissionType <- Try(PermissionType.fromJava(filter.entryFilter.permissionType))
       resource = Resource(resourceType, filter.patternFilter.name, filter.patternFilter.patternType)
@@ -49,5 +50,4 @@ object SecurityUtils {
     new AclBinding(resourcePattern, entry)
   }
 
-  def isClusterResource(name: String): Boolean = name.equals(Resource.ClusterResourceName)
 }

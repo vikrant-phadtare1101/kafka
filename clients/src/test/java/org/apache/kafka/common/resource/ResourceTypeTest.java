@@ -46,7 +46,7 @@ public class ResourceTypeTest {
     };
 
     @Test
-    public void testIsUnknown() {
+    public void testIsUnknown() throws Exception {
         for (AclResourceTypeTestInfo info : INFOS) {
             assertEquals(info.resourceType + " was supposed to have unknown == " + info.unknown,
                 info.unknown, info.resourceType.isUnknown());
@@ -54,7 +54,7 @@ public class ResourceTypeTest {
     }
 
     @Test
-    public void testCode() {
+    public void testCode() throws Exception {
         assertEquals(ResourceType.values().length, INFOS.length);
         for (AclResourceTypeTestInfo info : INFOS) {
             assertEquals(info.resourceType + " was supposed to have code == " + info.code,
@@ -66,7 +66,7 @@ public class ResourceTypeTest {
     }
 
     @Test
-    public void testName() {
+    public void testName() throws Exception {
         for (AclResourceTypeTestInfo info : INFOS) {
             assertEquals("ResourceType.fromString(" + info.name + ") was supposed to be " +
                 info.resourceType, info.resourceType, ResourceType.fromString(info.name));
@@ -75,7 +75,7 @@ public class ResourceTypeTest {
     }
 
     @Test
-    public void testExhaustive() {
+    public void testExhaustive() throws Exception {
         assertEquals(INFOS.length, ResourceType.values().length);
         for (int i = 0; i < INFOS.length; i++) {
             assertEquals(INFOS[i].resourceType, ResourceType.values()[i]);

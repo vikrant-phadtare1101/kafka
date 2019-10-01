@@ -87,7 +87,7 @@ public class KerberosNameTest {
     }
 
     @Test
-    public void testInvalidRules() {
+    public void testInvalidRules() throws Exception {
         testInvalidRule(Arrays.asList("default"));
         testInvalidRule(Arrays.asList("DEFAUL"));
         testInvalidRule(Arrays.asList("DEFAULT/L"));

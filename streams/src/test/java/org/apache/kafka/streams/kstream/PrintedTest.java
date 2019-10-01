@@ -28,15 +28,14 @@ import org.junit.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.PrintStream;
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 
 import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.Assert.assertThat;
 
 public class PrintedTest {
 
@@ -64,7 +63,7 @@ public class PrintedTest {
         final Processor<String, Integer> processor = processorSupplier.get();
         processor.process("hi", 1);
         processor.close();
-        try (final InputStream stream = Files.newInputStream(file.toPath())) {
+        try (final FileInputStream stream = new FileInputStream(file)) {
             final byte[] data = new byte[stream.available()];
             stream.read(data);
             assertThat(new String(data, StandardCharsets.UTF_8.name()), equalTo("[processor]: hi, 1\n"));

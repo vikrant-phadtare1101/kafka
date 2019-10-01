@@ -18,20 +18,20 @@
 package org.apache.kafka.streams.processor.internals;
 
 
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.errors.StreamsException;
 import org.apache.kafka.streams.processor.AbstractNotifyingBatchingRestoreCallback;
+import org.apache.kafka.streams.processor.BatchingStateRestoreCallback;
 import org.apache.kafka.streams.processor.StateRestoreCallback;
 import org.apache.kafka.streams.processor.StateRestoreListener;
 
 import java.util.Collection;
 
-public class CompositeRestoreListener implements RecordBatchingStateRestoreCallback, StateRestoreListener {
+public class CompositeRestoreListener implements BatchingStateRestoreCallback, StateRestoreListener {
 
     public static final NoOpStateRestoreListener NO_OP_STATE_RESTORE_LISTENER = new NoOpStateRestoreListener();
-    private final RecordBatchingStateRestoreCallback internalBatchingRestoreCallback;
+    private final BatchingStateRestoreCallback internalBatchingRestoreCallback;
     private final StateRestoreListener storeRestoreListener;
     private StateRestoreListener userRestoreListener = NO_OP_STATE_RESTORE_LISTENER;
 
@@ -43,7 +43,7 @@ public class CompositeRestoreListener implements RecordBatchingStateRestoreCallb
             storeRestoreListener = NO_OP_STATE_RESTORE_LISTENER;
         }
 
-        internalBatchingRestoreCallback = StateRestoreCallbackAdapter.adapt(stateRestoreCallback);
+        internalBatchingRestoreCallback = getBatchingRestoreCallback(stateRestoreCallback);
     }
 
     /**
@@ -85,8 +85,8 @@ public class CompositeRestoreListener implements RecordBatchingStateRestoreCallb
     }
 
     @Override
-    public void restoreBatch(final Collection<ConsumerRecord<byte[], byte[]>> records) {
-        internalBatchingRestoreCallback.restoreBatch(records);
+    public void restoreAll(final Collection<KeyValue<byte[], byte[]>> records) {
+        internalBatchingRestoreCallback.restoreAll(records);
     }
 
     void setUserRestoreListener(final StateRestoreListener userRestoreListener) {
@@ -96,20 +96,25 @@ public class CompositeRestoreListener implements RecordBatchingStateRestoreCallb
     }
 
     @Override
-    public void restoreAll(final Collection<KeyValue<byte[], byte[]>> records) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public void restore(final byte[] key,
                         final byte[] value) {
         throw new UnsupportedOperationException("Single restore functionality shouldn't be called directly but "
-                                                    + "through the delegated StateRestoreCallback instance");
+                                                + "through the delegated StateRestoreCallback instance");
     }
 
-    private static final class NoOpStateRestoreListener extends AbstractNotifyingBatchingRestoreCallback implements RecordBatchingStateRestoreCallback {
+    private BatchingStateRestoreCallback getBatchingRestoreCallback(StateRestoreCallback restoreCallback) {
+        if (restoreCallback instanceof  BatchingStateRestoreCallback) {
+            return (BatchingStateRestoreCallback) restoreCallback;
+        }
+
+        return new WrappedBatchingStateRestoreCallback(restoreCallback);
+    }
+
+
+    private static final class NoOpStateRestoreListener extends AbstractNotifyingBatchingRestoreCallback {
+
         @Override
-        public void restoreBatch(final Collection<ConsumerRecord<byte[], byte[]>> records) {
+        public void restoreAll(final Collection<KeyValue<byte[], byte[]>> records) {
 
         }
     }

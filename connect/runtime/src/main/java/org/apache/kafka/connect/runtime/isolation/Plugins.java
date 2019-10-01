@@ -62,8 +62,13 @@ public class Plugins {
     }
 
     private static DelegatingClassLoader newDelegatingClassLoader(final List<String> paths) {
-        return AccessController.doPrivileged(
-                (PrivilegedAction<DelegatingClassLoader>) () -> new DelegatingClassLoader(paths)
+        return (DelegatingClassLoader) AccessController.doPrivileged(
+                new PrivilegedAction() {
+                    @Override
+                    public Object run() {
+                        return new DelegatingClassLoader(paths);
+                    }
+                }
         );
     }
 
@@ -97,7 +102,6 @@ public class Plugins {
         );
     }
 
-    @SuppressWarnings("deprecation")
     protected static boolean isInternalConverter(String classPropertyName) {
         return classPropertyName.equals(WorkerConfig.INTERNAL_KEY_CONVERTER_CLASS_CONFIG)
             || classPropertyName.equals(WorkerConfig.INTERNAL_VALUE_CONVERTER_CLASS_CONFIG);
@@ -149,11 +153,6 @@ public class Plugins {
     }
 
     public Connector newConnector(String connectorClassOrAlias) {
-        Class<? extends Connector> klass = connectorClass(connectorClassOrAlias);
-        return newPlugin(klass);
-    }
-
-    public Class<? extends Connector> connectorClass(String connectorClassOrAlias) {
         Class<? extends Connector> klass;
         try {
             klass = pluginClass(
@@ -193,7 +192,7 @@ public class Plugins {
             PluginDesc<Connector> entry = matches.get(0);
             klass = entry.pluginClass();
         }
-        return klass;
+        return newPlugin(klass);
     }
 
     public Task newTask(Class<? extends Task> taskClass) {
@@ -244,7 +243,6 @@ public class Plugins {
         }
 
         // Determine whether this is a key or value converter based upon the supplied property name ...
-        @SuppressWarnings("deprecation")
         final boolean isKeyConverter = WorkerConfig.KEY_CONVERTER_CLASS_CONFIG.equals(classPropertyName)
                                      || WorkerConfig.INTERNAL_KEY_CONVERTER_CLASS_CONFIG.equals(classPropertyName);
 

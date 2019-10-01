@@ -28,15 +28,11 @@ import org.apache.kafka.streams.errors.ProcessorStateException;
 import org.apache.kafka.streams.processor.StateRestoreCallback;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.TaskId;
-import org.apache.kafka.streams.processor.internals.testutil.LogCaptureAppender;
-import org.apache.kafka.streams.state.TimestampedBytesStore;
 import org.apache.kafka.streams.state.internals.OffsetCheckpoint;
 import org.apache.kafka.test.MockBatchingStateRestoreListener;
-import org.apache.kafka.test.MockInternalProcessorContext;
-import org.apache.kafka.test.MockKeyValueStore;
+import org.apache.kafka.test.MockStateStore;
 import org.apache.kafka.test.NoOpProcessorContext;
 import org.apache.kafka.test.TestUtils;
-import org.hamcrest.Matchers;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -44,7 +40,8 @@ import org.junit.Test;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.nio.charset.Charset;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -53,12 +50,6 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static java.util.Arrays.asList;
-import static java.util.Collections.emptyMap;
-import static java.util.Collections.singletonList;
-import static java.util.Collections.singletonMap;
-import static org.apache.kafka.common.utils.Utils.mkEntry;
-import static org.apache.kafka.common.utils.Utils.mkMap;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.core.Is.is;
@@ -77,17 +68,17 @@ public class ProcessorStateManagerTest {
     private final String nonPersistentStoreName = "nonPersistentStore";
     private final String persistentStoreTopicName = ProcessorStateManager.storeChangelogTopic(applicationId, persistentStoreName);
     private final String nonPersistentStoreTopicName = ProcessorStateManager.storeChangelogTopic(applicationId, nonPersistentStoreName);
-    private final MockKeyValueStore persistentStore = new MockKeyValueStore(persistentStoreName, true);
-    private final MockKeyValueStore nonPersistentStore = new MockKeyValueStore(nonPersistentStoreName, false);
+    private final MockStateStore persistentStore = new MockStateStore(persistentStoreName, true);
+    private final MockStateStore nonPersistentStore = new MockStateStore(nonPersistentStoreName, false);
     private final TopicPartition persistentStorePartition = new TopicPartition(persistentStoreTopicName, 1);
-    private final String storeName = "mockKeyValueStore";
+    private final String storeName = "mockStateStore";
     private final String changelogTopic = ProcessorStateManager.storeChangelogTopic(applicationId, storeName);
     private final TopicPartition changelogTopicPartition = new TopicPartition(changelogTopic, 0);
     private final TaskId taskId = new TaskId(0, 1);
     private final MockChangelogReader changelogReader = new MockChangelogReader();
-    private final MockKeyValueStore mockKeyValueStore = new MockKeyValueStore(storeName, true);
-    private final byte[] key = new byte[] {0x0, 0x0, 0x0, 0x1};
-    private final byte[] value = "the-value".getBytes(StandardCharsets.UTF_8);
+    private final MockStateStore mockStateStore = new MockStateStore(storeName, true);
+    private final byte[] key = new byte[]{0x0, 0x0, 0x0, 0x1};
+    private final byte[] value = "the-value".getBytes(Charset.forName("UTF-8"));
     private final ConsumerRecord<byte[], byte[]> consumerRecord = new ConsumerRecord<>(changelogTopic, 0, 0, key, value);
     private final LogContext logContext = new LogContext("process-state-manager-test ");
 
@@ -106,7 +97,7 @@ public class ProcessorStateManagerTest {
                 put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "dummy:1234");
                 put(StreamsConfig.STATE_DIR_CONFIG, baseDir.getPath());
             }
-        }), new MockTime(), true);
+        }), new MockTime());
         checkpointFile = new File(stateDirectory.directoryForTask(taskId), ProcessorStateManager.CHECKPOINT_FILE_NAME);
         checkpoint = new OffsetCheckpoint(checkpointFile);
     }
@@ -123,20 +114,16 @@ public class ProcessorStateManagerTest {
 
         final KeyValue<byte[], byte[]> expectedKeyValue = KeyValue.pair(key, value);
 
-        final MockKeyValueStore persistentStore = getPersistentStore();
+        final MockStateStore persistentStore = getPersistentStore();
         final ProcessorStateManager stateMgr = getStandByStateManager(taskId);
 
         try {
             stateMgr.register(persistentStore, batchingRestoreCallback);
-            stateMgr.updateStandbyStates(
-                persistentStorePartition,
-                singletonList(consumerRecord),
-                consumerRecord.offset()
-            );
+            stateMgr.updateStandbyStates(persistentStorePartition, Collections.singletonList(consumerRecord));
             assertThat(batchingRestoreCallback.getRestoredRecords().size(), is(1));
             assertTrue(batchingRestoreCallback.getRestoredRecords().contains(expectedKeyValue));
         } finally {
-            stateMgr.close(true);
+            stateMgr.close(Collections.emptyMap());
         }
     }
 
@@ -145,44 +132,16 @@ public class ProcessorStateManagerTest {
         final TaskId taskId = new TaskId(0, 2);
         final Integer intKey = 1;
 
-        final MockKeyValueStore persistentStore = getPersistentStore();
+        final MockStateStore persistentStore = getPersistentStore();
         final ProcessorStateManager stateMgr = getStandByStateManager(taskId);
 
         try {
             stateMgr.register(persistentStore, persistentStore.stateRestoreCallback);
-            stateMgr.updateStandbyStates(
-                persistentStorePartition,
-                singletonList(consumerRecord),
-                consumerRecord.offset()
-            );
+            stateMgr.updateStandbyStates(persistentStorePartition, Collections.singletonList(consumerRecord));
             assertThat(persistentStore.keys.size(), is(1));
             assertTrue(persistentStore.keys.contains(intKey));
-            assertEquals(9, persistentStore.values.get(0).length);
         } finally {
-            stateMgr.close(true);
-        }
-    }
-
-    @Test
-    public void shouldConvertDataOnRestoreIfStoreImplementsTimestampedBytesStore() throws Exception {
-        final TaskId taskId = new TaskId(0, 2);
-        final Integer intKey = 1;
-
-        final MockKeyValueStore persistentStore = getConverterStore();
-        final ProcessorStateManager stateMgr = getStandByStateManager(taskId);
-
-        try {
-            stateMgr.register(persistentStore, persistentStore.stateRestoreCallback);
-            stateMgr.updateStandbyStates(
-                persistentStorePartition,
-                singletonList(consumerRecord),
-                consumerRecord.offset()
-            );
-            assertThat(persistentStore.keys.size(), is(1));
-            assertTrue(persistentStore.keys.contains(intKey));
-            assertEquals(17, persistentStore.values.get(0).length);
-        } finally {
-            stateMgr.close(true);
+            stateMgr.close(Collections.emptyMap());
         }
     }
 
@@ -190,16 +149,18 @@ public class ProcessorStateManagerTest {
     public void testRegisterPersistentStore() throws IOException {
         final TaskId taskId = new TaskId(0, 2);
 
-        final MockKeyValueStore persistentStore = getPersistentStore();
+        final MockStateStore persistentStore = getPersistentStore();
         final ProcessorStateManager stateMgr = new ProcessorStateManager(
             taskId,
             noPartitions,
             false,
             stateDirectory,
-            mkMap(
-                mkEntry(persistentStoreName, persistentStoreTopicName),
-                mkEntry(nonPersistentStoreName, nonPersistentStoreName)
-            ),
+            new HashMap<String, String>() {
+                {
+                    put(persistentStoreName, persistentStoreTopicName);
+                    put(nonPersistentStoreName, nonPersistentStoreName);
+                }
+            },
             changelogReader,
             false,
             logContext);
@@ -208,23 +169,25 @@ public class ProcessorStateManagerTest {
             stateMgr.register(persistentStore, persistentStore.stateRestoreCallback);
             assertTrue(changelogReader.wasRegistered(new TopicPartition(persistentStoreTopicName, 2)));
         } finally {
-            stateMgr.close(true);
+            stateMgr.close(Collections.emptyMap());
         }
     }
 
     @Test
     public void testRegisterNonPersistentStore() throws IOException {
-        final MockKeyValueStore nonPersistentStore =
-            new MockKeyValueStore(nonPersistentStoreName, false); // non persistent store
+        final MockStateStore nonPersistentStore
+            = new MockStateStore(nonPersistentStoreName, false); // non persistent store
         final ProcessorStateManager stateMgr = new ProcessorStateManager(
             new TaskId(0, 2),
             noPartitions,
             false,
             stateDirectory,
-            mkMap(
-                mkEntry(persistentStoreName, persistentStoreTopicName),
-                mkEntry(nonPersistentStoreName, nonPersistentStoreTopicName)
-            ),
+            new HashMap<String, String>() {
+                {
+                    put(persistentStoreName, persistentStoreTopicName);
+                    put(nonPersistentStoreName, nonPersistentStoreTopicName);
+                }
+            },
             changelogReader,
             false,
             logContext);
@@ -233,7 +196,7 @@ public class ProcessorStateManagerTest {
             stateMgr.register(nonPersistentStore, nonPersistentStore.stateRestoreCallback);
             assertTrue(changelogReader.wasRegistered(new TopicPartition(nonPersistentStoreTopicName, 2)));
         } finally {
-            stateMgr.close(true);
+            stateMgr.close(Collections.emptyMap());
         }
     }
 
@@ -255,15 +218,15 @@ public class ProcessorStateManagerTest {
         storeToChangelogTopic.put(storeName3, storeTopicName3);
 
         final OffsetCheckpoint checkpoint = new OffsetCheckpoint(new File(stateDirectory.directoryForTask(taskId), ProcessorStateManager.CHECKPOINT_FILE_NAME));
-        checkpoint.write(singletonMap(new TopicPartition(storeTopicName1, 0), lastCheckpointedOffset));
+        checkpoint.write(Collections.singletonMap(new TopicPartition(storeTopicName1, 0), lastCheckpointedOffset));
 
         final TopicPartition partition1 = new TopicPartition(storeTopicName1, 0);
         final TopicPartition partition2 = new TopicPartition(storeTopicName2, 0);
         final TopicPartition partition3 = new TopicPartition(storeTopicName3, 1);
 
-        final MockKeyValueStore store1 = new MockKeyValueStore(storeName1, true);
-        final MockKeyValueStore store2 = new MockKeyValueStore(storeName2, true);
-        final MockKeyValueStore store3 = new MockKeyValueStore(storeName3, true);
+        final MockStateStore store1 = new MockStateStore(storeName1, true);
+        final MockStateStore store2 = new MockStateStore(storeName2, true);
+        final MockStateStore store3 = new MockStateStore(storeName3, true);
 
         // if there is a source partition, inherit the partition id
         final Set<TopicPartition> sourcePartitions = Utils.mkSet(new TopicPartition(storeTopicName3, 1));
@@ -294,36 +257,36 @@ public class ProcessorStateManagerTest {
             assertEquals(-1L, (long) changeLogOffsets.get(partition3));
 
         } finally {
-            stateMgr.close(true);
+            stateMgr.close(Collections.emptyMap());
         }
     }
 
     @Test
     public void testGetStore() throws IOException {
-        final MockKeyValueStore mockKeyValueStore = new MockKeyValueStore(nonPersistentStoreName, false);
+        final MockStateStore mockStateStore = new MockStateStore(nonPersistentStoreName, false);
         final ProcessorStateManager stateMgr = new ProcessorStateManager(
             new TaskId(0, 1),
             noPartitions,
             false,
             stateDirectory,
-            emptyMap(),
+            Collections.emptyMap(),
             changelogReader,
             false,
             logContext);
         try {
-            stateMgr.register(mockKeyValueStore, mockKeyValueStore.stateRestoreCallback);
+            stateMgr.register(mockStateStore, mockStateStore.stateRestoreCallback);
 
             assertNull(stateMgr.getStore("noSuchStore"));
-            assertEquals(mockKeyValueStore, stateMgr.getStore(nonPersistentStoreName));
+            assertEquals(mockStateStore, stateMgr.getStore(nonPersistentStoreName));
 
         } finally {
-            stateMgr.close(true);
+            stateMgr.close(Collections.emptyMap());
         }
     }
 
     @Test
     public void testFlushAndClose() throws IOException {
-        checkpoint.write(emptyMap());
+        checkpoint.write(Collections.emptyMap());
 
         // set up ack'ed offsets
         final HashMap<TopicPartition, Long> ackedOffsets = new HashMap<>();
@@ -336,8 +299,12 @@ public class ProcessorStateManagerTest {
             noPartitions,
             false,
             stateDirectory,
-            mkMap(mkEntry(persistentStoreName, persistentStoreTopicName),
-                  mkEntry(nonPersistentStoreName, nonPersistentStoreTopicName)),
+            new HashMap<String, String>() {
+                {
+                    put(persistentStoreName, persistentStoreTopicName);
+                    put(nonPersistentStoreName, nonPersistentStoreTopicName);
+                }
+            },
             changelogReader,
             false,
             logContext);
@@ -350,8 +317,7 @@ public class ProcessorStateManagerTest {
         } finally {
             // close the state manager with the ack'ed offsets
             stateMgr.flush();
-            stateMgr.checkpoint(ackedOffsets);
-            stateMgr.close(true);
+            stateMgr.close(ackedOffsets);
         }
         // make sure all stores are closed, and the checkpoint file is written.
         assertTrue(persistentStore.flushed);
@@ -360,49 +326,10 @@ public class ProcessorStateManagerTest {
         assertTrue(nonPersistentStore.closed);
         assertTrue(checkpointFile.exists());
 
-        // make sure that flush is called in the proper order
-        assertThat(persistentStore.getLastFlushCount(), Matchers.lessThan(nonPersistentStore.getLastFlushCount()));
-
         // the checkpoint file should contain an offset from the persistent store only.
         final Map<TopicPartition, Long> checkpointedOffsets = checkpoint.read();
         assertEquals(1, checkpointedOffsets.size());
         assertEquals(new Long(124), checkpointedOffsets.get(new TopicPartition(persistentStoreTopicName, 1)));
-    }
-
-    @Test
-    public void shouldMaintainRegistrationOrderWhenReregistered() throws IOException {
-        checkpoint.write(emptyMap());
-
-        // set up ack'ed offsets
-        final TopicPartition persistentTopicPartition = new TopicPartition(persistentStoreTopicName, 1);
-        final TopicPartition nonPersistentTopicPartition = new TopicPartition(nonPersistentStoreTopicName, 1);
-
-        final ProcessorStateManager stateMgr = new ProcessorStateManager(
-            taskId,
-            noPartitions,
-            false,
-            stateDirectory,
-            mkMap(mkEntry(persistentStoreName, persistentStoreTopicName),
-                  mkEntry(nonPersistentStoreName, nonPersistentStoreTopicName)),
-            changelogReader,
-            false,
-            logContext);
-        stateMgr.register(persistentStore, persistentStore.stateRestoreCallback);
-        stateMgr.register(nonPersistentStore, nonPersistentStore.stateRestoreCallback);
-        // de-registers the stores, but doesn't re-register them because
-        // the context isn't connected to our state manager
-        stateMgr.reinitializeStateStoresForPartitions(asList(nonPersistentTopicPartition, persistentTopicPartition),
-                                                      new MockInternalProcessorContext());
-        // register them in backward order
-        stateMgr.register(nonPersistentStore, nonPersistentStore.stateRestoreCallback);
-        stateMgr.register(persistentStore, persistentStore.stateRestoreCallback);
-
-        stateMgr.flush();
-
-        // make sure that flush is called in the proper order
-        assertTrue(persistentStore.flushed);
-        assertTrue(nonPersistentStore.flushed);
-        assertThat(persistentStore.getLastFlushCount(), Matchers.lessThan(nonPersistentStore.getLastFlushCount()));
     }
 
     @Test
@@ -412,7 +339,7 @@ public class ProcessorStateManagerTest {
             noPartitions,
             false,
             stateDirectory,
-            emptyMap(),
+            Collections.emptyMap(),
             changelogReader,
             false,
             logContext);
@@ -422,21 +349,21 @@ public class ProcessorStateManagerTest {
 
     @Test
     public void shouldNotChangeOffsetsIfAckedOffsetsIsNull() throws IOException {
-        final Map<TopicPartition, Long> offsets = singletonMap(persistentStorePartition, 99L);
+        final Map<TopicPartition, Long> offsets = Collections.singletonMap(persistentStorePartition, 99L);
         checkpoint.write(offsets);
 
-        final MockKeyValueStore persistentStore = new MockKeyValueStore(persistentStoreName, true);
+        final MockStateStore persistentStore = new MockStateStore(persistentStoreName, true);
         final ProcessorStateManager stateMgr = new ProcessorStateManager(
             taskId,
             noPartitions,
             false,
             stateDirectory,
-            emptyMap(),
+            Collections.emptyMap(),
             changelogReader,
             false,
             logContext);
         stateMgr.register(persistentStore, persistentStore.stateRestoreCallback);
-        stateMgr.close(true);
+        stateMgr.close(null);
         final Map<TopicPartition, Long> read = checkpoint.read();
         assertThat(read, equalTo(offsets));
     }
@@ -448,15 +375,15 @@ public class ProcessorStateManagerTest {
             noPartitions,
             false,
             stateDirectory,
-            singletonMap(persistentStore.name(), persistentStoreTopicName),
+            Collections.singletonMap(persistentStore.name(), persistentStoreTopicName),
             changelogReader,
             false,
             logContext);
         stateMgr.register(persistentStore, persistentStore.stateRestoreCallback);
 
-        stateMgr.checkpoint(singletonMap(persistentStorePartition, 10L));
+        stateMgr.checkpoint(Collections.singletonMap(persistentStorePartition, 10L));
         final Map<TopicPartition, Long> read = checkpoint.read();
-        assertThat(read, equalTo(singletonMap(persistentStorePartition, 11L)));
+        assertThat(read, equalTo(Collections.singletonMap(persistentStorePartition, 11L)));
     }
 
     @Test
@@ -466,23 +393,25 @@ public class ProcessorStateManagerTest {
             noPartitions,
             true, // standby
             stateDirectory,
-            singletonMap(persistentStore.name(), persistentStoreTopicName),
+            Collections.singletonMap(persistentStore.name(), persistentStoreTopicName),
             changelogReader,
             false,
             logContext);
 
         stateMgr.register(persistentStore, persistentStore.stateRestoreCallback);
         final byte[] bytes = Serdes.Integer().serializer().serialize("", 10);
-        stateMgr.updateStandbyStates(
-            persistentStorePartition,
-            singletonList(new ConsumerRecord<>("", 0, 0L, bytes, bytes)),
-            888L
-        );
+        stateMgr.updateStandbyStates(persistentStorePartition,
+                                     Collections.singletonList(
+                                             new ConsumerRecord<>(persistentStorePartition.topic(),
+                                                                  persistentStorePartition.partition(),
+                                                                  888L,
+                                                                  bytes,
+                                                                  bytes)));
 
-        stateMgr.checkpoint(emptyMap());
+        stateMgr.checkpoint(Collections.emptyMap());
 
         final Map<TopicPartition, Long> read = checkpoint.read();
-        assertThat(read, equalTo(singletonMap(persistentStorePartition, 889L)));
+        assertThat(read, equalTo(Collections.singletonMap(persistentStorePartition, 889L)));
 
     }
 
@@ -495,16 +424,16 @@ public class ProcessorStateManagerTest {
             noPartitions,
             true, // standby
             stateDirectory,
-            singletonMap(nonPersistentStoreName, nonPersistentStoreTopicName),
+            Collections.singletonMap(nonPersistentStoreName, nonPersistentStoreTopicName),
             changelogReader,
             false,
             logContext);
 
         stateMgr.register(nonPersistentStore, nonPersistentStore.stateRestoreCallback);
-        stateMgr.checkpoint(singletonMap(topicPartition, 876L));
+        stateMgr.checkpoint(Collections.singletonMap(topicPartition, 876L));
 
         final Map<TopicPartition, Long> read = checkpoint.read();
-        assertThat(read, equalTo(emptyMap()));
+        assertThat(read, equalTo(Collections.emptyMap()));
     }
 
     @Test
@@ -514,17 +443,17 @@ public class ProcessorStateManagerTest {
             noPartitions,
             true, // standby
             stateDirectory,
-            emptyMap(),
+            Collections.emptyMap(),
             changelogReader,
             false,
             logContext);
 
         stateMgr.register(persistentStore, persistentStore.stateRestoreCallback);
 
-        stateMgr.checkpoint(singletonMap(persistentStorePartition, 987L));
+        stateMgr.checkpoint(Collections.singletonMap(persistentStorePartition, 987L));
 
         final Map<TopicPartition, Long> read = checkpoint.read();
-        assertThat(read, equalTo(emptyMap()));
+        assertThat(read, equalTo(Collections.emptyMap()));
     }
 
     @Test
@@ -534,13 +463,13 @@ public class ProcessorStateManagerTest {
             noPartitions,
             false,
             stateDirectory,
-            emptyMap(),
+            Collections.emptyMap(),
             changelogReader,
             false,
             logContext);
 
         try {
-            stateManager.register(new MockKeyValueStore(ProcessorStateManager.CHECKPOINT_FILE_NAME, true), null);
+            stateManager.register(new MockStateStore(ProcessorStateManager.CHECKPOINT_FILE_NAME, true), null);
             fail("should have thrown illegal argument exception when store name same as checkpoint file");
         } catch (final IllegalArgumentException e) {
             //pass
@@ -554,15 +483,15 @@ public class ProcessorStateManagerTest {
             noPartitions,
             false,
             stateDirectory,
-            emptyMap(),
+            Collections.emptyMap(),
             changelogReader,
             false,
             logContext);
 
-        stateManager.register(mockKeyValueStore, null);
+        stateManager.register(mockStateStore, null);
 
         try {
-            stateManager.register(mockKeyValueStore, null);
+            stateManager.register(mockStateStore, null);
             fail("should have thrown illegal argument exception when store with same name already registered");
         } catch (final IllegalArgumentException e) {
             // pass
@@ -578,12 +507,12 @@ public class ProcessorStateManagerTest {
             Collections.singleton(changelogTopicPartition),
             false,
             stateDirectory,
-            singletonMap(storeName, changelogTopic),
+            Collections.singletonMap(storeName, changelogTopic),
             changelogReader,
             false,
             logContext);
 
-        final MockKeyValueStore stateStore = new MockKeyValueStore(storeName, true) {
+        final MockStateStore stateStore = new MockStateStore(storeName, true) {
             @Override
             public void flush() {
                 throw new RuntimeException("KABOOM!");
@@ -607,12 +536,12 @@ public class ProcessorStateManagerTest {
             Collections.singleton(changelogTopicPartition),
             false,
             stateDirectory,
-            singletonMap(storeName, changelogTopic),
+            Collections.singletonMap(storeName, changelogTopic),
             changelogReader,
             false,
             logContext);
 
-        final MockKeyValueStore stateStore = new MockKeyValueStore(storeName, true) {
+        final MockStateStore stateStore = new MockStateStore(storeName, true) {
             @Override
             public void close() {
                 throw new RuntimeException("KABOOM!");
@@ -621,80 +550,39 @@ public class ProcessorStateManagerTest {
         stateManager.register(stateStore, stateStore.stateRestoreCallback);
 
         try {
-            stateManager.close(true);
+            stateManager.close(Collections.emptyMap());
             fail("Should throw ProcessorStateException if store close throws exception");
         } catch (final ProcessorStateException e) {
             // pass
         }
     }
 
-    // if the optional is absent, it'll throw an exception and fail the test.
-    @SuppressWarnings("OptionalGetWithoutIsPresent")
     @Test
-    public void shouldLogAWarningIfCheckpointThrowsAnIOException() {
-        final LogCaptureAppender appender = LogCaptureAppender.createAndRegister();
-
-        final ProcessorStateManager stateMgr;
-        try {
-            stateMgr = new ProcessorStateManager(
-                taskId,
-                noPartitions,
-                false,
-                stateDirectory,
-                singletonMap(persistentStore.name(), persistentStoreTopicName),
-                changelogReader,
-                false,
-                logContext);
-        } catch (final IOException e) {
-            e.printStackTrace();
-            throw new AssertionError(e);
-        }
-        stateMgr.register(persistentStore, persistentStore.stateRestoreCallback);
-
-        stateDirectory.clean();
-        stateMgr.checkpoint(singletonMap(persistentStorePartition, 10L));
-        LogCaptureAppender.unregister(appender);
-
-        boolean foundExpectedLogMessage = false;
-        for (final LogCaptureAppender.Event event : appender.getEvents()) {
-            if ("WARN".equals(event.getLevel())
-                && event.getMessage().startsWith("process-state-manager-test Failed to write offset checkpoint file to [")
-                && event.getMessage().endsWith(".checkpoint]")
-                && event.getThrowableInfo().get().startsWith("java.io.FileNotFoundException: ")) {
-
-                foundExpectedLogMessage = true;
-                break;
-            }
-        }
-        assertTrue(foundExpectedLogMessage);
-    }
-
-    @Test
-    public void shouldFlushAllStoresEvenIfStoreThrowsException() throws IOException {
-        final AtomicBoolean flushedStore = new AtomicBoolean(false);
-
-        final MockKeyValueStore stateStore1 = new MockKeyValueStore(storeName, true) {
-            @Override
-            public void flush() {
-                throw new RuntimeException("KABOOM!");
-            }
-        };
-        final MockKeyValueStore stateStore2 = new MockKeyValueStore(storeName + "2", true) {
-            @Override
-            public void flush() {
-                flushedStore.set(true);
-            }
-        };
+    public void shouldFlushAllStoresEvenIfStoreThrowsExcepiton() throws IOException {
         final ProcessorStateManager stateManager = new ProcessorStateManager(
             taskId,
             Collections.singleton(changelogTopicPartition),
             false,
             stateDirectory,
-            singletonMap(storeName, changelogTopic),
+            Collections.singletonMap(storeName, changelogTopic),
             changelogReader,
             false,
             logContext);
 
+        final AtomicBoolean flushedStore = new AtomicBoolean(false);
+
+        final MockStateStore stateStore1 = new MockStateStore(storeName, true) {
+            @Override
+            public void flush() {
+                throw new RuntimeException("KABOOM!");
+            }
+        };
+        final MockStateStore stateStore2 = new MockStateStore(storeName + "2", true) {
+            @Override
+            public void flush() {
+                flushedStore.set(true);
+            }
+        };
         stateManager.register(stateStore1, stateStore1.stateRestoreCallback);
         stateManager.register(stateStore2, stateStore2.stateRestoreCallback);
 
@@ -706,43 +594,42 @@ public class ProcessorStateManagerTest {
 
     @Test
     public void shouldCloseAllStoresEvenIfStoreThrowsExcepiton() throws IOException {
-
-        final AtomicBoolean closedStore = new AtomicBoolean(false);
-
-        final MockKeyValueStore stateStore1 = new MockKeyValueStore(storeName, true) {
-            @Override
-            public void close() {
-                throw new RuntimeException("KABOOM!");
-            }
-        };
-        final MockKeyValueStore stateStore2 = new MockKeyValueStore(storeName + "2", true) {
-            @Override
-            public void close() {
-                closedStore.set(true);
-            }
-        };
         final ProcessorStateManager stateManager = new ProcessorStateManager(
             taskId,
             Collections.singleton(changelogTopicPartition),
             false,
             stateDirectory,
-            singletonMap(storeName, changelogTopic),
+            Collections.singletonMap(storeName, changelogTopic),
             changelogReader,
             false,
             logContext);
 
+        final AtomicBoolean closedStore = new AtomicBoolean(false);
+
+        final MockStateStore stateStore1 = new MockStateStore(storeName, true) {
+            @Override
+            public void close() {
+                throw new RuntimeException("KABOOM!");
+            }
+        };
+        final MockStateStore stateStore2 = new MockStateStore(storeName + "2", true) {
+            @Override
+            public void close() {
+                closedStore.set(true);
+            }
+        };
         stateManager.register(stateStore1, stateStore1.stateRestoreCallback);
         stateManager.register(stateStore2, stateStore2.stateRestoreCallback);
 
         try {
-            stateManager.close(true);
+            stateManager.close(Collections.emptyMap());
         } catch (final ProcessorStateException expected) { /* ignode */ }
         Assert.assertTrue(closedStore.get());
     }
 
     @Test
     public void shouldDeleteCheckpointFileOnCreationIfEosEnabled() throws IOException {
-        checkpoint.write(singletonMap(new TopicPartition(persistentStoreTopicName, 1), 123L));
+        checkpoint.write(Collections.singletonMap(new TopicPartition(persistentStoreTopicName, 1), 123L));
         assertTrue(checkpointFile.exists());
 
         ProcessorStateManager stateManager = null;
@@ -752,7 +639,7 @@ public class ProcessorStateManagerTest {
                 noPartitions,
                 false,
                 stateDirectory,
-                emptyMap(),
+                Collections.emptyMap(),
                 changelogReader,
                 true,
                 logContext);
@@ -760,7 +647,7 @@ public class ProcessorStateManagerTest {
             assertFalse(checkpointFile.exists());
         } finally {
             if (stateManager != null) {
-                stateManager.close(true);
+                stateManager.close(null);
             }
         }
     }
@@ -779,15 +666,13 @@ public class ProcessorStateManagerTest {
         final String store2Name = "store2";
         final String store2Changelog = "store2-changelog";
         final TopicPartition store2Partition = new TopicPartition(store2Changelog, 0);
-        final List<TopicPartition> changelogPartitions = asList(changelogTopicPartition, store2Partition);
-        final Map<String, String> storeToChangelog = mkMap(
-                mkEntry(storeName, changelogTopic),
-                mkEntry(store2Name, store2Changelog)
-        );
-
-        final MockKeyValueStore stateStore = new MockKeyValueStore(storeName, true);
-        final MockKeyValueStore stateStore2 = new MockKeyValueStore(store2Name, true);
-
+        final List<TopicPartition> changelogPartitions = Arrays.asList(changelogTopicPartition, store2Partition);
+        final Map<String, String> storeToChangelog = new HashMap<String, String>() {
+            {
+                put(storeName, changelogTopic);
+                put(store2Name, store2Changelog);
+            }
+        };
         final ProcessorStateManager stateManager = new ProcessorStateManager(
             taskId,
             changelogPartitions,
@@ -797,6 +682,9 @@ public class ProcessorStateManagerTest {
             changelogReader,
             eosEnabled,
             logContext);
+
+        final MockStateStore stateStore = new MockStateStore(storeName, true);
+        final MockStateStore stateStore2 = new MockStateStore(store2Name, true);
 
         stateManager.register(stateStore, stateStore.stateRestoreCallback);
         stateManager.register(stateStore2, stateStore2.stateRestoreCallback);
@@ -821,24 +709,18 @@ public class ProcessorStateManagerTest {
             noPartitions,
             true,
             stateDirectory,
-            singletonMap(persistentStoreName, persistentStoreTopicName),
+            new HashMap<String, String>() {
+                {
+                    put(persistentStoreName, persistentStoreTopicName);
+                }
+            },
             changelogReader,
             false,
             logContext);
     }
 
-    private MockKeyValueStore getPersistentStore() {
-        return new MockKeyValueStore("persistentStore", true);
+    private MockStateStore getPersistentStore() {
+        return new MockStateStore("persistentStore", true);
     }
 
-    private MockKeyValueStore getConverterStore() {
-        return new ConverterStore("persistentStore", true);
-    }
-
-    private class ConverterStore extends MockKeyValueStore implements TimestampedBytesStore {
-        ConverterStore(final String name,
-                       final boolean persistent) {
-            super(name, persistent);
-        }
-    }
 }

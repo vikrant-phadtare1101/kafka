@@ -19,6 +19,7 @@ package org.apache.kafka.common.requests;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.protocol.types.ArrayOf;
 import org.apache.kafka.common.protocol.types.Field;
 import org.apache.kafka.common.protocol.types.Schema;
 import org.apache.kafka.common.protocol.types.Struct;
@@ -35,21 +36,18 @@ import static org.apache.kafka.common.protocol.CommonFields.PARTITION_ID;
 import static org.apache.kafka.common.protocol.CommonFields.TOPIC_NAME;
 
 public class StopReplicaResponse extends AbstractResponse {
-    private static final Field.ComplexArray PARTITIONS = new Field.ComplexArray("partitions", "Response for the requests partitions");
+    private static final String PARTITIONS_KEY_NAME = "partitions";
 
-    private static final Field PARTITIONS_V0 = PARTITIONS.withFields(
+    private static final Schema STOP_REPLICA_RESPONSE_PARTITION_V0 = new Schema(
             TOPIC_NAME,
             PARTITION_ID,
             ERROR_CODE);
     private static final Schema STOP_REPLICA_RESPONSE_V0 = new Schema(
             ERROR_CODE,
-            PARTITIONS_V0);
-
-    private static final Schema STOP_REPLICA_RESPONSE_V1 = STOP_REPLICA_RESPONSE_V0;
-
+            new Field(PARTITIONS_KEY_NAME, new ArrayOf(STOP_REPLICA_RESPONSE_PARTITION_V0)));
 
     public static Schema[] schemaVersions() {
-        return new Schema[] {STOP_REPLICA_RESPONSE_V0, STOP_REPLICA_RESPONSE_V1};
+        return new Schema[] {STOP_REPLICA_RESPONSE_V0};
     }
 
     private final Map<TopicPartition, Errors> responses;
@@ -58,7 +56,6 @@ public class StopReplicaResponse extends AbstractResponse {
      * Possible error code:
      *
      * STALE_CONTROLLER_EPOCH (11)
-     * STALE_BROKER_EPOCH (77)
      */
     private final Errors error;
 
@@ -69,7 +66,7 @@ public class StopReplicaResponse extends AbstractResponse {
 
     public StopReplicaResponse(Struct struct) {
         responses = new HashMap<>();
-        for (Object responseDataObj : struct.get(PARTITIONS)) {
+        for (Object responseDataObj : struct.getArray(PARTITIONS_KEY_NAME)) {
             Struct responseData = (Struct) responseDataObj;
             String topic = responseData.get(TOPIC_NAME);
             int partition = responseData.get(PARTITION_ID);
@@ -106,7 +103,7 @@ public class StopReplicaResponse extends AbstractResponse {
 
         List<Struct> responseDatas = new ArrayList<>(responses.size());
         for (Map.Entry<TopicPartition, Errors> response : responses.entrySet()) {
-            Struct partitionData = struct.instance(PARTITIONS);
+            Struct partitionData = struct.instance(PARTITIONS_KEY_NAME);
             TopicPartition partition = response.getKey();
             partitionData.set(TOPIC_NAME, partition.topic());
             partitionData.set(PARTITION_ID, partition.partition());
@@ -114,7 +111,7 @@ public class StopReplicaResponse extends AbstractResponse {
             responseDatas.add(partitionData);
         }
 
-        struct.set(PARTITIONS, responseDatas.toArray());
+        struct.set(PARTITIONS_KEY_NAME, responseDatas.toArray());
         struct.set(ERROR_CODE, error.code());
         return struct;
     }

@@ -56,9 +56,6 @@ public class FileLogInputStreamTest {
 
     @Test
     public void testWriteTo() throws IOException {
-        if (compression == CompressionType.ZSTD && magic < MAGIC_VALUE_V2)
-            return;
-
         try (FileRecords fileRecords = FileRecords.open(tempFile())) {
             fileRecords.append(MemoryRecords.withRecords(magic, compression, new SimpleRecord("foo".getBytes())));
             fileRecords.flush();
@@ -84,9 +81,6 @@ public class FileLogInputStreamTest {
 
     @Test
     public void testSimpleBatchIteration() throws IOException {
-        if (compression == CompressionType.ZSTD && magic < MAGIC_VALUE_V2)
-            return;
-
         try (FileRecords fileRecords = FileRecords.open(tempFile())) {
             SimpleRecord firstBatchRecord = new SimpleRecord(3241324L, "a".getBytes(), "foo".getBytes());
             SimpleRecord secondBatchRecord = new SimpleRecord(234280L, "b".getBytes(), "bar".getBytes());
@@ -112,9 +106,6 @@ public class FileLogInputStreamTest {
     @Test
     public void testBatchIterationWithMultipleRecordsPerBatch() throws IOException {
         if (magic < MAGIC_VALUE_V2 && compression == CompressionType.NONE)
-            return;
-
-        if (compression == CompressionType.ZSTD && magic < MAGIC_VALUE_V2)
             return;
 
         try (FileRecords fileRecords = FileRecords.open(tempFile())) {
@@ -194,9 +185,6 @@ public class FileLogInputStreamTest {
 
     @Test
     public void testBatchIterationIncompleteBatch() throws IOException {
-        if (compression == CompressionType.ZSTD && magic < MAGIC_VALUE_V2)
-            return;
-
         try (FileRecords fileRecords = FileRecords.open(tempFile())) {
             SimpleRecord firstBatchRecord = new SimpleRecord(100L, "foo".getBytes());
             SimpleRecord secondBatchRecord = new SimpleRecord(200L, "bar".getBytes());

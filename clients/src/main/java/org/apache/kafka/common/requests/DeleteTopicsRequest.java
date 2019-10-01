@@ -16,16 +16,19 @@
  */
 package org.apache.kafka.common.requests;
 
-import org.apache.kafka.common.message.DeleteTopicsRequestData;
-import org.apache.kafka.common.message.DeleteTopicsResponseData;
-import org.apache.kafka.common.message.DeleteTopicsResponseData.DeletableTopicResult;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.protocol.types.ArrayOf;
 import org.apache.kafka.common.protocol.types.Field;
 import org.apache.kafka.common.protocol.types.Schema;
 import org.apache.kafka.common.protocol.types.Struct;
+import org.apache.kafka.common.utils.Utils;
 
 import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 import static org.apache.kafka.common.protocol.types.Type.INT32;
 import static org.apache.kafka.common.protocol.types.Type.STRING;
@@ -48,73 +51,89 @@ public class DeleteTopicsRequest extends AbstractRequest {
      */
     private static final Schema DELETE_TOPICS_REQUEST_V2 = DELETE_TOPICS_REQUEST_V1;
 
-    /**
-     * v3 request is the same that as v2. The response is different based on the request version.
-     * In v3 version a TopicDeletionDisabledException is returned
-     */
-    private static final Schema DELETE_TOPICS_REQUEST_V3 = DELETE_TOPICS_REQUEST_V2;
-
     public static Schema[] schemaVersions() {
         return new Schema[]{DELETE_TOPICS_REQUEST_V0, DELETE_TOPICS_REQUEST_V1,
-            DELETE_TOPICS_REQUEST_V2, DELETE_TOPICS_REQUEST_V3};
+            DELETE_TOPICS_REQUEST_V2};
     }
 
-    private DeleteTopicsRequestData data;
-    private final short version;
+    private final Set<String> topics;
+    private final Integer timeout;
 
     public static class Builder extends AbstractRequest.Builder<DeleteTopicsRequest> {
-        private DeleteTopicsRequestData data;
+        private final Set<String> topics;
+        private final Integer timeout;
 
-        public Builder(DeleteTopicsRequestData data) {
+        public Builder(Set<String> topics, Integer timeout) {
             super(ApiKeys.DELETE_TOPICS);
-            this.data = data;
+            this.topics = topics;
+            this.timeout = timeout;
         }
 
         @Override
         public DeleteTopicsRequest build(short version) {
-            return new DeleteTopicsRequest(data, version);
+            return new DeleteTopicsRequest(topics, timeout, version);
         }
 
         @Override
         public String toString() {
-            return data.toString();
+            StringBuilder bld = new StringBuilder();
+            bld.append("(type=DeleteTopicsRequest").
+                append(", topics=(").append(Utils.join(topics, ", ")).append(")").
+                append(", timeout=").append(timeout).
+                append(")");
+            return bld.toString();
         }
     }
 
-    private DeleteTopicsRequest(DeleteTopicsRequestData data, short version) {
-        super(ApiKeys.DELETE_TOPICS, version);
-        this.data = data;
-        this.version = version;
+    private DeleteTopicsRequest(Set<String> topics, Integer timeout, short version) {
+        super(version);
+        this.topics = topics;
+        this.timeout = timeout;
     }
 
     public DeleteTopicsRequest(Struct struct, short version) {
-        super(ApiKeys.DELETE_TOPICS, version);
-        this.data = new DeleteTopicsRequestData(struct, version);
-        this.version = version;
+        super(version);
+        Object[] topicsArray = struct.getArray(TOPICS_KEY_NAME);
+        Set<String> topics = new HashSet<>(topicsArray.length);
+        for (Object topic : topicsArray)
+            topics.add((String) topic);
+
+        this.topics = topics;
+        this.timeout = struct.getInt(TIMEOUT_KEY_NAME);
     }
 
     @Override
     protected Struct toStruct() {
-        return data.toStruct(version);
-    }
-
-    public DeleteTopicsRequestData data() {
-        return data;
+        Struct struct = new Struct(ApiKeys.DELETE_TOPICS.requestSchema(version()));
+        struct.set(TOPICS_KEY_NAME, topics.toArray());
+        struct.set(TIMEOUT_KEY_NAME, timeout);
+        return struct;
     }
 
     @Override
     public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-        DeleteTopicsResponseData response = new DeleteTopicsResponseData();
-        if (version >= 1) {
-            response.setThrottleTimeMs(throttleTimeMs);
+        Map<String, Errors> topicErrors = new HashMap<>();
+        for (String topic : topics)
+            topicErrors.put(topic, Errors.forException(e));
+
+        switch (version()) {
+            case 0:
+                return new DeleteTopicsResponse(topicErrors);
+            case 1:
+            case 2:
+                return new DeleteTopicsResponse(throttleTimeMs, topicErrors);
+            default:
+                throw new IllegalArgumentException(String.format("Version %d is not valid. Valid versions for %s are 0 to %d",
+                    version(), this.getClass().getSimpleName(), ApiKeys.DELETE_TOPICS.latestVersion()));
         }
-        ApiError apiError = ApiError.fromThrowable(e);
-        for (String topic : data.topicNames()) {
-            response.responses().add(new DeletableTopicResult()
-                    .setName(topic)
-                    .setErrorCode(apiError.error().code()));
-        }
-        return new DeleteTopicsResponse(response);
+    }
+
+    public Set<String> topics() {
+        return topics;
+    }
+
+    public Integer timeout() {
+        return this.timeout;
     }
 
     public static DeleteTopicsRequest parse(ByteBuffer buffer, short version) {

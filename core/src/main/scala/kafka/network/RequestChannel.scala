@@ -272,19 +272,17 @@ object RequestChannel extends Logging {
   }
 }
 
-class RequestChannel(val queueSize: Int, val metricNamePrefix : String) extends KafkaMetricsGroup {
+class RequestChannel(val queueSize: Int) extends KafkaMetricsGroup {
   import RequestChannel._
   val metrics = new RequestChannel.Metrics
   private val requestQueue = new ArrayBlockingQueue[BaseRequest](queueSize)
   private val processors = new ConcurrentHashMap[Int, Processor]()
-  val requestQueueSizeMetricName = metricNamePrefix.concat(RequestQueueSizeMetric)
-  val responseQueueSizeMetricName = metricNamePrefix.concat(ResponseQueueSizeMetric)
 
-  newGauge(requestQueueSizeMetricName, new Gauge[Int] {
+  newGauge(RequestQueueSizeMetric, new Gauge[Int] {
       def value = requestQueue.size
   })
 
-  newGauge(responseQueueSizeMetricName, new Gauge[Int]{
+  newGauge(ResponseQueueSizeMetric, new Gauge[Int]{
     def value = processors.values.asScala.foldLeft(0) {(total, processor) =>
       total + processor.responseQueueSize
     }
@@ -294,7 +292,7 @@ class RequestChannel(val queueSize: Int, val metricNamePrefix : String) extends 
     if (processors.putIfAbsent(processor.id, processor) != null)
       warn(s"Unexpected processor with processorId ${processor.id}")
 
-    newGauge(responseQueueSizeMetricName,
+    newGauge(ResponseQueueSizeMetric,
       new Gauge[Int] {
         def value = processor.responseQueueSize
       },
@@ -304,7 +302,7 @@ class RequestChannel(val queueSize: Int, val metricNamePrefix : String) extends 
 
   def removeProcessor(processorId: Int): Unit = {
     processors.remove(processorId)
-    removeMetric(responseQueueSizeMetricName, Map(ProcessorMetricTag -> processorId.toString))
+    removeMetric(ResponseQueueSizeMetric, Map(ProcessorMetricTag -> processorId.toString))
   }
 
   /** Send a request to be handled, potentially blocking until there is room in the queue for the request */

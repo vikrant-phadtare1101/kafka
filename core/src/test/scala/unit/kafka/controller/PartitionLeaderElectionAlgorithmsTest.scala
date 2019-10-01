@@ -18,8 +18,9 @@ package kafka.controller
 
 import org.junit.Assert._
 import org.junit.{Before, Test}
+import org.scalatest.junit.JUnitSuite
 
-class PartitionLeaderElectionAlgorithmsTest {
+class PartitionLeaderElectionAlgorithmsTest  extends JUnitSuite {
   private var controllerContext: ControllerContext = null
 
   @Before

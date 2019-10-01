@@ -37,7 +37,7 @@ public class ClientState {
     }
 
     ClientState(final int capacity) {
-        this(new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashSet<>(), capacity);
+        this(new HashSet<TaskId>(), new HashSet<TaskId>(), new HashSet<TaskId>(), new HashSet<TaskId>(), new HashSet<TaskId>(), new HashSet<TaskId>(), capacity);
     }
 
     private ClientState(final Set<TaskId> activeTasks,
@@ -93,7 +93,6 @@ public class ClientState {
         return prevStandbyTasks;
     }
 
-    @SuppressWarnings("WeakerAccess")
     public int assignedTaskCount() {
         return assignedTasks.size();
     }
@@ -102,7 +101,6 @@ public class ClientState {
         capacity++;
     }
 
-    @SuppressWarnings("WeakerAccess")
     public int activeTaskCount() {
         return activeTasks.size();
     }
@@ -145,13 +143,12 @@ public class ClientState {
         final double otherLoad = (double) other.assignedTaskCount() / other.capacity;
         final double thisLoad = (double) assignedTaskCount() / capacity;
 
-        if (thisLoad < otherLoad) {
+        if (thisLoad < otherLoad)
             return true;
-        } else if (thisLoad > otherLoad) {
+        else if (thisLoad > otherLoad)
             return false;
-        } else {
+        else
             return capacity > other.capacity;
-        }
     }
 
     Set<TaskId> previousStandbyTasks() {

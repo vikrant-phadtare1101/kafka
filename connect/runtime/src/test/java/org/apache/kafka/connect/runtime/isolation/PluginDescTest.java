@@ -49,7 +49,7 @@ public class PluginDescTest {
     }
 
     @Test
-    public void testRegularPluginDesc() {
+    public void testRegularPluginDesc() throws Exception {
         PluginDesc<Connector> connectorDesc = new PluginDesc<>(
                 Connector.class,
                 regularVersion,
@@ -76,7 +76,7 @@ public class PluginDescTest {
     }
 
     @Test
-    public void testPluginDescWithSystemClassLoader() {
+    public void testPluginDescWithSystemClassLoader() throws Exception {
         String location = "classpath";
         PluginDesc<SinkConnector> connectorDesc = new PluginDesc<>(
                 SinkConnector.class,
@@ -104,7 +104,7 @@ public class PluginDescTest {
     }
 
     @Test
-    public void testPluginDescWithNullVersion() {
+    public void testPluginDescWithNullVersion() throws Exception {
         String nullVersion = "null";
         PluginDesc<SourceConnector> connectorDesc = new PluginDesc<>(
                 SourceConnector.class,
@@ -130,7 +130,7 @@ public class PluginDescTest {
     }
 
     @Test
-    public void testPluginDescEquality() {
+    public void testPluginDescEquality() throws Exception {
         PluginDesc<Connector> connectorDescPluginPath = new PluginDesc<>(
                 Connector.class,
                 snaphotVersion,
@@ -177,7 +177,7 @@ public class PluginDescTest {
     }
 
     @Test
-    public void testPluginDescComparison() {
+    public void testPluginDescComparison() throws Exception {
         PluginDesc<Connector> connectorDescPluginPath = new PluginDesc<>(
                 Connector.class,
                 regularVersion,

@@ -25,8 +25,9 @@ import static org.junit.Assert.assertEquals;
 public class WindowsTest {
 
     private class TestWindows extends Windows {
+
         @Override
-        public Map windowsFor(final long timestamp) {
+        public Map windowsFor(long timestamp) {
             return null;
         }
 
@@ -34,26 +35,25 @@ public class WindowsTest {
         public long size() {
             return 0;
         }
-
-        public long gracePeriodMs() {
-            return 0L;
-        }
     }
 
-    @SuppressWarnings("deprecation") // specifically testing deprecated APIs
+    @Test
+    public void shouldSetNumberOfSegments() {
+        final int anySegmentSizeLargerThanOne = 5;
+        assertEquals(anySegmentSizeLargerThanOne, new TestWindows().segments(anySegmentSizeLargerThanOne).segments);
+    }
+
     @Test
     public void shouldSetWindowRetentionTime() {
         final int anyNotNegativeRetentionTime = 42;
         assertEquals(anyNotNegativeRetentionTime, new TestWindows().until(anyNotNegativeRetentionTime).maintainMs());
     }
 
-    @SuppressWarnings("deprecation") // specifically testing deprecated APIs
     @Test(expected = IllegalArgumentException.class)
     public void numberOfSegmentsMustBeAtLeastTwo() {
         new TestWindows().segments(1);
     }
 
-    @SuppressWarnings("deprecation") // specifically testing deprecated APIs
     @Test(expected = IllegalArgumentException.class)
     public void retentionTimeMustNotBeNegative() {
         new TestWindows().until(-1);

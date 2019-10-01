@@ -22,6 +22,7 @@ import javax.security.auth.login.Configuration
 import kafka.utils.{CoreUtils, Logging, TestUtils}
 import org.junit.{After, AfterClass, Before, BeforeClass}
 import org.junit.Assert._
+import org.scalatest.junit.JUnitSuite
 import org.apache.kafka.common.security.JaasUtils
 import org.apache.kafka.test.IntegrationTest
 import org.junit.experimental.categories.Category
@@ -36,13 +37,13 @@ import org.apache.kafka.common.utils.Time
 import org.apache.zookeeper.{WatchedEvent, Watcher, ZooKeeper}
 
 @Category(Array(classOf[IntegrationTest]))
-abstract class ZooKeeperTestHarness extends Logging {
+abstract class ZooKeeperTestHarness extends JUnitSuite with Logging {
 
   val zkConnectionTimeout = 10000
-  val zkSessionTimeout = 15000 // Allows us to avoid ZK session expiration due to GC up to 2/3 * 15000ms = 10 secs
+  val zkSessionTimeout = 6000
   val zkMaxInFlightRequests = Int.MaxValue
 
-  protected def zkAclsEnabled: Option[Boolean] = None
+  protected val zkAclsEnabled: Option[Boolean] = None
 
   var zkClient: KafkaZkClient = null
   var adminZkClient: AdminZkClient = null
@@ -83,7 +84,7 @@ abstract class ZooKeeperTestHarness extends Logging {
 }
 
 object ZooKeeperTestHarness {
-  val ZkClientEventThreadSuffix = "-EventThread"
+  val ZkClientEventThreadPrefix = "ZkClient-EventThread"
 
   // Threads which may cause transient failures in subsequent tests if not shutdown.
   // These include threads which make connections to brokers and may cause issues
@@ -93,7 +94,7 @@ object ZooKeeperTestHarness {
                                   KafkaProducer.NETWORK_THREAD_PREFIX,
                                   AdminClientUnitTestEnv.kafkaAdminClientNetworkThreadPrefix(),
                                   AbstractCoordinator.HEARTBEAT_THREAD_PREFIX,
-                                  ZkClientEventThreadSuffix)
+                                  ZkClientEventThreadPrefix)
 
   /**
    * Verify that a previous test that doesn't use ZooKeeperTestHarness hasn't left behind an unexpected thread.

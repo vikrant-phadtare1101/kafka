@@ -21,6 +21,7 @@ import org.apache.kafka.streams.kstream.Initializer;
 public class MockInitializer {
 
     private static class StringInit implements Initializer<String> {
+
         @Override
         public String apply() {
             return "0";

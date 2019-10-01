@@ -24,6 +24,7 @@ import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.utils.LogContext;
+import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.errors.StreamsException;
 import org.apache.kafka.streams.processor.StateRestoreListener;
 import org.slf4j.Logger;
@@ -195,8 +196,6 @@ public class StoreChangelogReader implements ChangelogReader {
         for (final TopicPartition partition : initialized) {
             final StateRestorer restorer = stateRestorers.get(partition);
             if (restorer.checkpoint() != StateRestorer.NO_CHECKPOINT) {
-                log.trace("Found checkpoint {} from changelog {} for store {}.", restorer.checkpoint(), partition, restorer.storeName());
-
                 restoreConsumer.seek(partition, restorer.checkpoint());
                 logRestoreOffsets(partition,
                         restorer.checkpoint(),
@@ -204,8 +203,6 @@ public class StoreChangelogReader implements ChangelogReader {
                 restorer.setStartingOffset(restoreConsumer.position(partition));
                 restorer.restoreStarted();
             } else {
-                log.trace("Did not find checkpoint from changelog {} for store {}, rewinding to beginning.", partition, restorer.storeName());
-
                 restoreConsumer.seekToBeginning(Collections.singletonList(partition));
                 needsPositionUpdate.add(restorer);
             }
@@ -281,13 +278,12 @@ public class StoreChangelogReader implements ChangelogReader {
         needsRestoring.clear();
         endOffsets.clear();
         needsInitializing.clear();
-        completedRestorers.clear();
     }
 
     private long processNext(final List<ConsumerRecord<byte[], byte[]>> records,
                              final StateRestorer restorer,
                              final Long endOffset) {
-        final List<ConsumerRecord<byte[], byte[]>> restoreRecords = new ArrayList<>();
+        final List<KeyValue<byte[], byte[]>> restoreRecords = new ArrayList<>();
         long nextPosition = -1;
         final int numberRecords = records.size();
         int numberRestored = 0;
@@ -301,7 +297,7 @@ public class StoreChangelogReader implements ChangelogReader {
             lastRestoredOffset = offset;
             numberRestored++;
             if (record.key() != null) {
-                restoreRecords.add(record);
+                restoreRecords.add(KeyValue.pair(record.key(), record.value()));
             }
         }
 

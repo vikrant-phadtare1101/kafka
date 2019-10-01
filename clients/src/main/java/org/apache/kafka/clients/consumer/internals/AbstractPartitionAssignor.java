@@ -80,7 +80,11 @@ public abstract class AbstractPartitionAssignor implements PartitionAssignor {
     }
 
     protected static <K, V> void put(Map<K, List<V>> map, K key, V value) {
-        List<V> list = map.computeIfAbsent(key, k -> new ArrayList<>());
+        List<V> list = map.get(key);
+        if (list == null) {
+            list = new ArrayList<>();
+            map.put(key, list);
+        }
         list.add(value);
     }
 

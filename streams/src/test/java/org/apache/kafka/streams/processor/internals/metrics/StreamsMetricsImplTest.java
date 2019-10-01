@@ -18,57 +18,19 @@ package org.apache.kafka.streams.processor.internals.metrics;
 
 
 import org.apache.kafka.common.MetricName;
-import org.apache.kafka.common.metrics.KafkaMetric;
-import org.apache.kafka.common.metrics.MetricConfig;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.metrics.Sensor;
-import org.apache.kafka.common.metrics.Sensor.RecordingLevel;
-import org.apache.kafka.common.utils.MockTime;
-import org.easymock.EasyMock;
-import org.easymock.EasyMockSupport;
+import org.apache.kafka.common.metrics.stats.Count;
 import org.junit.Test;
 
 import java.util.Collections;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import static org.apache.kafka.common.utils.Utils.mkEntry;
 import static org.apache.kafka.common.utils.Utils.mkMap;
-import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.PROCESSOR_NODE_METRICS_GROUP;
-import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.addAvgMaxLatency;
-import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.addInvocationRateAndCount;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.greaterThan;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
 
-public class StreamsMetricsImplTest extends EasyMockSupport {
-
-    private final static String SENSOR_PREFIX_DELIMITER = ".";
-    private final static String SENSOR_NAME_DELIMITER = ".s.";
-    private final static String INTERNAL_PREFIX = "internal";
-
-    @Test
-    public void shouldGetThreadLevelSensor() {
-        final Metrics metrics = mock(Metrics.class);
-        final String threadName = "thread1";
-        final String sensorName = "sensor1";
-        final String expectedFullSensorName =
-            INTERNAL_PREFIX + SENSOR_PREFIX_DELIMITER + threadName + SENSOR_NAME_DELIMITER + sensorName;
-        final RecordingLevel recordingLevel = RecordingLevel.DEBUG;
-        final Sensor[] parents = {};
-        EasyMock.expect(metrics.sensor(expectedFullSensorName, recordingLevel, parents)).andReturn(null);
-
-        replayAll();
-
-        final StreamsMetricsImpl streamsMetrics = new StreamsMetricsImpl(metrics, threadName);
-        final Sensor sensor = streamsMetrics.threadLevelSensor(sensorName, recordingLevel);
-
-        verifyAll();
-
-        assertNull(sensor);
-    }
+public class StreamsMetricsImplTest {
 
     @Test(expected = NullPointerException.class)
     public void testNullMetrics() {
@@ -84,6 +46,7 @@ public class StreamsMetricsImplTest extends EasyMockSupport {
     @Test
     public void testRemoveSensor() {
         final String sensorName = "sensor1";
+        final String taskName = "task";
         final String scope = "scope";
         final String entity = "entity";
         final String operation = "put";
@@ -95,10 +58,10 @@ public class StreamsMetricsImplTest extends EasyMockSupport {
         final Sensor sensor1a = streamsMetrics.addSensor(sensorName, Sensor.RecordingLevel.DEBUG, sensor1);
         streamsMetrics.removeSensor(sensor1a);
 
-        final Sensor sensor2 = streamsMetrics.addLatencyAndThroughputSensor(scope, entity, operation, Sensor.RecordingLevel.DEBUG);
+        final Sensor sensor2 = streamsMetrics.addLatencyAndThroughputSensor(taskName, scope, entity, operation, Sensor.RecordingLevel.DEBUG);
         streamsMetrics.removeSensor(sensor2);
 
-        final Sensor sensor3 = streamsMetrics.addThroughputSensor(scope, entity, operation, Sensor.RecordingLevel.DEBUG);
+        final Sensor sensor3 = streamsMetrics.addThroughputSensor(taskName, scope, entity, operation, Sensor.RecordingLevel.DEBUG);
         streamsMetrics.removeSensor(sensor3);
 
         assertEquals(Collections.emptyMap(), streamsMetrics.parentSensors());
@@ -114,46 +77,41 @@ public class StreamsMetricsImplTest extends EasyMockSupport {
 
         final String taskName = "taskName";
         final String operation = "operation";
-        final Map<String, String> taskTags = mkMap(mkEntry("tkey", "value"));
+        final Map<String, String> threadTags = mkMap(mkEntry("threadkey", "value"));
 
-        final String processorNodeName = "processorNodeName";
-        final Map<String, String> nodeTags = mkMap(mkEntry("nkey", "value"));
+        final Map<String, String> taskTags = mkMap(mkEntry("taskkey", "value"));
 
-        final Sensor parent1 = metrics.taskLevelSensor(taskName, operation, Sensor.RecordingLevel.DEBUG);
-        addAvgMaxLatency(parent1, PROCESSOR_NODE_METRICS_GROUP, taskTags, operation);
-        addInvocationRateAndCount(parent1, PROCESSOR_NODE_METRICS_GROUP, taskTags, operation, "", "");
+        final Sensor parent1 = metrics.threadLevelSensor(operation, Sensor.RecordingLevel.DEBUG);
+        parent1.add(new MetricName("name", "group", "description", threadTags), new Count());
 
-        final int numberOfTaskMetrics = registry.metrics().size();
+        assertEquals(1, registry.metrics().size());
 
-        final Sensor sensor1 = metrics.nodeLevelSensor(taskName, processorNodeName, operation, Sensor.RecordingLevel.DEBUG, parent1);
-        addAvgMaxLatency(sensor1, PROCESSOR_NODE_METRICS_GROUP, nodeTags, operation);
-        addInvocationRateAndCount(sensor1, PROCESSOR_NODE_METRICS_GROUP, nodeTags, operation, "", "");
+        final Sensor sensor1 = metrics.taskLevelSensor(taskName, operation, Sensor.RecordingLevel.DEBUG, parent1);
+        sensor1.add(new MetricName("name", "group", "description", taskTags), new Count());
 
-        assertThat(registry.metrics().size(), greaterThan(numberOfTaskMetrics));
-
-        metrics.removeAllNodeLevelSensors(taskName, processorNodeName);
-
-        assertThat(registry.metrics().size(), equalTo(numberOfTaskMetrics));
-
-        final Sensor parent2 = metrics.taskLevelSensor(taskName, operation, Sensor.RecordingLevel.DEBUG);
-        addAvgMaxLatency(parent2, PROCESSOR_NODE_METRICS_GROUP, taskTags, operation);
-        addInvocationRateAndCount(parent2, PROCESSOR_NODE_METRICS_GROUP, taskTags, operation, "", "");
-
-        assertThat(registry.metrics().size(), equalTo(numberOfTaskMetrics));
-
-        final Sensor sensor2 = metrics.nodeLevelSensor(taskName, processorNodeName, operation, Sensor.RecordingLevel.DEBUG, parent2);
-        addAvgMaxLatency(sensor2, PROCESSOR_NODE_METRICS_GROUP, nodeTags, operation);
-        addInvocationRateAndCount(sensor2, PROCESSOR_NODE_METRICS_GROUP, nodeTags, operation, "", "");
-
-        assertThat(registry.metrics().size(), greaterThan(numberOfTaskMetrics));
-
-        metrics.removeAllNodeLevelSensors(taskName, processorNodeName);
-
-        assertThat(registry.metrics().size(), equalTo(numberOfTaskMetrics));
+        assertEquals(2, registry.metrics().size());
 
         metrics.removeAllTaskLevelSensors(taskName);
 
-        assertThat(registry.metrics().size(), equalTo(0));
+        assertEquals(1, registry.metrics().size());
+
+        final Sensor parent2 = metrics.threadLevelSensor(operation, Sensor.RecordingLevel.DEBUG);
+        parent2.add(new MetricName("name", "group", "description", threadTags), new Count());
+
+        assertEquals(1, registry.metrics().size());
+
+        final Sensor sensor2 = metrics.taskLevelSensor(taskName, operation, Sensor.RecordingLevel.DEBUG, parent2);
+        sensor2.add(new MetricName("name", "group", "description", taskTags), new Count());
+
+        assertEquals(2, registry.metrics().size());
+
+        metrics.removeAllTaskLevelSensors(taskName);
+
+        assertEquals(1, registry.metrics().size());
+
+        metrics.removeAllThreadLevelSensors();
+
+        assertEquals(0, registry.metrics().size());
     }
 
     @Test
@@ -161,11 +119,12 @@ public class StreamsMetricsImplTest extends EasyMockSupport {
         final StreamsMetricsImpl streamsMetrics = new StreamsMetricsImpl(new Metrics(), "");
         final int defaultMetrics = streamsMetrics.metrics().size();
 
+        final String taskName = "task";
         final String scope = "scope";
         final String entity = "entity";
         final String operation = "put";
 
-        final Sensor sensor1 = streamsMetrics.addLatencyAndThroughputSensor(scope, entity, operation, Sensor.RecordingLevel.DEBUG);
+        final Sensor sensor1 = streamsMetrics.addLatencyAndThroughputSensor(taskName, scope, entity, operation, Sensor.RecordingLevel.DEBUG);
 
         // 2 meters and 4 non-meter metrics plus a common metric that keeps track of total registered metrics in Metrics() constructor
         final int meterMetricsCount = 2; // Each Meter is a combination of a Rate and a Total
@@ -181,11 +140,12 @@ public class StreamsMetricsImplTest extends EasyMockSupport {
         final StreamsMetricsImpl streamsMetrics = new StreamsMetricsImpl(new Metrics(), "");
         final int defaultMetrics = streamsMetrics.metrics().size();
 
+        final String taskName = "task";
         final String scope = "scope";
         final String entity = "entity";
         final String operation = "put";
 
-        final Sensor sensor1 = streamsMetrics.addThroughputSensor(scope, entity, operation, Sensor.RecordingLevel.DEBUG);
+        final Sensor sensor1 = streamsMetrics.addThroughputSensor(taskName, scope, entity, operation, Sensor.RecordingLevel.DEBUG);
 
         final int meterMetricsCount = 2; // Each Meter is a combination of a Rate and a Total
         // 2 meter metrics plus a common metric that keeps track of total registered metrics in Metrics() constructor
@@ -193,43 +153,5 @@ public class StreamsMetricsImplTest extends EasyMockSupport {
 
         streamsMetrics.removeSensor(sensor1);
         assertEquals(defaultMetrics, streamsMetrics.metrics().size());
-    }
-
-    @Test
-    public void testTotalMetricDoesntDecrease() {
-        final MockTime time = new MockTime(1);
-        final MetricConfig config = new MetricConfig().timeWindow(1, TimeUnit.MILLISECONDS);
-        final Metrics metrics = new Metrics(config, time);
-        final StreamsMetricsImpl streamsMetrics = new StreamsMetricsImpl(metrics, "");
-
-        final String scope = "scope";
-        final String entity = "entity";
-        final String operation = "op";
-
-        final Sensor sensor = streamsMetrics.addLatencyAndThroughputSensor(
-            scope,
-            entity,
-            operation,
-            Sensor.RecordingLevel.INFO
-        );
-
-        final double latency = 100.0;
-        final MetricName totalMetricName = metrics.metricName(
-            "op-total",
-            "stream-scope-metrics",
-            "",
-            "client-id",
-            "",
-            "scope-id",
-            "entity"
-        );
-
-        final KafkaMetric totalMetric = metrics.metric(totalMetricName);
-
-        for (int i = 0; i < 10; i++) {
-            assertEquals(i, Math.round(totalMetric.measurable().measure(config, time.milliseconds())));
-            sensor.record(latency, time.milliseconds());
-        }
-
     }
 }

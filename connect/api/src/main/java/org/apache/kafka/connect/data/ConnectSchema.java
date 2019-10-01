@@ -218,10 +218,14 @@ public class ConnectSchema implements Schema {
             if (!schema.isOptional())
                 throw new DataException("Invalid value: null used for required field: \"" + name
                         + "\", schema type: " + schema.type());
-            return;
+            else
+                return;
         }
 
-        List<Class> expectedClasses = expectedClassesFor(schema);
+        List<Class> expectedClasses = LOGICAL_TYPE_CLASSES.get(schema.name());
+
+        if (expectedClasses == null)
+                expectedClasses = SCHEMA_TYPE_CLASSES.get(schema.type());
 
         if (expectedClasses == null)
             throw new DataException("Invalid Java object for schema type " + schema.type()
@@ -260,13 +264,6 @@ public class ConnectSchema implements Schema {
                 }
                 break;
         }
-    }
-
-    private static List<Class> expectedClassesFor(Schema schema) {
-        List<Class> expectedClasses = LOGICAL_TYPE_CLASSES.get(schema.name());
-        if (expectedClasses == null)
-            expectedClasses = SCHEMA_TYPE_CLASSES.get(schema.type());
-        return expectedClasses;
     }
 
     /**

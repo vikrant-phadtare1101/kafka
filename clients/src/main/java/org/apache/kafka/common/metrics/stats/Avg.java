@@ -42,8 +42,7 @@ public class Avg extends SampledStat {
             total += s.value;
             count += s.eventCount;
         }
-        return count == 0 ? Double.NaN : total / count;
+        return count == 0 ? 0 : total / count;
     }
 
 }
-
