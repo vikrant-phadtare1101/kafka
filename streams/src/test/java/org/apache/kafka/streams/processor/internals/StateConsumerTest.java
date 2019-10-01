@@ -109,6 +109,15 @@ public class StateConsumerTest {
     }
 
     @Test
+    public void shouldNotFlushWhenFlushIntervalIsZero() {
+        stateConsumer = new GlobalStreamThread.StateConsumer(logContext, consumer, stateMaintainer, time, Duration.ofMillis(10L), -1);
+        stateConsumer.initialize();
+        time.sleep(100);
+        stateConsumer.pollAndUpdate();
+        assertFalse(stateMaintainer.flushed);
+    }
+
+    @Test
     public void shouldCloseConsumer() throws IOException {
         stateConsumer.close();
         assertTrue(consumer.closed());

@@ -17,13 +17,13 @@
 package org.apache.kafka.streams.kstream.internals;
 
 import org.apache.kafka.streams.processor.ProcessorContext;
-import org.apache.kafka.streams.state.TimestampedKeyValueStore;
-import org.apache.kafka.streams.state.ValueAndTimestamp;
+import org.apache.kafka.streams.state.ReadOnlyKeyValueStore;
 
 public class KTableSourceValueGetterSupplier<K, V> implements KTableValueGetterSupplier<K, V> {
+
     private final String storeName;
 
-    KTableSourceValueGetterSupplier(final String storeName) {
+    public KTableSourceValueGetterSupplier(String storeName) {
         this.storeName = storeName;
     }
 
@@ -37,18 +37,21 @@ public class KTableSourceValueGetterSupplier<K, V> implements KTableValueGetterS
     }
 
     private class KTableSourceValueGetter implements KTableValueGetter<K, V> {
-        private TimestampedKeyValueStore<K, V> store = null;
+
+        ReadOnlyKeyValueStore<K, V> store = null;
 
         @SuppressWarnings("unchecked")
-        public void init(final ProcessorContext context) {
-            store = (TimestampedKeyValueStore<K, V>) context.getStateStore(storeName);
+        public void init(ProcessorContext context) {
+            store = (ReadOnlyKeyValueStore<K, V>) context.getStateStore(storeName);
         }
 
-        public ValueAndTimestamp<V> get(final K key) {
+        public V get(K key) {
             return store.get(key);
         }
 
         @Override
-        public void close() {}
+        public void close() {
+        }
     }
+
 }

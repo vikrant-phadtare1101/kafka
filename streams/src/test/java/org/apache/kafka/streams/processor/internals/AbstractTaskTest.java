@@ -50,7 +50,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 
-import static org.apache.kafka.streams.processor.internals.ProcessorTopologyFactories.withLocalStores;
 import static org.easymock.EasyMock.expect;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -64,8 +63,8 @@ public class AbstractTaskTest {
     private final TopicPartition storeTopicPartition2 = new TopicPartition("t2", 0);
     private final TopicPartition storeTopicPartition3 = new TopicPartition("t3", 0);
     private final TopicPartition storeTopicPartition4 = new TopicPartition("t4", 0);
-    private final Collection<TopicPartition> storeTopicPartitions =
-        Utils.mkSet(storeTopicPartition1, storeTopicPartition2, storeTopicPartition3, storeTopicPartition4);
+    private final Collection<TopicPartition> storeTopicPartitions
+        = Utils.mkSet(storeTopicPartition1, storeTopicPartition2, storeTopicPartition3, storeTopicPartition4);
 
     @Before
     public void before() {
@@ -97,8 +96,6 @@ public class AbstractTaskTest {
     public void shouldThrowLockExceptionIfFailedToLockStateDirectoryWhenTopologyHasStores() throws IOException {
         final Consumer consumer = EasyMock.createNiceMock(Consumer.class);
         final StateStore store = EasyMock.createNiceMock(StateStore.class);
-        expect(store.name()).andReturn("dummy-store-name").anyTimes();
-        EasyMock.replay(store);
         expect(stateDirectory.lock(id)).andReturn(false);
         EasyMock.replay(stateDirectory);
 
@@ -155,7 +152,7 @@ public class AbstractTaskTest {
         expect(store4.name()).andReturn(storeName4).anyTimes();
         EasyMock.replay(store4);
 
-        final StateDirectory stateDirectory = new StateDirectory(streamsConfig, new MockTime(), true);
+        final StateDirectory stateDirectory = new StateDirectory(streamsConfig, new MockTime());
         final AbstractTask task = createTask(
             consumer,
             new HashMap<StateStore, String>() {
@@ -235,13 +232,9 @@ public class AbstractTaskTest {
 
         return new AbstractTask(id,
                                 storeTopicPartitions,
-                                withLocalStores(new ArrayList<>(stateStoresToChangelogTopics.keySet()),
-                                                storeNamesToChangelogTopics),
+                                ProcessorTopology.withLocalStores(new ArrayList<>(stateStoresToChangelogTopics.keySet()), storeNamesToChangelogTopics),
                                 consumer,
-                                new StoreChangelogReader(consumer,
-                                                         Duration.ZERO,
-                                                         new MockStateRestoreListener(),
-                                                         new LogContext("stream-task-test ")),
+                                new StoreChangelogReader(consumer, Duration.ZERO, new MockStateRestoreListener(), new LogContext("stream-task-test ")),
                                 false,
                                 stateDirectory,
                                 config) {

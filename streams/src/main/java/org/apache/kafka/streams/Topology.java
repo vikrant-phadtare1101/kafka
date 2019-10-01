@@ -304,7 +304,6 @@ public class Topology {
      * @return itself
      * @throws TopologyException if processor is already added or if topics have already been registered by name
      */
-    @SuppressWarnings("overloads")
     public synchronized Topology addSource(final AutoOffsetReset offsetReset,
                                            final String name,
                                            final Deserializer keyDeserializer,
@@ -360,7 +359,7 @@ public class Topology {
      * @return itself
      * @throws TopologyException if processor is already added or if topics have already been registered by another source
      */
-    @SuppressWarnings("overloads")
+
     public synchronized Topology addSource(final AutoOffsetReset offsetReset,
                                            final String name,
                                            final TimestampExtractor timestampExtractor,
@@ -392,7 +391,6 @@ public class Topology {
      * @return itself
      * @throws TopologyException if processor is already added or if topics have already been registered by name
      */
-    @SuppressWarnings("overloads")
     public synchronized Topology addSource(final AutoOffsetReset offsetReset,
                                            final String name,
                                            final TimestampExtractor timestampExtractor,

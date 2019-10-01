@@ -22,7 +22,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Map;
@@ -65,9 +64,7 @@ public class PropertyFileLoginModule implements LoginModule {
         if (!credentialPropertiesMap.containsKey(fileName)) {
             Properties credentialProperties = new Properties();
             try {
-                try (InputStream inputStream = Files.newInputStream(Paths.get(fileName))) {
-                    credentialProperties.load(inputStream);
-                }
+                credentialProperties.load(Files.newInputStream(Paths.get(fileName)));
                 credentialPropertiesMap.putIfAbsent(fileName, credentialProperties);
             } catch (IOException e) {
                 log.error("Error loading credentials file ", e);

@@ -22,12 +22,13 @@ import java.util.concurrent.locks.ReentrantLock
 import kafka.log.Log
 import kafka.server.{FetchDataInfo, LogOffsetMetadata, ReplicaManager}
 import kafka.utils.{MockScheduler, Pool}
-import org.scalatest.Assertions.fail
+import kafka.utils.TestUtils.fail
 import kafka.zk.KafkaZkClient
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.internals.Topic.TRANSACTION_STATE_TOPIC_NAME
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.record._
+import org.apache.kafka.common.requests.IsolationLevel
 import org.apache.kafka.common.requests.ProduceResponse.PartitionResponse
 import org.apache.kafka.common.requests.TransactionResult
 import org.apache.kafka.common.utils.MockTime
@@ -573,8 +574,8 @@ class TransactionStateManagerTest {
                             records: MemoryRecords): Unit = {
     EasyMock.reset(replicaManager)
 
-    val logMock: Log = EasyMock.mock(classOf[Log])
-    val fileRecordsMock: FileRecords = EasyMock.mock(classOf[FileRecords])
+    val logMock =  EasyMock.mock(classOf[Log])
+    val fileRecordsMock = EasyMock.mock(classOf[FileRecords])
 
     val endOffset = startOffset + records.records.asScala.size
 
@@ -582,11 +583,8 @@ class TransactionStateManagerTest {
     EasyMock.expect(replicaManager.getLogEndOffset(topicPartition)).andStubReturn(Some(endOffset))
 
     EasyMock.expect(logMock.logStartOffset).andStubReturn(startOffset)
-    EasyMock.expect(logMock.read(EasyMock.eq(startOffset),
-      maxLength = EasyMock.anyInt(),
-      maxOffset = EasyMock.eq(None),
-      minOneMessage = EasyMock.eq(true),
-      includeAbortedTxns = EasyMock.eq(false)))
+    EasyMock.expect(logMock.read(EasyMock.eq(startOffset), EasyMock.anyInt(), EasyMock.eq(None),
+      EasyMock.eq(true), EasyMock.eq(IsolationLevel.READ_UNCOMMITTED)))
       .andReturn(FetchDataInfo(LogOffsetMetadata(startOffset), fileRecordsMock))
 
     EasyMock.expect(fileRecordsMock.sizeInBytes()).andStubReturn(records.sizeInBytes)

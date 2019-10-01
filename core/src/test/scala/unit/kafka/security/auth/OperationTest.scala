@@ -20,8 +20,9 @@ package kafka.security.auth
 import org.apache.kafka.common.acl.AclOperation
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.scalatest.junit.JUnitSuite
 
-class OperationTest {
+class OperationTest extends JUnitSuite {
   /**
     * Test round trip conversions between org.apache.kafka.common.acl.AclOperation and
     * kafka.security.auth.Operation.

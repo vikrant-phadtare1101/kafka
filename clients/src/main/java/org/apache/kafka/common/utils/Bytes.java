@@ -25,8 +25,6 @@ import java.util.Comparator;
  */
 public class Bytes implements Comparable<Bytes> {
 
-    public static final byte[] EMPTY = new byte[0];
-
     private static final char[] HEX_CHARS_UPPER = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
 
     private final byte[] bytes;
@@ -141,7 +139,7 @@ public class Bytes implements Comparable<Bytes> {
     }
 
     /**
-     * A byte array comparator based on lexicographic ordering.
+     * A byte array comparator based on lexicograpic ordering.
      */
     public final static ByteArrayComparator BYTES_LEXICO_COMPARATOR = new LexicographicByteArrayComparator();
 

@@ -16,6 +16,8 @@
 from ducktape.utils.util import wait_until
 
 from kafkatest.tests.kafka_test import KafkaTest
+from kafkatest.services.zookeeper import ZookeeperService
+from kafkatest.services.kafka import KafkaService
 from kafkatest.services.verifiable_producer import VerifiableProducer
 from kafkatest.services.verifiable_consumer import VerifiableConsumer
 from kafkatest.services.kafka import TopicPartition
@@ -53,16 +55,15 @@ class VerifiableConsumerTest(KafkaTest):
         """Override this since we're adding services outside of the constructor"""
         return super(VerifiableConsumerTest, self).min_cluster_size() + self.num_consumers + self.num_producers
 
-    def setup_consumer(self, topic, static_membership=False, enable_autocommit=False,
-                       assignment_strategy="org.apache.kafka.clients.consumer.RangeAssignor", **kwargs):
+    def setup_consumer(self, topic, enable_autocommit=False, assignment_strategy="org.apache.kafka.clients.consumer.RangeAssignor"):
         return VerifiableConsumer(self.test_context, self.num_consumers, self.kafka,
-                                  topic, self.group_id, static_membership=static_membership, session_timeout_sec=self.session_timeout_sec,
+                                  topic, self.group_id, session_timeout_sec=self.session_timeout_sec,
                                   assignment_strategy=assignment_strategy, enable_autocommit=enable_autocommit,
-                                  log_level="TRACE", **kwargs)
+                                  log_level="TRACE")
 
-    def setup_producer(self, topic, max_messages=-1, throughput=500):
+    def setup_producer(self, topic, max_messages=-1):
         return VerifiableProducer(self.test_context, self.num_producers, self.kafka, topic,
-                                  max_messages=max_messages, throughput=throughput,
+                                  max_messages=max_messages, throughput=500,
                                   request_timeout_sec=self.PRODUCER_REQUEST_TIMEOUT_SEC,
                                   log_level="DEBUG")
 

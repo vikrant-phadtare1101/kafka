@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.streams.state.internals;
 
+import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.state.SessionBytesStoreSupplier;
 import org.apache.kafka.streams.state.SessionStore;
@@ -23,6 +24,8 @@ import org.apache.kafka.streams.state.SessionStore;
 public class RocksDbSessionBytesStoreSupplier implements SessionBytesStoreSupplier {
     private final String name;
     private final long retentionPeriod;
+
+    private static final int NUM_SEGMENTS = 3;
 
     public RocksDbSessionBytesStoreSupplier(final String name,
                                             final long retentionPeriod) {
@@ -39,11 +42,10 @@ public class RocksDbSessionBytesStoreSupplier implements SessionBytesStoreSuppli
     public SessionStore<Bytes, byte[]> get() {
         final RocksDBSegmentedBytesStore segmented = new RocksDBSegmentedBytesStore(
             name,
-            metricsScope(),
             retentionPeriod,
-            segmentIntervalMs(),
+            NUM_SEGMENTS,
             new SessionKeySchema());
-        return new RocksDBSessionStore(segmented);
+        return new RocksDBSessionStore<>(segmented, Serdes.Bytes(), Serdes.ByteArray());
     }
 
     @Override
@@ -53,12 +55,8 @@ public class RocksDbSessionBytesStoreSupplier implements SessionBytesStoreSuppli
 
     @Override
     public long segmentIntervalMs() {
-        // Selected somewhat arbitrarily. Profiling may reveal a different value is preferable.
-        return Math.max(retentionPeriod / 2, 60_000L);
-    }
-
-    @Override
-    public long retentionPeriod() {
-        return retentionPeriod;
+        return Segments.segmentInterval(
+            retentionPeriod,
+            NUM_SEGMENTS);
     }
 }

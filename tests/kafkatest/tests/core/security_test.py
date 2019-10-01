@@ -81,7 +81,7 @@ class SecurityTest(EndToEndTest):
         self.create_and_start_clients(log_level="DEBUG")
 
         try:
-            wait_until(lambda: self.producer.num_acked > 0, timeout_sec=30)
+            wait_until(lambda: self.producer.num_acked > 0, timeout_sec=5)
 
             # Fail quickly if messages are successfully acked
             raise RuntimeError("Messages published successfully but should not have!"

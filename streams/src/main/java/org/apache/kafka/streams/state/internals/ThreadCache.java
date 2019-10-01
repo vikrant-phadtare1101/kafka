@@ -19,8 +19,8 @@ package org.apache.kafka.streams.state.internals;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.streams.KeyValue;
+import org.apache.kafka.streams.processor.internals.ProcessorRecordContext;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
-import org.apache.kafka.streams.state.internals.NamedCache.LRUNode;
 import org.slf4j.Logger;
 
 import java.util.Collections;
@@ -50,7 +50,7 @@ public class ThreadCache {
         void apply(final List<DirtyEntry> dirty);
     }
 
-    public ThreadCache(final LogContext logContext, final long maxCacheSizeBytes, final StreamsMetricsImpl metrics) {
+    public ThreadCache(final LogContext logContext, long maxCacheSizeBytes, final StreamsMetricsImpl metrics) {
         this.maxCacheSizeBytes = maxCacheSizeBytes;
         this.metrics = metrics;
         this.log = logContext.logger(getClass());
@@ -89,7 +89,7 @@ public class ThreadCache {
      * @return
      */
     public static String taskIDfromCacheName(final String cacheName) {
-        final String[] tokens = cacheName.split("-", 2);
+        String[] tokens = cacheName.split("-", 2);
         return tokens[0];
     }
 
@@ -99,7 +99,7 @@ public class ThreadCache {
      * @return
      */
     public static String underlyingStoreNamefromCacheName(final String cacheName) {
-        final String[] tokens = cacheName.split("-", 2);
+        String[] tokens = cacheName.split("-", 2);
         return tokens[1];
     }
 
@@ -110,7 +110,7 @@ public class ThreadCache {
      * @param namespace
      * @param listener
      */
-    public void addDirtyEntryFlushListener(final String namespace, final DirtyEntryFlushListener listener) {
+    public void addDirtyEntryFlushListener(final String namespace, DirtyEntryFlushListener listener) {
         final NamedCache cache = getOrCreateCache(namespace);
         cache.setListener(listener);
     }
@@ -129,7 +129,7 @@ public class ThreadCache {
         }
     }
 
-    public LRUCacheEntry get(final String namespace, final Bytes key) {
+    public LRUCacheEntry get(final String namespace, Bytes key) {
         numGets++;
 
         if (key == null) {
@@ -143,7 +143,7 @@ public class ThreadCache {
         return cache.get(key);
     }
 
-    public void put(final String namespace, final Bytes key, final LRUCacheEntry value) {
+    public void put(final String namespace, Bytes key, LRUCacheEntry value) {
         numPuts++;
 
         final NamedCache cache = getOrCreateCache(namespace);
@@ -151,7 +151,7 @@ public class ThreadCache {
         maybeEvict(namespace);
     }
 
-    public LRUCacheEntry putIfAbsent(final String namespace, final Bytes key, final LRUCacheEntry value) {
+    public LRUCacheEntry putIfAbsent(final String namespace, Bytes key, LRUCacheEntry value) {
         final NamedCache cache = getOrCreateCache(namespace);
 
         final LRUCacheEntry result = cache.putIfAbsent(key, value);
@@ -164,7 +164,7 @@ public class ThreadCache {
     }
 
     public void putAll(final String namespace, final List<KeyValue<Bytes, LRUCacheEntry>> entries) {
-        for (final KeyValue<Bytes, LRUCacheEntry> entry : entries) {
+        for (KeyValue<Bytes, LRUCacheEntry> entry : entries) {
             put(namespace, entry.key, entry.value);
         }
     }
@@ -181,22 +181,22 @@ public class ThreadCache {
     public MemoryLRUCacheBytesIterator range(final String namespace, final Bytes from, final Bytes to) {
         final NamedCache cache = getCache(namespace);
         if (cache == null) {
-            return new MemoryLRUCacheBytesIterator(Collections.emptyIterator());
+            return new MemoryLRUCacheBytesIterator(Collections.<Bytes>emptyIterator(), new NamedCache(namespace, this.metrics));
         }
-        return new MemoryLRUCacheBytesIterator(cache.subMapIterator(from, to));
+        return new MemoryLRUCacheBytesIterator(cache.keyRange(from, to), cache);
     }
 
     public MemoryLRUCacheBytesIterator all(final String namespace) {
         final NamedCache cache = getCache(namespace);
         if (cache == null) {
-            return new MemoryLRUCacheBytesIterator(Collections.emptyIterator());
+            return new MemoryLRUCacheBytesIterator(Collections.<Bytes>emptyIterator(), new NamedCache(namespace, this.metrics));
         }
-        return new MemoryLRUCacheBytesIterator(cache.allIterator());
+        return new MemoryLRUCacheBytesIterator(cache.allKeys(), cache);
     }
-    
+
     public long size() {
         long size = 0;
-        for (final NamedCache cache : caches.values()) {
+        for (NamedCache cache : caches.values()) {
             size += cache.size();
             if (isOverflowing(size)) {
                 return Long.MAX_VALUE;
@@ -235,7 +235,7 @@ public class ThreadCache {
             // a put on another cache. So even though the sizeInBytes() is
             // still > maxCacheSizeBytes there is nothing to evict from this
             // namespaced cache.
-            if (cache.size() == 0) {
+            if (cache.isEmpty()) {
                 return;
             }
             cache.evict();
@@ -261,11 +261,13 @@ public class ThreadCache {
     }
 
     static class MemoryLRUCacheBytesIterator implements PeekingKeyValueIterator<Bytes, LRUCacheEntry> {
-        private final Iterator<Map.Entry<Bytes, LRUNode>> underlying;
+        private final Iterator<Bytes> keys;
+        private final NamedCache cache;
         private KeyValue<Bytes, LRUCacheEntry> nextEntry;
 
-        MemoryLRUCacheBytesIterator(final Iterator<Map.Entry<Bytes, LRUNode>> underlying) {
-            this.underlying = underlying;
+        MemoryLRUCacheBytesIterator(final Iterator<Bytes> keys, final NamedCache cache) {
+            this.keys = keys;
+            this.cache = cache;
         }
 
         public Bytes peekNextKey() {
@@ -289,7 +291,7 @@ public class ThreadCache {
                 return true;
             }
 
-            while (underlying.hasNext() && nextEntry == null) {
+            while (keys.hasNext() && nextEntry == null) {
                 internalNext();
             }
 
@@ -307,9 +309,8 @@ public class ThreadCache {
         }
 
         private void internalNext() {
-            final Map.Entry<Bytes, LRUNode> mapEntry = underlying.next();
-            final Bytes cacheKey = mapEntry.getKey();
-            final LRUCacheEntry entry = mapEntry.getValue().entry();
+            Bytes cacheKey = keys.next();
+            final LRUCacheEntry entry = cache.get(cacheKey);
             if (entry == null) {
                 return;
             }
@@ -331,9 +332,9 @@ public class ThreadCache {
     static class DirtyEntry {
         private final Bytes key;
         private final byte[] newValue;
-        private final LRUCacheEntry recordContext;
+        private final ProcessorRecordContext recordContext;
 
-        DirtyEntry(final Bytes key, final byte[] newValue, final LRUCacheEntry recordContext) {
+        DirtyEntry(final Bytes key, final byte[] newValue, final ProcessorRecordContext recordContext) {
             this.key = key;
             this.newValue = newValue;
             this.recordContext = recordContext;
@@ -347,7 +348,7 @@ public class ThreadCache {
             return newValue;
         }
 
-        public LRUCacheEntry entry() {
+        public ProcessorRecordContext recordContext() {
             return recordContext;
         }
     }

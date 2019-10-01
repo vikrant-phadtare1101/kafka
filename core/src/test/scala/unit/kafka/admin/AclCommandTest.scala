@@ -20,25 +20,19 @@ import java.util.Properties
 
 import kafka.admin.AclCommand.AclCommandOptions
 import kafka.security.auth._
-import kafka.server.{KafkaConfig, KafkaServer}
-import kafka.utils.{Exit, Logging, TestUtils}
+import kafka.server.KafkaConfig
+import kafka.utils.{Logging, TestUtils}
 import kafka.zk.ZooKeeperTestHarness
-import org.apache.kafka.common.resource.PatternType
-import org.apache.kafka.common.network.ListenerName
-
 import org.apache.kafka.common.resource.PatternType.{LITERAL, PREFIXED}
-import org.apache.kafka.common.security.auth.{KafkaPrincipal, SecurityProtocol}
-import org.apache.kafka.common.utils.SecurityUtils
-import org.junit.{After, Before, Test}
-import org.scalatest.Assertions.intercept
+import org.apache.kafka.common.security.auth.KafkaPrincipal
+import org.junit.{Before, Test}
 
 class AclCommandTest extends ZooKeeperTestHarness with Logging {
 
-  var servers: Seq[KafkaServer] = Seq()
-
-  private val principal: KafkaPrincipal = SecurityUtils.parseKafkaPrincipal("User:test2")
-  private val Users = Set(SecurityUtils.parseKafkaPrincipal("User:CN=writeuser,OU=Unknown,O=Unknown,L=Unknown,ST=Unknown,C=Unknown"),
-    principal, SecurityUtils.parseKafkaPrincipal("""User:CN=\#User with special chars in CN : (\, \+ \" \\ \< \> \; ')"""))
+  private val principal: KafkaPrincipal = KafkaPrincipal.fromString("User:test2")
+  private val Users = Set(KafkaPrincipal.fromString("User:CN=writeuser,OU=Unknown,O=Unknown,L=Unknown,ST=Unknown,C=Unknown"),
+    principal,
+    KafkaPrincipal.fromString("""User:CN=\#User with special chars in CN : (\, \+ \" \\ \< \> \; ')"""))
   private val Hosts = Set("host1", "host2")
   private val AllowHostCommand = Array("--allow-host", "host1", "--allow-host", "host2")
   private val DenyHostCommand = Array("--deny-host", "host1", "--deny-host", "host2")
@@ -92,7 +86,6 @@ class AclCommandTest extends ZooKeeperTestHarness with Logging {
 
   private var brokerProps: Properties = _
   private var zkArgs: Array[String] = _
-  private var adminArgs: Array[String] = _
 
   @Before
   override def setUp(): Unit = {
@@ -100,66 +93,33 @@ class AclCommandTest extends ZooKeeperTestHarness with Logging {
 
     brokerProps = TestUtils.createBrokerConfig(0, zkConnect)
     brokerProps.put(KafkaConfig.AuthorizerClassNameProp, "kafka.security.auth.SimpleAclAuthorizer")
-    brokerProps.put(SimpleAclAuthorizer.SuperUsersProp, "User:ANONYMOUS")
 
     zkArgs = Array("--authorizer-properties", "zookeeper.connect=" + zkConnect)
   }
 
-  @After
-  override def tearDown() {
-    TestUtils.shutdownServers(servers)
-    super.tearDown()
-  }
-
   @Test
-  def testAclCliWithAuthorizer(): Unit = {
-    testAclCli(zkArgs)
-  }
-
-  @Test
-  def testAclCliWithAdminAPI(): Unit = {
-    createServer()
-    testAclCli(adminArgs)
-  }
-
-  private def createServer(): Unit = {
-    servers = Seq(TestUtils.createServer(KafkaConfig.fromProps(brokerProps)))
-    val listenerName = ListenerName.forSecurityProtocol(SecurityProtocol.PLAINTEXT)
-    adminArgs = Array("--bootstrap-server", TestUtils.bootstrapServers(servers, listenerName))
-  }
-
-  private def testAclCli(cmdArgs: Array[String]) {
+  def testAclCli() {
     for ((resources, resourceCmd) <- ResourceToCommand) {
       for (permissionType <- PermissionType.values) {
         val operationToCmd = ResourceToOperations(resources)
         val (acls, cmd) = getAclToCommand(permissionType, operationToCmd._1)
-          AclCommand.main(cmdArgs ++ cmd ++ resourceCmd ++ operationToCmd._2 :+ "--add")
+          AclCommand.main(zkArgs ++ cmd ++ resourceCmd ++ operationToCmd._2 :+ "--add")
           for (resource <- resources) {
             withAuthorizer() { authorizer =>
               TestUtils.waitAndVerifyAcls(acls, authorizer, resource)
             }
           }
 
-          testRemove(cmdArgs, resources, resourceCmd)
+          testRemove(resources, resourceCmd, brokerProps)
       }
     }
   }
 
   @Test
-  def testProducerConsumerCliWithAuthorizer(): Unit = {
-    testProducerConsumerCli(zkArgs)
-  }
-
-  @Test
-  def testProducerConsumerCliWithAdminAPI(): Unit = {
-    createServer()
-    testProducerConsumerCli(adminArgs)
-  }
-
-  private def testProducerConsumerCli(cmdArgs: Array[String]) {
+  def testProducerConsumerCli() {
     for ((cmd, resourcesToAcls) <- CmdToResourcesToAcl) {
       val resourceCommand: Array[String] = resourcesToAcls.keys.map(ResourceToCommand).foldLeft(Array[String]())(_ ++ _)
-      AclCommand.main(cmdArgs ++ getCmd(Allow) ++ resourceCommand ++ cmd :+ "--add")
+      AclCommand.main(zkArgs ++ getCmd(Allow) ++ resourceCommand ++ cmd :+ "--add")
       for ((resources, acls) <- resourcesToAcls) {
         for (resource <- resources) {
           withAuthorizer() { authorizer =>
@@ -167,25 +127,15 @@ class AclCommandTest extends ZooKeeperTestHarness with Logging {
           }
         }
       }
-      testRemove(cmdArgs, resourcesToAcls.keys.flatten.toSet, resourceCommand ++ cmd)
+      testRemove(resourcesToAcls.keys.flatten.toSet, resourceCommand ++ cmd, brokerProps)
     }
   }
 
   @Test
-  def testAclsOnPrefixedResourcesWithAuthorizer(): Unit = {
-    testAclsOnPrefixedResources(zkArgs)
-  }
-
-  @Test
-  def testAclsOnPrefixedResourcesWithAdminAPI(): Unit = {
-    createServer()
-    testAclsOnPrefixedResources(adminArgs)
-  }
-
-  private def testAclsOnPrefixedResources(cmdArgs: Array[String]): Unit = {
+  def testAclsOnPrefixedResources(): Unit = {
     val cmd = Array("--allow-principal", principal.toString, "--producer", "--topic", "Test-", "--resource-pattern-type", "Prefixed")
 
-    AclCommand.main(cmdArgs ++ cmd :+ "--add")
+    AclCommand.main(zkArgs ++ cmd :+ "--add")
 
     withAuthorizer() { authorizer =>
       val writeAcl = Acl(principal, Allow, Acl.WildCardHost, Write)
@@ -194,7 +144,7 @@ class AclCommandTest extends ZooKeeperTestHarness with Logging {
       TestUtils.waitAndVerifyAcls(Set(writeAcl, describeAcl, createAcl), authorizer, Resource(Topic, "Test-", PREFIXED))
     }
 
-    AclCommand.main(cmdArgs ++ cmd :+ "--remove" :+ "--force")
+    AclCommand.main(zkArgs ++ cmd :+ "--remove" :+ "--force")
 
     withAuthorizer() { authorizer =>
       TestUtils.waitAndVerifyAcls(Set.empty[Acl], authorizer, Resource(Cluster, "kafka-cluster", LITERAL))
@@ -205,42 +155,12 @@ class AclCommandTest extends ZooKeeperTestHarness with Logging {
   @Test(expected = classOf[IllegalArgumentException])
   def testInvalidAuthorizerProperty() {
     val args = Array("--authorizer-properties", "zookeeper.connect " + zkConnect)
-    val aclCommandService = new AclCommand.AuthorizerService(new AclCommandOptions(args))
-    aclCommandService.listAcls()
+    AclCommand.withAuthorizer(new AclCommandOptions(args))(null)
   }
 
-  @Test
-  def testPatternTypes() {
-    Exit.setExitProcedure { (status, _) =>
-      if (status == 1)
-        throw new RuntimeException("Exiting command")
-      else
-        throw new AssertionError(s"Unexpected exit with status $status")
-    }
-    def verifyPatternType(cmd: Array[String], isValid: Boolean): Unit = {
-      if (isValid)
-        AclCommand.main(cmd)
-      else
-        intercept[RuntimeException](AclCommand.main(cmd))
-    }
-    try {
-      PatternType.values.foreach { patternType =>
-        val addCmd = zkArgs ++ Array("--allow-principal", principal.toString, "--producer", "--topic", "Test",
-          "--add", "--resource-pattern-type", patternType.toString)
-        verifyPatternType(addCmd, isValid = patternType.isSpecific)
-        val listCmd = zkArgs ++ Array("--topic", "Test", "--list", "--resource-pattern-type", patternType.toString)
-        verifyPatternType(listCmd, isValid = patternType != PatternType.UNKNOWN)
-        val removeCmd = zkArgs ++ Array("--topic", "Test", "--force", "--remove", "--resource-pattern-type", patternType.toString)
-        verifyPatternType(removeCmd, isValid = patternType != PatternType.UNKNOWN)
-      }
-    } finally {
-      Exit.resetExitProcedure()
-    }
-  }
-
-  private def testRemove(cmdArgs: Array[String], resources: Set[Resource], resourceCmd: Array[String]) {
+  private def testRemove(resources: Set[Resource], resourceCmd: Array[String], brokerProps: Properties) {
     for (resource <- resources) {
-      AclCommand.main(cmdArgs ++ resourceCmd :+ "--remove" :+ "--force")
+      AclCommand.main(zkArgs ++ resourceCmd :+ "--remove" :+ "--force")
       withAuthorizer() { authorizer =>
         TestUtils.waitAndVerifyAcls(Set.empty[Acl], authorizer, resource)
       }
@@ -258,7 +178,7 @@ class AclCommandTest extends ZooKeeperTestHarness with Logging {
     Users.foldLeft(cmd) ((cmd, user) => cmd ++ Array(principalCmd, user.toString))
   }
 
-  private def withAuthorizer()(f: Authorizer => Unit) {
+  def withAuthorizer()(f: Authorizer => Unit) {
     val kafkaConfig = KafkaConfig.fromProps(brokerProps, doLog = false)
     val authZ = new SimpleAclAuthorizer
     try {

@@ -22,7 +22,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
+import java.nio.charset.Charset;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Set;
@@ -32,7 +32,7 @@ public class SubscriptionInfo {
 
     private static final Logger log = LoggerFactory.getLogger(SubscriptionInfo.class);
 
-    public static final int LATEST_SUPPORTED_VERSION = 4;
+    public static final int LATEST_SUPPORTED_VERSION = 3;
     static final int UNKNOWN = -1;
 
     private final int usedVersion;
@@ -124,9 +124,6 @@ public class SubscriptionInfo {
             case 3:
                 buf = encodeVersionThree();
                 break;
-            case 4:
-                buf = encodeVersionFour();
-                break;
             default:
                 throw new IllegalStateException("Unknown metadata version: " + usedVersion
                     + "; latest supported version: " + LATEST_SUPPORTED_VERSION);
@@ -171,7 +168,7 @@ public class SubscriptionInfo {
         if (userEndPoint == null) {
             return new byte[0];
         } else {
-            return userEndPoint.getBytes(StandardCharsets.UTF_8);
+            return userEndPoint.getBytes(Charset.forName("UTF-8"));
         }
     }
 
@@ -208,7 +205,7 @@ public class SubscriptionInfo {
     private ByteBuffer encodeVersionThree() {
         final byte[] endPointBytes = prepareUserEndPoint();
 
-        final ByteBuffer buf = ByteBuffer.allocate(getVersionThreeAndFourByteLength(endPointBytes));
+        final ByteBuffer buf = ByteBuffer.allocate(getVersionThreeByteLength(endPointBytes));
 
         buf.putInt(3); // used version
         buf.putInt(LATEST_SUPPORTED_VERSION); // supported version
@@ -220,22 +217,7 @@ public class SubscriptionInfo {
         return buf;
     }
 
-    private ByteBuffer encodeVersionFour() {
-        final byte[] endPointBytes = prepareUserEndPoint();
-
-        final ByteBuffer buf = ByteBuffer.allocate(getVersionThreeAndFourByteLength(endPointBytes));
-
-        buf.putInt(4); // used version
-        buf.putInt(LATEST_SUPPORTED_VERSION); // supported version
-        encodeClientUUID(buf);
-        encodeTasks(buf, prevTasks);
-        encodeTasks(buf, standbyTasks);
-        encodeUserEndPoint(buf, endPointBytes);
-
-        return buf;
-    }
-
-    protected int getVersionThreeAndFourByteLength(final byte[] endPointBytes) {
+    protected int getVersionThreeByteLength(final byte[] endPointBytes) {
         return 4 + // used version
                4 + // latest supported version version
                16 + // client ID
@@ -265,7 +247,6 @@ public class SubscriptionInfo {
                 decodeVersionTwoData(subscriptionInfo, data);
                 break;
             case 3:
-            case 4:
                 latestSupportedVersion = data.getInt();
                 subscriptionInfo = new SubscriptionInfo(usedVersion, latestSupportedVersion);
                 decodeVersionThreeData(subscriptionInfo, data);
@@ -318,7 +299,7 @@ public class SubscriptionInfo {
         if (bytesLength != 0) {
             final byte[] bytes = new byte[bytesLength];
             data.get(bytes);
-            subscriptionInfo.userEndPoint = new String(bytes, StandardCharsets.UTF_8);
+            subscriptionInfo.userEndPoint = new String(bytes, Charset.forName("UTF-8"));
         }
     }
 

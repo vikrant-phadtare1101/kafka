@@ -28,7 +28,7 @@ public interface ClientQuotaEntity {
     /**
      * Entity type of a {@link ConfigEntity}
      */
-    enum ConfigEntityType {
+    public enum ConfigEntityType {
         USER,
         CLIENT_ID,
         DEFAULT_USER,
@@ -41,7 +41,7 @@ public interface ClientQuotaEntity {
      * For example, {user, client-id} quota is represented using two
      * instances of ConfigEntity with entity types USER and CLIENT_ID.
      */
-    interface ConfigEntity {
+    public interface ConfigEntity {
         /**
          * Returns the name of this entity. For default quotas, an empty string is returned.
          */

@@ -20,16 +20,15 @@
 package org.apache.kafka.streams.scala
 package kstream
 
-import org.apache.kafka.streams.kstream.internals.KTableImpl
-import org.apache.kafka.streams.kstream.{KGroupedStream => KGroupedStreamJ, KTable => KTableJ, _}
+import org.apache.kafka.streams.kstream.{KGroupedStream => KGroupedStreamJ, _}
 import org.apache.kafka.streams.scala.ImplicitConversions._
-import org.apache.kafka.streams.scala.FunctionsCompatConversions._
+import org.apache.kafka.streams.scala.FunctionConversions._
 
 /**
  * Wraps the Java class KGroupedStream and delegates method calls to the underlying Java object.
  *
- * @tparam K Type of keys
- * @tparam V Type of values
+ * @param [K] Type of keys
+ * @param [V] Type of values
  * @param inner The underlying Java abstraction for KGroupedStream
  *
  * @see `org.apache.kafka.streams.kstream.KGroupedStream`
@@ -47,13 +46,9 @@ class KGroupedStream[K, V](val inner: KGroupedStreamJ[K, V]) {
    * @see `org.apache.kafka.streams.kstream.KGroupedStream#count`
    */
   def count()(implicit materialized: Materialized[K, Long, ByteArrayKeyValueStore]): KTable[K, Long] = {
-    val javaCountTable: KTableJ[K, java.lang.Long] =
+    val c: KTable[K, java.lang.Long] =
       inner.count(materialized.asInstanceOf[Materialized[K, java.lang.Long, ByteArrayKeyValueStore]])
-    val tableImpl = javaCountTable.asInstanceOf[KTableImpl[K, ByteArrayKeyValueStore, java.lang.Long]]
-    javaCountTable.mapValues[Long](
-      ((l: java.lang.Long) => Long2long(l)).asValueMapper,
-      Materialized.`with`[K, Long, ByteArrayKeyValueStore](tableImpl.keySerde(), Serdes.Long)
-    )
+    c.mapValues[Long](Long2long _)
   }
 
   /**

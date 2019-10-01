@@ -20,9 +20,9 @@ import kafka.common.KafkaException
 import org.apache.kafka.common.acl.AclPermissionType
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import org.scalatest.Assertions.fail
+import org.scalatest.junit.JUnitSuite
 
-class PermissionTypeTest {
+class PermissionTypeTest extends JUnitSuite {
 
   @Test
   def testFromString(): Unit = {

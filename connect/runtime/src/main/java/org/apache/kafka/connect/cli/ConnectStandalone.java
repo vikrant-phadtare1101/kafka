@@ -19,12 +19,10 @@ package org.apache.kafka.connect.cli;
 import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
-import org.apache.kafka.connect.connector.policy.ConnectorClientConfigOverridePolicy;
 import org.apache.kafka.connect.runtime.Connect;
 import org.apache.kafka.connect.runtime.ConnectorConfig;
 import org.apache.kafka.connect.runtime.Herder;
 import org.apache.kafka.connect.runtime.Worker;
-import org.apache.kafka.connect.runtime.WorkerConfig;
 import org.apache.kafka.connect.runtime.WorkerInfo;
 import org.apache.kafka.connect.runtime.isolation.Plugins;
 import org.apache.kafka.connect.runtime.rest.RestServer;
@@ -57,9 +55,9 @@ import java.util.Map;
 public class ConnectStandalone {
     private static final Logger log = LoggerFactory.getLogger(ConnectStandalone.class);
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
 
-        if (args.length < 2 || Arrays.asList(args).contains("--help")) {
+        if (args.length < 2) {
             log.info("Usage: ConnectStandalone worker.properties connector1.properties [connector2.properties ...]");
             Exit.exit(1);
         }
@@ -89,13 +87,9 @@ public class ConnectStandalone {
             URI advertisedUrl = rest.advertisedUrl();
             String workerId = advertisedUrl.getHost() + ":" + advertisedUrl.getPort();
 
-            ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy = plugins.newPlugin(
-                config.getString(WorkerConfig.CONNECTOR_CLIENT_POLICY_CLASS_CONFIG),
-                config, ConnectorClientConfigOverridePolicy.class);
-            Worker worker = new Worker(workerId, time, plugins, config, new FileOffsetBackingStore(),
-                                       connectorClientConfigOverridePolicy);
+            Worker worker = new Worker(workerId, time, plugins, config, new FileOffsetBackingStore());
 
-            Herder herder = new StandaloneHerder(worker, kafkaClusterId, connectorClientConfigOverridePolicy);
+            Herder herder = new StandaloneHerder(worker, kafkaClusterId);
             final Connect connect = new Connect(herder, rest);
             log.info("Kafka Connect standalone worker initialization took {}ms", time.hiResClockMs() - initStart);
 

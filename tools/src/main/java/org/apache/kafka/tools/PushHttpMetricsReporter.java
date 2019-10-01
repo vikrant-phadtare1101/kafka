@@ -174,7 +174,8 @@ public class PushHttpMetricsReporter implements MetricsReporter {
                 samples = new ArrayList<>(metrics.size());
                 for (KafkaMetric metric : metrics.values()) {
                     MetricName name = metric.metricName();
-                    samples.add(new MetricValue(name.name(), name.group(), name.tags(), metric.metricValue()));
+                    double value = metric.value();
+                    samples.add(new MetricValue(name.name(), name.group(), name.tags(), value));
                 }
             }
 
@@ -211,9 +212,9 @@ public class PushHttpMetricsReporter implements MetricsReporter {
                 } else {
                     log.info("Finished reporting metrics with response code {}", responseCode);
                 }
-            } catch (Throwable t) {
-                log.error("Error reporting metrics", t);
-                throw new KafkaException("Failed to report current metrics", t);
+            } catch (Exception e) {
+                log.error("Error reporting metrics", e);
+                throw new KafkaException("Failed to report current metrics", e);
             } finally {
                 if (connection != null) {
                     connection.disconnect();

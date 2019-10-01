@@ -21,7 +21,6 @@ import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.header.Header;
 
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * <p>
@@ -114,8 +113,12 @@ public class SourceRecord extends ConnectRecord<SourceRecord> {
 
         SourceRecord that = (SourceRecord) o;
 
-        return Objects.equals(sourcePartition, that.sourcePartition) &&
-                Objects.equals(sourceOffset, that.sourceOffset);
+        if (sourcePartition != null ? !sourcePartition.equals(that.sourcePartition) : that.sourcePartition != null)
+            return false;
+        if (sourceOffset != null ? !sourceOffset.equals(that.sourceOffset) : that.sourceOffset != null)
+            return false;
+
+        return true;
     }
 
     @Override

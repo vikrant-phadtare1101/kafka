@@ -25,43 +25,33 @@ import org.eclipse.jetty.util.ssl.SslContextFactory;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 /**
  * Helper class for setting up SSL for RestServer and RestClient
  */
 public class SSLUtils {
-
-    private static final Pattern COMMA_WITH_WHITESPACE = Pattern.compile("\\s*,\\s*");
+    /**
+     * Configures SSL/TLS for HTTPS Jetty Server / Client
+     */
+    public static SslContextFactory createSslContextFactory(WorkerConfig config) {
+        return createSslContextFactory(config, false);
+    }
 
     /**
-     * Configures SSL/TLS for HTTPS Jetty Server
+     * Configures SSL/TLS for HTTPS Jetty Server / Client
      */
-    public static SslContextFactory createServerSideSslContextFactory(WorkerConfig config) {
+    public static SslContextFactory createSslContextFactory(WorkerConfig config, boolean client) {
         Map<String, Object> sslConfigValues = config.valuesWithPrefixAllOrNothing("listeners.https.");
 
-        final SslContextFactory.Server ssl = new SslContextFactory.Server();
+        SslContextFactory ssl = new SslContextFactory();
 
         configureSslContextFactoryKeyStore(ssl, sslConfigValues);
         configureSslContextFactoryTrustStore(ssl, sslConfigValues);
         configureSslContextFactoryAlgorithms(ssl, sslConfigValues);
         configureSslContextFactoryAuthentication(ssl, sslConfigValues);
 
-        return ssl;
-    }
-
-    /**
-     * Configures SSL/TLS for HTTPS Jetty Client
-     */
-    public static SslContextFactory createClientSideSslContextFactory(WorkerConfig config) {
-        Map<String, Object> sslConfigValues = config.valuesWithPrefixAllOrNothing("listeners.https.");
-
-        final SslContextFactory.Client ssl = new SslContextFactory.Client();
-
-        configureSslContextFactoryKeyStore(ssl, sslConfigValues);
-        configureSslContextFactoryTrustStore(ssl, sslConfigValues);
-        configureSslContextFactoryAlgorithms(ssl, sslConfigValues);
-        configureSslContextFactoryEndpointIdentification(ssl, sslConfigValues);
+        if (client)
+            configureSslContextFactoryEndpointIdentification(ssl, sslConfigValues);
 
         return ssl;
     }
@@ -110,9 +100,8 @@ public class SSLUtils {
     /**
      * Configures Protocol, Algorithm and Provider related settings in SslContextFactory
      */
-    @SuppressWarnings("unchecked")
     protected static void configureSslContextFactoryAlgorithms(SslContextFactory ssl, Map<String, Object> sslConfigValues) {
-        List<String> sslEnabledProtocols = (List<String>) getOrDefault(sslConfigValues, SslConfigs.SSL_ENABLED_PROTOCOLS_CONFIG, Arrays.asList(COMMA_WITH_WHITESPACE.split(SslConfigs.DEFAULT_SSL_ENABLED_PROTOCOLS)));
+        List<String> sslEnabledProtocols = (List<String>) getOrDefault(sslConfigValues, SslConfigs.SSL_ENABLED_PROTOCOLS_CONFIG, Arrays.asList(SslConfigs.DEFAULT_SSL_ENABLED_PROTOCOLS.split("\\s*,\\s*")));
         ssl.setIncludeProtocols(sslEnabledProtocols.toArray(new String[sslEnabledProtocols.size()]));
 
         String sslProvider = (String) sslConfigValues.get(SslConfigs.SSL_PROVIDER_CONFIG);
@@ -146,7 +135,7 @@ public class SSLUtils {
     /**
      * Configures Authentication related settings in SslContextFactory
      */
-    protected static void configureSslContextFactoryAuthentication(SslContextFactory.Server ssl, Map<String, Object> sslConfigValues) {
+    protected static void configureSslContextFactoryAuthentication(SslContextFactory ssl, Map<String, Object> sslConfigValues) {
         String sslClientAuth = (String) getOrDefault(sslConfigValues, BrokerSecurityConfigs.SSL_CLIENT_AUTH_CONFIG, "none");
         switch (sslClientAuth) {
             case "requested":

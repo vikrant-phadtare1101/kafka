@@ -33,9 +33,9 @@ class GroupAuthorizerIntegrationTest extends AuthorizerIntegrationTest {
   override val kafkaPrincipalType = GroupPrincipalType
   override def userPrincipal = TestGroupPrincipal
 
-  override def brokerPropertyOverrides(properties: Properties): Unit = {
+  override def propertyOverrides(properties: Properties): Unit = {
     properties.setProperty(BrokerSecurityConfigs.PRINCIPAL_BUILDER_CLASS_CONFIG,
       classOf[GroupPrincipalBuilder].getName)
-    super.brokerPropertyOverrides(properties)
+    super.propertyOverrides(properties)
   }
 }

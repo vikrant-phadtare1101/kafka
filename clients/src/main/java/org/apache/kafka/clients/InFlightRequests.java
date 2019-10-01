@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -152,7 +153,12 @@ final class InFlightRequests {
         } else {
             final Deque<NetworkClient.InFlightRequest> clearedRequests = requests.remove(node);
             inFlightRequestCount.getAndAdd(-clearedRequests.size());
-            return () -> clearedRequests.descendingIterator();
+            return new Iterable<NetworkClient.InFlightRequest>() {
+                @Override
+                public Iterator<NetworkClient.InFlightRequest> iterator() {
+                    return clearedRequests.descendingIterator();
+                }
+            };
         }
     }
 

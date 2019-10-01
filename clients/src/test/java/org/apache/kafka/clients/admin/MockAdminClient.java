@@ -17,30 +17,25 @@
 package org.apache.kafka.clients.admin;
 
 import org.apache.kafka.common.KafkaFuture;
-import org.apache.kafka.common.Metric;
-import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.ElectionType;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.TopicPartitionReplica;
 import org.apache.kafka.common.acl.AclBinding;
 import org.apache.kafka.common.acl.AclBindingFilter;
-import org.apache.kafka.common.acl.AclOperation;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.errors.TopicExistsException;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.apache.kafka.common.internals.KafkaFutureImpl;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 public class MockAdminClient extends AdminClient {
     public static final String DEFAULT_CLUSTER_ID = "I4ZmrWqfT2e-upky_4fdPA";
@@ -51,8 +46,6 @@ public class MockAdminClient extends AdminClient {
 
     private Node controller;
     private int timeoutNextRequests = 0;
-
-    private Map<MetricName, Metric> mockMetrics = new HashMap<>();
 
     /**
      * Creates MockAdminClient for a cluster with the given brokers. The Kafka cluster ID uses the default value from
@@ -111,14 +104,6 @@ public class MockAdminClient extends AdminClient {
         allTopics.put(name, new TopicMetadata(internal, partitions, configs));
     }
 
-    public void markTopicForDeletion(final String name) {
-        if (!allTopics.containsKey(name)) {
-            throw new IllegalArgumentException(String.format("Topic %s did not exist.", name));
-        }
-
-        allTopics.get(name).markedForDeletion = true;
-    }
-
     public void timeoutNextRequest(int numberOfRequest) {
         timeoutNextRequests = numberOfRequest;
     }
@@ -128,22 +113,19 @@ public class MockAdminClient extends AdminClient {
         KafkaFutureImpl<Collection<Node>> nodesFuture = new KafkaFutureImpl<>();
         KafkaFutureImpl<Node> controllerFuture = new KafkaFutureImpl<>();
         KafkaFutureImpl<String> brokerIdFuture = new KafkaFutureImpl<>();
-        KafkaFutureImpl<Set<AclOperation>> authorizedOperationsFuture = new KafkaFutureImpl<>();
 
         if (timeoutNextRequests > 0) {
             nodesFuture.completeExceptionally(new TimeoutException());
             controllerFuture.completeExceptionally(new TimeoutException());
             brokerIdFuture.completeExceptionally(new TimeoutException());
-            authorizedOperationsFuture.completeExceptionally(new TimeoutException());
             --timeoutNextRequests;
         } else {
             nodesFuture.complete(brokers);
             controllerFuture.complete(controller);
             brokerIdFuture.complete(clusterId);
-            authorizedOperationsFuture.complete(Collections.emptySet());
         }
 
-        return new DescribeClusterResult(nodesFuture, controllerFuture, brokerIdFuture, authorizedOperationsFuture);
+        return new DescribeClusterResult(nodesFuture, controllerFuture, brokerIdFuture);
     }
 
     @Override
@@ -181,7 +163,7 @@ public class MockAdminClient extends AdminClient {
             int numberOfPartitions = newTopic.numPartitions();
             List<TopicPartitionInfo> partitions = new ArrayList<>(numberOfPartitions);
             for (int p = 0; p < numberOfPartitions; ++p) {
-                partitions.add(new TopicPartitionInfo(p, brokers.get(0), replicas, Collections.emptyList()));
+                partitions.add(new TopicPartitionInfo(p, brokers.get(0), replicas, Collections.<Node>emptyList()));
             }
             allTopics.put(topicName, new TopicMetadata(false, partitions, newTopic.configs()));
             future.complete(null);
@@ -231,18 +213,18 @@ public class MockAdminClient extends AdminClient {
         for (String requestedTopic : topicNames) {
             for (Map.Entry<String, TopicMetadata> topicDescription : allTopics.entrySet()) {
                 String topicName = topicDescription.getKey();
-                if (topicName.equals(requestedTopic) && !topicDescription.getValue().markedForDeletion) {
+                if (topicName.equals(requestedTopic)) {
                     TopicMetadata topicMetadata = topicDescription.getValue();
                     KafkaFutureImpl<TopicDescription> future = new KafkaFutureImpl<>();
-                    future.complete(new TopicDescription(topicName, topicMetadata.isInternalTopic, topicMetadata.partitions,
-                            Collections.emptySet()));
+                    future.complete(new TopicDescription(topicName, topicMetadata.isInternalTopic, topicMetadata.partitions));
                     topicDescriptions.put(topicName, future);
                     break;
                 }
             }
             if (!topicDescriptions.containsKey(requestedTopic)) {
                 KafkaFutureImpl<TopicDescription> future = new KafkaFutureImpl<>();
-                future.completeExceptionally(new UnknownTopicOrPartitionException("Topic " + requestedTopic + " not found."));
+                future.completeExceptionally(new UnknownTopicOrPartitionException(
+                    String.format("Topic %s unknown.", requestedTopic)));
                 topicDescriptions.put(requestedTopic, future);
             }
         }
@@ -334,20 +316,6 @@ public class MockAdminClient extends AdminClient {
         throw new UnsupportedOperationException("Not implemented yet");
     }
 
-    @Deprecated
-    @Override
-    public ElectPreferredLeadersResult electPreferredLeaders(Collection<TopicPartition> partitions, ElectPreferredLeadersOptions options) {
-        throw new UnsupportedOperationException("Not implemented yet");
-    }
-
-    @Override
-    public ElectLeadersResult electLeaders(
-            ElectionType electionType,
-            Set<TopicPartition> partitions,
-            ElectLeadersOptions options) {
-        throw new UnsupportedOperationException("Not implemented yet");
-    }
-
     @Override
     public CreateAclsResult createAcls(Collection<AclBinding> acls, CreateAclsOptions options) {
         throw new UnsupportedOperationException("Not implemented yet");
@@ -386,14 +354,7 @@ public class MockAdminClient extends AdminClient {
     }
 
     @Override
-    @Deprecated
     public AlterConfigsResult alterConfigs(Map<ConfigResource, Config> configs, AlterConfigsOptions options) {
-        throw new UnsupportedOperationException("Not implemented yet");
-    }
-
-    @Override
-    public AlterConfigsResult incrementalAlterConfigs(Map<ConfigResource, Collection<AlterConfigOp>> configs,
-                                                      AlterConfigsOptions options) {
         throw new UnsupportedOperationException("Not implemented yet");
     }
 
@@ -413,7 +374,7 @@ public class MockAdminClient extends AdminClient {
     }
 
     @Override
-    public void close(Duration timeout) {}
+    public void close(long duration, TimeUnit unit) {}
 
 
     private final static class TopicMetadata {
@@ -421,24 +382,12 @@ public class MockAdminClient extends AdminClient {
         final List<TopicPartitionInfo> partitions;
         final Map<String, String> configs;
 
-        public boolean markedForDeletion;
-
         TopicMetadata(boolean isInternalTopic,
                       List<TopicPartitionInfo> partitions,
                       Map<String, String> configs) {
             this.isInternalTopic = isInternalTopic;
             this.partitions = partitions;
-            this.configs = configs != null ? configs : Collections.emptyMap();
-            this.markedForDeletion = false;
+            this.configs = configs != null ? configs : Collections.<String, String>emptyMap();
         }
-    }
-
-    public void setMockMetrics(MetricName name, Metric metric) {
-        mockMetrics.put(name, metric);
-    }
-
-    @Override
-    public Map<MetricName, ? extends Metric> metrics() {
-        return mockMetrics;
     }
 }

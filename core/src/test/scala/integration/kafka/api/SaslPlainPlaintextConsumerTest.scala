@@ -13,11 +13,12 @@
 package kafka.api
 
 import java.io.File
-import java.util.{Locale, Properties}
+import java.util.Locale
 
 import kafka.server.KafkaConfig
-import kafka.utils.{JaasTestUtils, TestUtils}
+import kafka.utils.{CoreUtils, JaasTestUtils, TestUtils, ZkUtils}
 import org.apache.kafka.common.network.ListenerName
+import org.apache.kafka.common.security.JaasUtils
 import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.junit.{After, Before, Test}
 
@@ -28,8 +29,6 @@ class SaslPlainPlaintextConsumerTest extends BaseConsumerTest with SaslSetup {
   private val kafkaServerJaasEntryName =
     s"${listenerName.value.toLowerCase(Locale.ROOT)}.${JaasTestUtils.KafkaServerContextName}"
   this.serverConfig.setProperty(KafkaConfig.ZkEnableSecureAclsProp, "false")
-  // disable secure acls of zkClient in ZooKeeperTestHarness
-  override protected def zkAclsEnabled = Some(false)
   override protected def securityProtocol = SecurityProtocol.SASL_PLAINTEXT
   override protected lazy val trustStoreFile = Some(File.createTempFile("truststore", ".jks"))
   override protected val serverSaslProperties = Some(kafkaServerSaslProperties(kafkaServerSaslMechanisms, kafkaClientSaslMechanism))
@@ -37,7 +36,7 @@ class SaslPlainPlaintextConsumerTest extends BaseConsumerTest with SaslSetup {
 
   @Before
   override def setUp(): Unit = {
-    startSasl(jaasSections(kafkaServerSaslMechanisms, Some(kafkaClientSaslMechanism), Both, kafkaServerJaasEntryName))
+    startSasl(jaasSections(kafkaServerSaslMechanisms, Some(kafkaClientSaslMechanism), KafkaSasl, kafkaServerJaasEntryName))
     super.setUp()
   }
 
@@ -47,17 +46,14 @@ class SaslPlainPlaintextConsumerTest extends BaseConsumerTest with SaslSetup {
     closeSasl()
   }
 
-  override def modifyConfigs(props: Seq[Properties]): Unit = {
-    super.modifyConfigs(props)
-    configureListeners(props)
-  }
-
   /**
    * Checks that everyone can access ZkUtils.SecureZkRootPaths and ZkUtils.SensitiveZkRootPaths
    * when zookeeper.set.acl=false, even if ZooKeeper is SASL-enabled.
    */
   @Test
   def testZkAclsDisabled() {
-    TestUtils.verifyUnsecureZkAcls(zkClient)
+    val zkUtils = ZkUtils(zkConnect, zkSessionTimeout, zkConnectionTimeout, zkAclsEnabled.getOrElse(JaasUtils.isZkSecurityEnabled))
+    TestUtils.verifyUnsecureZkAcls(zkUtils)
+    CoreUtils.swallow(zkUtils.close(), this)
   }
 }

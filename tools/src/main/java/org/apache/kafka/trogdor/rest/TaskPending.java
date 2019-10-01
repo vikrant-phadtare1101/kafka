@@ -30,9 +30,4 @@ public class TaskPending extends TaskState {
     public TaskPending(@JsonProperty("spec") TaskSpec spec) {
         super(spec, NullNode.instance);
     }
-
-    @Override
-    public TaskStateType stateType() {
-        return TaskStateType.PENDING;
-    }
 }

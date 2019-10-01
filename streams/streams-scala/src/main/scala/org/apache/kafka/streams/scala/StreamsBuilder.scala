@@ -19,10 +19,9 @@
  */
 package org.apache.kafka.streams.scala
 
-import java.util.Properties
 import java.util.regex.Pattern
 
-import org.apache.kafka.streams.kstream.GlobalKTable
+import org.apache.kafka.streams.kstream.{Consumed, GlobalKTable, Materialized}
 import org.apache.kafka.streams.processor.{ProcessorSupplier, StateStore}
 import org.apache.kafka.streams.state.StoreBuilder
 import org.apache.kafka.streams.{Topology, StreamsBuilder => StreamsBuilderJ}
@@ -78,7 +77,7 @@ class StreamsBuilder(inner: StreamsBuilderJ = new StreamsBuilderJ) {
   /**
    * Create a [[kstream.KStream]] from the specified topic pattern.
    *
-   * @param topicPattern the topic name pattern
+   * @param topics the topic name pattern
    * @return a [[kstream.KStream]] for the specified topics
    * @see #stream(String)
    * @see `org.apache.kafka.streams.StreamsBuilder#stream`
@@ -158,22 +157,17 @@ class StreamsBuilder(inner: StreamsBuilderJ = new StreamsBuilderJ) {
   /**
    * Adds a state store to the underlying `Topology`. The store must still be "connected" to a `Processor`,
    * `Transformer`, or `ValueTransformer` before it can be used.
-   * <p>
-   * It is required to connect state stores to `Processor`, `Transformer`, or `ValueTransformer` before they can be used.
    *
    * @param builder the builder used to obtain this state store `StateStore` instance
    * @return the underlying Java abstraction `StreamsBuilder` after adding the `StateStore`
-   * @throws org.apache.kafka.streams.errors.TopologyException if state store supplier is already added
+   * @throws TopologyException if state store supplier is already added
    * @see `org.apache.kafka.streams.StreamsBuilder#addStateStore`
    */
   def addStateStore(builder: StoreBuilder[_ <: StateStore]): StreamsBuilderJ = inner.addStateStore(builder)
 
   /**
-   * Adds a global `StateStore` to the topology. Global stores should not be added to `Processor`, `Transformer`,
+   * Adds a global `StateStore` to the topology. Global stores should not be added to `Processor, `Transformer`,
    * or `ValueTransformer` (in contrast to regular stores).
-   * <p>
-   * It is not required to connect a global store to `Processor`, `Transformer`, or `ValueTransformer`;
-   * those have read-only access to all global stores by default.
    *
    * @see `org.apache.kafka.streams.StreamsBuilder#addGlobalStore`
    */
@@ -184,14 +178,4 @@ class StreamsBuilder(inner: StreamsBuilderJ = new StreamsBuilderJ) {
     inner.addGlobalStore(storeBuilder, topic, consumed, stateUpdateSupplier)
 
   def build(): Topology = inner.build()
-
-  /**
-   * Returns the `Topology` that represents the specified processing logic and accepts
-   * a `Properties` instance used to indicate whether to optimize topology or not.
-   *
-   * @param props the `Properties` used for building possibly optimized topology
-   * @return the `Topology` that represents the specified processing logic
-   * @see `org.apache.kafka.streams.StreamsBuilder#build`
-   */
-  def build(props: Properties): Topology = inner.build(props)
 }

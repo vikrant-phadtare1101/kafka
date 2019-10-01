@@ -61,7 +61,7 @@ public class WrappingStoreProviderTest {
 
     @Test
     public void shouldFindKeyValueStores() {
-        final List<ReadOnlyKeyValueStore<String, String>> results =
+        List<ReadOnlyKeyValueStore<String, String>> results =
                 wrappingStoreProvider.stores("kv", QueryableStoreTypes.<String, String>keyValueStore());
         assertEquals(2, results.size());
     }

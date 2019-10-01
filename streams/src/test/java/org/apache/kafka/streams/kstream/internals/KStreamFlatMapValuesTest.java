@@ -35,21 +35,24 @@ import java.util.Properties;
 import static org.junit.Assert.assertArrayEquals;
 
 public class KStreamFlatMapValuesTest {
-    private final String topicName = "topic";
-    private final ConsumerRecordFactory<Integer, Integer> recordFactory =
-        new ConsumerRecordFactory<>(new IntegerSerializer(), new IntegerSerializer(), 0L);
-    private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.Integer(), Serdes.String());
+
+    private String topicName = "topic";
+    private final ConsumerRecordFactory<Integer, Integer> recordFactory = new ConsumerRecordFactory<>(new IntegerSerializer(), new IntegerSerializer());
+    private final Properties props = StreamsTestUtils.topologyTestConfig(Serdes.Integer(), Serdes.String());
 
     @Test
     public void testFlatMapValues() {
-        final StreamsBuilder builder = new StreamsBuilder();
+        StreamsBuilder builder = new StreamsBuilder();
 
-        final ValueMapper<Number, Iterable<String>> mapper =
-            value -> {
-                final ArrayList<String> result = new ArrayList<>();
-                result.add("v" + value);
-                result.add("V" + value);
-                return result;
+        ValueMapper<Number, Iterable<String>> mapper =
+            new ValueMapper<Number, Iterable<String>>() {
+                @Override
+                public Iterable<String> apply(Number value) {
+                    ArrayList<String> result = new ArrayList<String>();
+                    result.add("v" + value);
+                    result.add("V" + value);
+                    return result;
+                }
             };
 
         final int[] expectedKeys = {0, 1, 2, 3};
@@ -65,7 +68,7 @@ public class KStreamFlatMapValuesTest {
             }
         }
 
-        final String[] expected = {"0:v0 (ts: 0)", "0:V0 (ts: 0)", "1:v1 (ts: 0)", "1:V1 (ts: 0)", "2:v2 (ts: 0)", "2:V2 (ts: 0)", "3:v3 (ts: 0)", "3:V3 (ts: 0)"};
+        String[] expected = {"0:v0", "0:V0", "1:v1", "1:V1", "2:v2", "2:V2", "3:v3", "3:V3"};
 
         assertArrayEquals(expected, supplier.theCapturedProcessor().processed.toArray());
     }
@@ -73,15 +76,18 @@ public class KStreamFlatMapValuesTest {
 
     @Test
     public void testFlatMapValuesWithKeys() {
-        final StreamsBuilder builder = new StreamsBuilder();
+        StreamsBuilder builder = new StreamsBuilder();
 
-        final ValueMapperWithKey<Integer, Number, Iterable<String>> mapper =
-            (readOnlyKey, value) -> {
-                final ArrayList<String> result = new ArrayList<>();
+        ValueMapperWithKey<Integer, Number, Iterable<String>> mapper =
+                new ValueMapperWithKey<Integer, Number, Iterable<String>>() {
+            @Override
+            public Iterable<String> apply(final Integer readOnlyKey, final Number value) {
+                ArrayList<String> result = new ArrayList<>();
                 result.add("v" + value);
                 result.add("k" + readOnlyKey);
                 return result;
-            };
+            }
+        };
 
         final int[] expectedKeys = {0, 1, 2, 3};
 
@@ -97,7 +103,7 @@ public class KStreamFlatMapValuesTest {
             }
         }
 
-        final String[] expected = {"0:v0 (ts: 0)", "0:k0 (ts: 0)", "1:v1 (ts: 0)", "1:k1 (ts: 0)", "2:v2 (ts: 0)", "2:k2 (ts: 0)", "3:v3 (ts: 0)", "3:k3 (ts: 0)"};
+        String[] expected = {"0:v0", "0:k0", "1:v1", "1:k1", "2:v2", "2:k2", "3:v3", "3:k3"};
 
         assertArrayEquals(expected, supplier.theCapturedProcessor().processed.toArray());
     }

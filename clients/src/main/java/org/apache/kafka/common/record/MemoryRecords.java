@@ -47,7 +47,12 @@ public class MemoryRecords extends AbstractRecords {
 
     private final ByteBuffer buffer;
 
-    private final Iterable<MutableRecordBatch> batches = this::batchIterator;
+    private final Iterable<MutableRecordBatch> batches = new Iterable<MutableRecordBatch>() {
+        @Override
+        public Iterator<MutableRecordBatch> iterator() {
+            return batchIterator();
+        }
+    };
 
     private int validBytes = -1;
 

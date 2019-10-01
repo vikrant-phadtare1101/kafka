@@ -43,7 +43,7 @@ public class TimeWindowedSerializerTest {
     @Test
     public void testWindowedKeySerializerNoArgConstructors() {
         timeWindowedSerializer.configure(props, true);
-        final Serializer<?> inner = timeWindowedSerializer.innerSerializer();
+        Serializer<?> inner = timeWindowedSerializer.innerSerializer();
         assertNotNull("Inner serializer should be not null", inner);
         assertTrue("Inner serializer type should be StringSerializer", inner instanceof StringSerializer);
     }
@@ -51,7 +51,7 @@ public class TimeWindowedSerializerTest {
     @Test
     public void testWindowedValueSerializerNoArgConstructors() {
         timeWindowedSerializer.configure(props, false);
-        final Serializer<?> inner = timeWindowedSerializer.innerSerializer();
+        Serializer<?> inner = timeWindowedSerializer.innerSerializer();
         assertNotNull("Inner serializer should be not null", inner);
         assertTrue("Inner serializer type should be ByteArraySerializer", inner instanceof ByteArraySerializer);
     }

@@ -152,7 +152,7 @@ public class KafkaFutureImpl<T> extends KafkaFuture<T> {
     }
 
     /**
-     * @see KafkaFutureImpl#thenApply(BaseFunction)
+     * @See KafkaFutureImpl#thenApply(BaseFunction)
      */
     @Override
     public <R> KafkaFuture<R> thenApply(Function<T, R> function) {
@@ -208,7 +208,7 @@ public class KafkaFutureImpl<T> extends KafkaFuture<T> {
 
     @Override
     public synchronized boolean complete(T newValue) {
-        List<BiConsumer<? super T, ? super Throwable>> oldWaiters;
+        List<BiConsumer<? super T, ? super Throwable>> oldWaiters = null;
         synchronized (this) {
             if (done)
                 return false;
@@ -225,7 +225,7 @@ public class KafkaFutureImpl<T> extends KafkaFuture<T> {
 
     @Override
     public boolean completeExceptionally(Throwable newException) {
-        List<BiConsumer<? super T, ? super Throwable>> oldWaiters;
+        List<BiConsumer<? super T, ? super Throwable>> oldWaiters = null;
         synchronized (this) {
             if (done)
                 return false;
@@ -247,7 +247,9 @@ public class KafkaFutureImpl<T> extends KafkaFuture<T> {
      */
     @Override
     public synchronized boolean cancel(boolean mayInterruptIfRunning) {
-        return completeExceptionally(new CancellationException()) || exception instanceof CancellationException;
+        if (completeExceptionally(new CancellationException()))
+            return true;
+        return exception instanceof CancellationException;
     }
 
     /**
@@ -255,7 +257,7 @@ public class KafkaFutureImpl<T> extends KafkaFuture<T> {
      */
     @Override
     public T get() throws InterruptedException, ExecutionException {
-        SingleWaiter<T> waiter = new SingleWaiter<>();
+        SingleWaiter<T> waiter = new SingleWaiter<T>();
         addWaiter(waiter);
         return waiter.await();
     }
@@ -267,7 +269,7 @@ public class KafkaFutureImpl<T> extends KafkaFuture<T> {
     @Override
     public T get(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException,
             TimeoutException {
-        SingleWaiter<T> waiter = new SingleWaiter<>();
+        SingleWaiter<T> waiter = new SingleWaiter<T>();
         addWaiter(waiter);
         return waiter.await(timeout, unit);
     }
@@ -290,7 +292,7 @@ public class KafkaFutureImpl<T> extends KafkaFuture<T> {
      */
     @Override
     public synchronized boolean isCancelled() {
-        return exception instanceof CancellationException;
+        return (exception != null) && (exception instanceof CancellationException);
     }
 
     /**

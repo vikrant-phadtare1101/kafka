@@ -33,7 +33,7 @@ import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.errors.StreamsException;
-import org.apache.kafka.streams.kstream.Grouped;
+import org.apache.kafka.streams.kstream.Serialized;
 import org.apache.kafka.streams.kstream.ValueMapper;
 
 import java.io.IOException;
@@ -41,6 +41,7 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.Locale;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 
 public class BrokerCompatibilityTest {
 
@@ -79,16 +80,18 @@ public class BrokerCompatibilityTest {
         streamsProperties.put(StreamsConfig.consumerPrefix(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG), timeout);
         streamsProperties.put(StreamsConfig.consumerPrefix(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG), timeout);
         streamsProperties.put(StreamsConfig.REQUEST_TIMEOUT_MS_CONFIG, timeout + 1);
-        final Serde<String> stringSerde = Serdes.String();
+        //TODO remove this config or set to smaller value when KIP-91 is merged
+        streamsProperties.put(StreamsConfig.producerPrefix(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG), 60000);
+        Serde<String> stringSerde = Serdes.String();
 
 
         final StreamsBuilder builder = new StreamsBuilder();
-        builder.<String, String>stream(SOURCE_TOPIC).groupByKey(Grouped.with(stringSerde, stringSerde))
+        builder.<String, String>stream(SOURCE_TOPIC).groupByKey(Serialized.with(stringSerde, stringSerde))
             .count()
             .toStream()
             .mapValues(new ValueMapper<Long, String>() {
                 @Override
-                public String apply(final Long value) {
+                public String apply(Long value) {
                     return value.toString();
                 }
             })
@@ -107,7 +110,7 @@ public class BrokerCompatibilityTest {
                 System.err.println("FATAL: An unexpected exception " + cause);
                 e.printStackTrace(System.err);
                 System.err.flush();
-                streams.close(Duration.ofSeconds(30));
+                streams.close(30, TimeUnit.SECONDS);
             }
         });
         System.out.println("start Kafka Streams");

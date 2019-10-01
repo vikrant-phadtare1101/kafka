@@ -42,7 +42,7 @@ class MergedSortedCacheWindowStoreIterator extends AbstractMergedSortedCacheStor
 
     @Override
     Long deserializeCacheKey(final Bytes cacheKey) {
-        final byte[] binaryKey = bytesFromCacheKey(cacheKey);
+        byte[] binaryKey = bytesFromCacheKey(cacheKey);
         return WindowKeySchema.extractStoreTimestamp(binaryKey);
     }
 
@@ -58,7 +58,7 @@ class MergedSortedCacheWindowStoreIterator extends AbstractMergedSortedCacheStor
 
     @Override
     public int compare(final Bytes cacheKey, final Long storeKey) {
-        final byte[] binaryKey = bytesFromCacheKey(cacheKey);
+        byte[] binaryKey = bytesFromCacheKey(cacheKey);
 
         final Long cacheTimestamp = WindowKeySchema.extractStoreTimestamp(binaryKey);
         return cacheTimestamp.compareTo(storeKey);

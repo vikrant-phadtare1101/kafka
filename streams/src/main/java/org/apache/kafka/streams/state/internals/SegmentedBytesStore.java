@@ -99,6 +99,13 @@ public interface SegmentedBytesStore extends StateStore {
     interface KeySchema {
 
         /**
+         * Initialized the schema with a topic.
+         *
+         * @param topic a topic name
+         */
+        void init(final String topic);
+
+        /**
          * Given a range of record keys and a time, construct a Segmented key that represents
          * the upper range of keys to search when performing range queries.
          * @see SessionKeySchema#upperRange
@@ -154,7 +161,7 @@ public interface SegmentedBytesStore extends StateStore {
 
         /**
          * Create an implementation of {@link HasNextCondition} that knows when
-         * to stop iterating over the KeyValueSegments. Used during {@link SegmentedBytesStore#fetch(Bytes, Bytes, long, long)} operations
+         * to stop iterating over the Segments. Used during {@link SegmentedBytesStore#fetch(Bytes, Bytes, long, long)} operations
          * @param binaryKeyFrom the first key in the range
          * @param binaryKeyTo   the last key in the range
          * @param from          starting time range
@@ -171,6 +178,6 @@ public interface SegmentedBytesStore extends StateStore {
          * @param to
          * @return  List of segments to search
          */
-        <S extends Segment> List<S> segmentsToSearch(Segments<S> segments, long from, long to);
+        List<Segment> segmentsToSearch(Segments segments, long from, long to);
     }
 }

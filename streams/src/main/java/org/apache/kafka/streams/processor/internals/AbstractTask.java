@@ -51,11 +51,9 @@ public abstract class AbstractTask implements Task {
     final boolean eosEnabled;
     final Logger log;
     final LogContext logContext;
-    final StateDirectory stateDirectory;
-
     boolean taskInitialized;
     boolean taskClosed;
-    boolean commitNeeded;
+    final StateDirectory stateDirectory;
 
     InternalProcessorContext processorContext;
 
@@ -240,13 +238,15 @@ public abstract class AbstractTask implements Task {
     }
 
     /**
+     * @param writeCheckpoint boolean indicating if a checkpoint file should be written
      * @throws ProcessorStateException if there is an error while closing the state manager
      */
-    void closeStateManager(final boolean clean) throws ProcessorStateException {
+    // visible for testing
+    void closeStateManager(final boolean writeCheckpoint) throws ProcessorStateException {
         ProcessorStateException exception = null;
         log.trace("Closing state manager");
         try {
-            stateMgr.close(clean);
+            stateMgr.close(writeCheckpoint ? activeTaskCheckpointableOffsets() : null);
         } catch (final ProcessorStateException e) {
             exception = e;
         } finally {
@@ -265,10 +265,6 @@ public abstract class AbstractTask implements Task {
 
     public boolean isClosed() {
         return taskClosed;
-    }
-
-    public boolean commitNeeded() {
-        return commitNeeded;
     }
 
     public boolean hasStateStores() {

@@ -18,22 +18,21 @@ package org.apache.kafka.streams.processor.internals.testutil;
 
 
 import org.apache.log4j.AppenderSkeleton;
-import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
 import org.apache.log4j.spi.LoggingEvent;
 
+import java.util.Deque;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 
 public class LogCaptureAppender extends AppenderSkeleton {
-    private final LinkedList<LoggingEvent> events = new LinkedList<>();
+    private final Deque<LoggingEvent> events = new LinkedList<>();
 
-    @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
     public static class Event {
-        private String level;
-        private String message;
-        private Optional<String> throwableInfo;
+        private final String level;
+        private final String message;
+        private final Optional<String> throwableInfo;
 
         Event(final String level, final String message, final Optional<String> throwableInfo) {
             this.level = level;
@@ -58,10 +57,6 @@ public class LogCaptureAppender extends AppenderSkeleton {
         final LogCaptureAppender logCaptureAppender = new LogCaptureAppender();
         Logger.getRootLogger().addAppender(logCaptureAppender);
         return logCaptureAppender;
-    }
-
-    public static void setClassLoggerToDebug(final Class<?> clazz) {
-        Logger.getLogger(clazz).setLevel(Level.DEBUG);
     }
 
     public static void unregister(final LogCaptureAppender logCaptureAppender) {

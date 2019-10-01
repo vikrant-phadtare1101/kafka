@@ -23,8 +23,8 @@ package kstream
 import org.apache.kafka.streams.KeyValue
 import org.apache.kafka.streams.kstream.{KStream => KStreamJ, _}
 import org.apache.kafka.streams.processor.{Processor, ProcessorSupplier, TopicNameExtractor}
-import org.apache.kafka.streams.scala.FunctionsCompatConversions._
 import org.apache.kafka.streams.scala.ImplicitConversions._
+import org.apache.kafka.streams.scala.FunctionConversions._
 
 import scala.collection.JavaConverters._
 
@@ -285,10 +285,9 @@ class KStream[K, V](val inner: KStreamJ[K, V]) {
    * can be altered arbitrarily).
    * A `Transformer` (provided by the given `TransformerSupplier`) is applied to each input record
    * and computes zero or more output records.
-   * In order to assign a state, the state must be created and added via `addStateStore` before they can be connected
-   * to the `Transformer`.
-   * It's not required to connect global state stores that are added via `addGlobalStore`;
-   * read-only access to global state stores is available by default.
+   * In order to assign a state, the state must be created and registered
+   * beforehand via stores added via `addStateStore` or `addGlobalStore`
+   * before they can be connected to the `Transformer`
    *
    * @param transformerSupplier the `TransformerSuplier` that generates `Transformer`
    * @param stateStoreNames     the names of the state stores used by the processor
@@ -303,10 +302,8 @@ class KStream[K, V](val inner: KStreamJ[K, V]) {
    * Transform the value of each input record into a new value (with possible new type) of the output record.
    * A `ValueTransformer` (provided by the given `ValueTransformerSupplier`) is applied to each input
    * record value and computes a new value for it.
-   * In order to assign a state, the state must be created and added via `addStateStore` before they can be connected
-   * to the `ValueTransformer`.
-   * It's not required to connect global state stores that are added via `addGlobalStore`;
-   * read-only access to global state stores is available by default.
+   * In order to assign a state, the state must be created and registered
+   * beforehand via stores added via `addStateStore` or `addGlobalStore` before they can be connected to the `Transformer`
    *
    * @param valueTransformerSupplier a instance of `ValueTransformerSupplier` that generates a `ValueTransformer`
    * @param stateStoreNames          the names of the state stores used by the processor
@@ -321,10 +318,8 @@ class KStream[K, V](val inner: KStreamJ[K, V]) {
    * Transform the value of each input record into a new value (with possible new type) of the output record.
    * A `ValueTransformer` (provided by the given `ValueTransformerSupplier`) is applied to each input
    * record value and computes a new value for it.
-   * In order to assign a state, the state must be created and added via `addStateStore` before they can be connected
-   * to the `ValueTransformer`.
-   * It's not required to connect global state stores that are added via `addGlobalStore`;
-   * read-only access to global state stores is available by default.
+   * In order to assign a state, the state must be created and registered
+   * beforehand via stores added via `addStateStore` or `addGlobalStore` before they can be connected to the `Transformer`
    *
    * @param valueTransformerSupplier a instance of `ValueTransformerWithKeySupplier` that generates a `ValueTransformerWithKey`
    * @param stateStoreNames          the names of the state stores used by the processor
@@ -338,10 +333,8 @@ class KStream[K, V](val inner: KStreamJ[K, V]) {
   /**
    * Process all records in this stream, one record at a time, by applying a `Processor` (provided by the given
    * `processorSupplier`).
-   * In order to assign a state, the state must be created and added via `addStateStore` before they can be connected
-   * to the `Processor`.
-   * It's not required to connect global state stores that are added via `addGlobalStore`;
-   * read-only access to global state stores is available by default.
+   * In order to assign a state, the state must be created and registered
+   * beforehand via stores added via `addStateStore` or `addGlobalStore` before they can be connected to the `Transformer`
    *
    * @param processorSupplier a function that generates a [[org.apache.kafka.streams.processor.Processor]]
    * @param stateStoreNames   the names of the state store used by the processor
@@ -358,8 +351,8 @@ class KStream[K, V](val inner: KStreamJ[K, V]) {
   /**
    * Group the records by their current key into a [[KGroupedStream]]
    * <p>
-   * The user can either supply the `Grouped` instance as an implicit in scope or she can also provide an implicit
-   * serdes that will be converted to a `Grouped` instance implicitly.
+   * The user can either supply the `Serialized` instance as an implicit in scope or she can also provide an implicit
+   * serdes that will be converted to a `Serialized` instance implicitly.
    * <p>
    * {{{
    * Example:
@@ -372,28 +365,28 @@ class KStream[K, V](val inner: KStreamJ[K, V]) {
    *     .leftJoin(userRegionsTable, (clicks: Long, region: String) => (if (region == null) "UNKNOWN" else region, clicks))
    *     .map((_, regionWithClicks) => regionWithClicks)
    *
-   *     // the groupByKey gets the Grouped instance through an implicit conversion of the
+   *     // the groupByKey gets the Serialized instance through an implicit conversion of the
    *     // serdes brought into scope through the import Serdes._ above
    *     .groupByKey
    *     .reduce(_ + _)
    *
-   * // Similarly you can create an implicit Grouped and it will be passed implicitly
+   * // Similarly you can create an implicit Serialized and it will be passed implicitly
    * // to the groupByKey call
    * }}}
    *
-   * @param grouped the instance of Grouped that gives the serdes
+   * @param serialized the instance of Serialized that gives the serdes
    * @return a [[KGroupedStream]] that contains the grouped records of the original [[KStream]]
    * @see `org.apache.kafka.streams.kstream.KStream#groupByKey`
    */
-  def groupByKey(implicit grouped: Grouped[K, V]): KGroupedStream[K, V] =
-    inner.groupByKey(grouped)
+  def groupByKey(implicit serialized: Serialized[K, V]): KGroupedStream[K, V] =
+    inner.groupByKey(serialized)
 
   /**
    * Group the records of this [[KStream]] on a new key that is selected using the provided key transformation function
-   * and the `Grouped` instance.
+   * and the `Serialized` instance.
    * <p>
-   * The user can either supply the `Grouped` instance as an implicit in scope or she can also provide an implicit
-   * serdes that will be converted to a `Grouped` instance implicitly.
+   * The user can either supply the `Serialized` instance as an implicit in scope or she can also provide an implicit
+   * serdes that will be converted to a `Serialized` instance implicitly.
    * <p>
    * {{{
    * Example:
@@ -408,7 +401,7 @@ class KStream[K, V](val inner: KStreamJ[K, V]) {
    * val wordCounts: KTable[String, Long] =
    *   textLines.flatMapValues(v => pattern.split(v.toLowerCase))
    *
-   *     // the groupBy gets the Grouped instance through an implicit conversion of the
+   *     // the groupBy gets the Serialized instance through an implicit conversion of the
    *     // serdes brought into scope through the import Serdes._ above
    *     .groupBy((k, v) => v)
    *
@@ -419,8 +412,8 @@ class KStream[K, V](val inner: KStreamJ[K, V]) {
    * @return a [[KGroupedStream]] that contains the grouped records of the original [[KStream]]
    * @see `org.apache.kafka.streams.kstream.KStream#groupBy`
    */
-  def groupBy[KR](selector: (K, V) => KR)(implicit grouped: Grouped[KR, V]): KGroupedStream[KR, V] =
-    inner.groupBy(selector.asKeyValueMapper, grouped)
+  def groupBy[KR](selector: (K, V) => KR)(implicit serialized: Serialized[KR, V]): KGroupedStream[KR, V] =
+    inner.groupBy(selector.asKeyValueMapper, serialized)
 
   /**
    * Join records of this stream with another [[KStream]]'s records using windowed inner equi join with

@@ -30,6 +30,8 @@ import org.apache.kafka.connect.runtime.WorkerConfig;
 import org.apache.kafka.connect.runtime.distributed.DistributedConfig;
 import org.apache.kafka.connect.runtime.isolation.Plugins;
 import org.apache.kafka.connect.runtime.standalone.StandaloneConfig;
+import org.apache.kafka.connect.util.Callback;
+import org.easymock.Capture;
 import org.easymock.EasyMock;
 import org.junit.After;
 import org.junit.Assert;
@@ -45,6 +47,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -59,14 +62,11 @@ public class RestServerTest {
     private Plugins plugins;
     private RestServer server;
 
-    protected static final String KAFKA_CLUSTER_ID = "Xbafgnagvar";
-
     @After
     public void tearDown() {
         server.stop();
     }
 
-    @SuppressWarnings("deprecation")
     private Map<String, String> baseWorkerProps() {
         Map<String, String> workerProps = new HashMap<>();
         workerProps.put(DistributedConfig.STATUS_STORAGE_TOPIC_CONFIG, "status-topic");
@@ -92,7 +92,6 @@ public class RestServerTest {
         checkCORSRequest("", "http://bar.com", null, null);
     }
 
-    @SuppressWarnings("deprecation")
     @Test
     public void testParseListeners() {
         // Use listeners field
@@ -112,7 +111,6 @@ public class RestServerTest {
         Assert.assertArrayEquals(new String[] {"http://my-hostname:8080"}, server.parseListeners().toArray());
     }
 
-    @SuppressWarnings("deprecation")
     @Test
     public void testAdvertisedUri() {
         // Advertised URI from listeenrs without protocol
@@ -165,7 +163,6 @@ public class RestServerTest {
         Map<String, String> configMap = new HashMap<>(baseWorkerProps());
         DistributedConfig workerConfig = new DistributedConfig(configMap);
 
-        EasyMock.expect(herder.kafkaClusterId()).andReturn(KAFKA_CLUSTER_ID);
         EasyMock.expect(herder.plugins()).andStubReturn(plugins);
         EasyMock.expect(plugins.newPlugins(Collections.emptyList(),
             workerConfig,
@@ -202,14 +199,18 @@ public class RestServerTest {
         workerProps.put(WorkerConfig.ACCESS_CONTROL_ALLOW_METHODS_CONFIG, method);
         WorkerConfig workerConfig = new DistributedConfig(workerProps);
 
-        EasyMock.expect(herder.kafkaClusterId()).andReturn(KAFKA_CLUSTER_ID);
         EasyMock.expect(herder.plugins()).andStubReturn(plugins);
-        EasyMock.expect(plugins.newPlugins(Collections.emptyList(),
+        EasyMock.expect(plugins.newPlugins(Collections.EMPTY_LIST,
                                            workerConfig,
                                            ConnectRestExtension.class))
-            .andStubReturn(Collections.emptyList());
+            .andStubReturn(Collections.EMPTY_LIST);
 
-        EasyMock.expect(herder.connectors()).andReturn(Arrays.asList("a", "b"));
+        final Capture<Callback<Collection<String>>> connectorsCallback = EasyMock.newCapture();
+        herder.connectors(EasyMock.capture(connectorsCallback));
+        PowerMock.expectLastCall().andAnswer(() -> {
+            connectorsCallback.getValue().onCompletion(null, Arrays.asList("a", "b"));
+            return null;
+        });
 
         PowerMock.replayAll();
 
@@ -256,13 +257,18 @@ public class RestServerTest {
         workerProps.put("offset.storage.file.filename", "/tmp");
         WorkerConfig workerConfig = new StandaloneConfig(workerProps);
 
-        EasyMock.expect(herder.kafkaClusterId()).andReturn(KAFKA_CLUSTER_ID);
-        EasyMock.expect(herder.plugins()).andStubReturn(plugins);
-        EasyMock.expect(plugins.newPlugins(Collections.emptyList(),
-            workerConfig,
-            ConnectRestExtension.class)).andStubReturn(Collections.emptyList());
 
-        EasyMock.expect(herder.connectors()).andReturn(Arrays.asList("a", "b"));
+        EasyMock.expect(herder.plugins()).andStubReturn(plugins);
+        EasyMock.expect(plugins.newPlugins(Collections.EMPTY_LIST,
+            workerConfig,
+            ConnectRestExtension.class)).andStubReturn(Collections.EMPTY_LIST);
+
+        final Capture<Callback<Collection<String>>> connectorsCallback = EasyMock.newCapture();
+        herder.connectors(EasyMock.capture(connectorsCallback));
+        PowerMock.expectLastCall().andAnswer(() -> {
+            connectorsCallback.getValue().onCompletion(null, Arrays.asList("a", "b"));
+            return null;
+        });
 
         PowerMock.replayAll();
 

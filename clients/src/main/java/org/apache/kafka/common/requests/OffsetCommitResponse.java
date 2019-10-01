@@ -17,113 +17,147 @@
 package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.message.OffsetCommitResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.protocol.types.ArrayOf;
+import org.apache.kafka.common.protocol.types.Field;
+import org.apache.kafka.common.protocol.types.Schema;
 import org.apache.kafka.common.protocol.types.Struct;
+import org.apache.kafka.common.utils.CollectionUtils;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
-/**
- * Possible error codes:
- *
- * UNKNOWN_TOPIC_OR_PARTITION (3)
- * REQUEST_TIMED_OUT (7)
- * OFFSET_METADATA_TOO_LARGE (12)
- * COORDINATOR_LOAD_IN_PROGRESS (14)
- * GROUP_COORDINATOR_NOT_AVAILABLE (15)
- * NOT_COORDINATOR (16)
- * ILLEGAL_GENERATION (22)
- * UNKNOWN_MEMBER_ID (25)
- * REBALANCE_IN_PROGRESS (27)
- * INVALID_COMMIT_OFFSET_SIZE (28)
- * TOPIC_AUTHORIZATION_FAILED (29)
- * GROUP_AUTHORIZATION_FAILED (30)
- */
+import static org.apache.kafka.common.protocol.CommonFields.ERROR_CODE;
+import static org.apache.kafka.common.protocol.CommonFields.PARTITION_ID;
+import static org.apache.kafka.common.protocol.CommonFields.THROTTLE_TIME_MS;
+import static org.apache.kafka.common.protocol.CommonFields.TOPIC_NAME;
+
 public class OffsetCommitResponse extends AbstractResponse {
 
-    private final OffsetCommitResponseData data;
+    private static final String RESPONSES_KEY_NAME = "responses";
 
-    public OffsetCommitResponse(OffsetCommitResponseData data) {
-        this.data = data;
+    // topic level fields
+    private static final String PARTITIONS_KEY_NAME = "partition_responses";
+
+    /**
+     * Possible error codes:
+     *
+     * UNKNOWN_TOPIC_OR_PARTITION (3)
+     * REQUEST_TIMED_OUT (7)
+     * OFFSET_METADATA_TOO_LARGE (12)
+     * COORDINATOR_LOAD_IN_PROGRESS (14)
+     * GROUP_COORDINATOR_NOT_AVAILABLE (15)
+     * NOT_COORDINATOR (16)
+     * ILLEGAL_GENERATION (22)
+     * UNKNOWN_MEMBER_ID (25)
+     * REBALANCE_IN_PROGRESS (27)
+     * INVALID_COMMIT_OFFSET_SIZE (28)
+     * TOPIC_AUTHORIZATION_FAILED (29)
+     * GROUP_AUTHORIZATION_FAILED (30)
+     */
+
+    private static final Schema OFFSET_COMMIT_RESPONSE_PARTITION_V0 = new Schema(
+            PARTITION_ID,
+            ERROR_CODE);
+
+    private static final Schema OFFSET_COMMIT_RESPONSE_TOPIC_V0 = new Schema(
+            TOPIC_NAME,
+            new Field(PARTITIONS_KEY_NAME, new ArrayOf(OFFSET_COMMIT_RESPONSE_PARTITION_V0)));
+
+    private static final Schema OFFSET_COMMIT_RESPONSE_V0 = new Schema(
+            new Field(RESPONSES_KEY_NAME, new ArrayOf(OFFSET_COMMIT_RESPONSE_TOPIC_V0)));
+
+
+    /* The response types for V0, V1 and V2 of OFFSET_COMMIT_REQUEST are the same. */
+    private static final Schema OFFSET_COMMIT_RESPONSE_V1 = OFFSET_COMMIT_RESPONSE_V0;
+    private static final Schema OFFSET_COMMIT_RESPONSE_V2 = OFFSET_COMMIT_RESPONSE_V0;
+
+    private static final Schema OFFSET_COMMIT_RESPONSE_V3 = new Schema(
+            THROTTLE_TIME_MS,
+            new Field(RESPONSES_KEY_NAME, new ArrayOf(OFFSET_COMMIT_RESPONSE_TOPIC_V0)));
+
+    /**
+     * The version number is bumped to indicate that on quota violation brokers send out responses before throttling.
+     */
+    private static final Schema OFFSET_COMMIT_RESPONSE_V4 = OFFSET_COMMIT_RESPONSE_V3;
+
+    public static Schema[] schemaVersions() {
+        return new Schema[] {OFFSET_COMMIT_RESPONSE_V0, OFFSET_COMMIT_RESPONSE_V1, OFFSET_COMMIT_RESPONSE_V2,
+            OFFSET_COMMIT_RESPONSE_V3, OFFSET_COMMIT_RESPONSE_V4};
     }
 
-    public OffsetCommitResponse(int requestThrottleMs, Map<TopicPartition, Errors> responseData) {
-        Map<String, OffsetCommitResponseData.OffsetCommitResponseTopic>
-                responseTopicDataMap = new HashMap<>();
-
-        for (Map.Entry<TopicPartition, Errors> entry : responseData.entrySet()) {
-            TopicPartition topicPartition = entry.getKey();
-            String topicName = topicPartition.topic();
-
-            OffsetCommitResponseData.OffsetCommitResponseTopic topic = responseTopicDataMap
-                    .getOrDefault(topicName, new OffsetCommitResponseData.OffsetCommitResponseTopic());
-
-            if (topic.name().equals("")) {
-                topic.setName(topicName);
-            }
-            topic.partitions().add(new OffsetCommitResponseData.OffsetCommitResponsePartition()
-                    .setErrorCode(entry.getValue().code())
-                    .setPartitionIndex(topicPartition.partition())
-            );
-            responseTopicDataMap.put(topicName, topic);
-        }
-
-        data = new OffsetCommitResponseData()
-                .setTopics(new ArrayList<>(responseTopicDataMap.values()))
-                .setThrottleTimeMs(requestThrottleMs);
-    }
+    private final Map<TopicPartition, Errors> responseData;
+    private final int throttleTimeMs;
 
     public OffsetCommitResponse(Map<TopicPartition, Errors> responseData) {
         this(DEFAULT_THROTTLE_TIME, responseData);
     }
 
+    public OffsetCommitResponse(int throttleTimeMs, Map<TopicPartition, Errors> responseData) {
+        this.throttleTimeMs = throttleTimeMs;
+        this.responseData = responseData;
+    }
+
     public OffsetCommitResponse(Struct struct) {
-        short latestVersion = (short) (OffsetCommitResponseData.SCHEMAS.length - 1);
-        this.data = new OffsetCommitResponseData(struct, latestVersion);
-    }
-
-    public OffsetCommitResponse(Struct struct, short version) {
-        this.data = new OffsetCommitResponseData(struct, version);
-    }
-
-    public OffsetCommitResponseData data() {
-        return data;
-    }
-
-    @Override
-    public Map<Errors, Integer> errorCounts() {
-        Map<TopicPartition, Errors> errorMap = new HashMap<>();
-        for (OffsetCommitResponseData.OffsetCommitResponseTopic topic : data.topics()) {
-            for (OffsetCommitResponseData.OffsetCommitResponsePartition partition : topic.partitions()) {
-                errorMap.put(new TopicPartition(topic.name(), partition.partitionIndex()),
-                        Errors.forCode(partition.errorCode()));
+        this.throttleTimeMs = struct.getOrElse(THROTTLE_TIME_MS, DEFAULT_THROTTLE_TIME);
+        responseData = new HashMap<>();
+        for (Object topicResponseObj : struct.getArray(RESPONSES_KEY_NAME)) {
+            Struct topicResponse = (Struct) topicResponseObj;
+            String topic = topicResponse.get(TOPIC_NAME);
+            for (Object partitionResponseObj : topicResponse.getArray(PARTITIONS_KEY_NAME)) {
+                Struct partitionResponse = (Struct) partitionResponseObj;
+                int partition = partitionResponse.get(PARTITION_ID);
+                Errors error = Errors.forCode(partitionResponse.get(ERROR_CODE));
+                responseData.put(new TopicPartition(topic, partition), error);
             }
-
         }
-        return errorCounts(errorMap);
-    }
-
-    public static OffsetCommitResponse parse(ByteBuffer buffer, short version) {
-        return new OffsetCommitResponse(ApiKeys.OFFSET_COMMIT.parseResponse(version, buffer), version);
     }
 
     @Override
     public Struct toStruct(short version) {
-        return data.toStruct(version);
-    }
+        Struct struct = new Struct(ApiKeys.OFFSET_COMMIT.responseSchema(version));
+        struct.setIfExists(THROTTLE_TIME_MS, throttleTimeMs);
 
-    @Override
-    public String toString() {
-        return data.toString();
+        Map<String, Map<Integer, Errors>> topicsData = CollectionUtils.groupDataByTopic(responseData);
+        List<Struct> topicArray = new ArrayList<>();
+        for (Map.Entry<String, Map<Integer, Errors>> entries: topicsData.entrySet()) {
+            Struct topicData = struct.instance(RESPONSES_KEY_NAME);
+            topicData.set(TOPIC_NAME, entries.getKey());
+            List<Struct> partitionArray = new ArrayList<>();
+            for (Map.Entry<Integer, Errors> partitionEntry : entries.getValue().entrySet()) {
+                Struct partitionData = topicData.instance(PARTITIONS_KEY_NAME);
+                partitionData.set(PARTITION_ID, partitionEntry.getKey());
+                partitionData.set(ERROR_CODE, partitionEntry.getValue().code());
+                partitionArray.add(partitionData);
+            }
+            topicData.set(PARTITIONS_KEY_NAME, partitionArray.toArray());
+            topicArray.add(topicData);
+        }
+        struct.set(RESPONSES_KEY_NAME, topicArray.toArray());
+
+        return struct;
     }
 
     @Override
     public int throttleTimeMs() {
-        return data.throttleTimeMs();
+        return throttleTimeMs;
+    }
+
+    public Map<TopicPartition, Errors> responseData() {
+        return responseData;
+    }
+
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        return errorCounts(responseData);
+    }
+
+    public static OffsetCommitResponse parse(ByteBuffer buffer, short version) {
+        return new OffsetCommitResponse(ApiKeys.OFFSET_COMMIT.parseResponse(version, buffer));
     }
 
     @Override

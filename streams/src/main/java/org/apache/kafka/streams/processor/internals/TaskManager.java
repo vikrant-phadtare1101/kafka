@@ -99,11 +99,11 @@ public class TaskManager {
             throw new IllegalStateException(logPrefix + "consumer has not been initialized while adding stream tasks. This should not happen.");
         }
 
+        changelogReader.reset();
         // do this first as we may have suspended standby tasks that
         // will become active or vice versa
         standby.closeNonAssignedSuspendedTasks(assignedStandbyTasks);
         active.closeNonAssignedSuspendedTasks(assignedActiveTasks);
-
         addStreamTasks(assignment);
         addStandbyTasks();
         // Pause all the partitions until the underlying state store is ready for all the active tasks.
@@ -240,14 +240,7 @@ public class TaskManager {
         final AtomicReference<RuntimeException> firstException = new AtomicReference<>(null);
 
         firstException.compareAndSet(null, active.suspend());
-        // close all restoring tasks as well and then reset changelog reader;
-        // for those restoring and still assigned tasks, they will be re-created
-        // in addStreamTasks.
-        firstException.compareAndSet(null, active.closeAllRestoringTasks());
-        changelogReader.reset();
-
         firstException.compareAndSet(null, standby.suspend());
-
         // remove the changelog partitions from restore consumer
         restoreConsumer.unsubscribe();
 
@@ -283,10 +276,6 @@ public class TaskManager {
         if (fatalException != null) {
             throw fatalException;
         }
-    }
-
-    AdminClient getAdminClient() {
-        return adminClient;
     }
 
     Set<TaskId> suspendedActiveTaskIds() {
@@ -330,11 +319,11 @@ public class TaskManager {
         active.updateRestored(restored);
 
         if (active.allTasksRunning()) {
-            final Set<TopicPartition> assignment = consumer.assignment();
+            Set<TopicPartition> assignment = consumer.assignment();
             log.trace("Resuming partitions {}", assignment);
             consumer.resume(assignment);
             assignStandbyPartitions();
-            return standby.allTasksRunning();
+            return true;
         }
         return false;
     }
@@ -375,12 +364,12 @@ public class TaskManager {
     }
 
     public void setAssignmentMetadata(final Map<TaskId, Set<TopicPartition>> activeTasks,
-                                      final Map<TaskId, Set<TopicPartition>> standbyTasks) {
+                               final Map<TaskId, Set<TopicPartition>> standbyTasks) {
         this.assignedActiveTasks = activeTasks;
         this.assignedStandbyTasks = standbyTasks;
     }
 
-    public void updateSubscriptionsFromAssignment(final List<TopicPartition> partitions) {
+    public void updateSubscriptionsFromAssignment(List<TopicPartition> partitions) {
         if (builder().sourceTopicPattern() != null) {
             final Set<String> assignedTopics = new HashSet<>();
             for (final TopicPartition topicPartition : partitions) {
@@ -395,7 +384,7 @@ public class TaskManager {
         }
     }
 
-    public void updateSubscriptionsFromMetadata(final Set<String> topics) {
+    public void updateSubscriptionsFromMetadata(Set<String> topics) {
         if (builder().sourceTopicPattern() != null) {
             final Collection<String> existingTopics = builder().subscriptionUpdates().getUpdates();
             if (!existingTopics.equals(topics)) {
@@ -409,15 +398,15 @@ public class TaskManager {
      *                               or if the task producer got fenced (EOS)
      */
     int commitAll() {
-        final int committed = active.commit();
+        int committed = active.commit();
         return committed + standby.commit();
     }
 
     /**
      * @throws TaskMigratedException if the task producer got fenced (EOS only)
      */
-    int process(final long now) {
-        return active.process(now);
+    int process() {
+        return active.process();
     }
 
     /**
@@ -431,8 +420,8 @@ public class TaskManager {
      * @throws TaskMigratedException if committing offsets failed (non-EOS)
      *                               or if the task producer got fenced (EOS)
      */
-    int maybeCommitActiveTasksPerUserRequested() {
-        return active.maybeCommitPerUserRequested();
+    int maybeCommitActiveTasks() {
+        return active.maybeCommit();
     }
 
     void maybePurgeCommitedRecords() {
