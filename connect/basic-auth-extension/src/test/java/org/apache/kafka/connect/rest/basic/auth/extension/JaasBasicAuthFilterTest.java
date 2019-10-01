@@ -59,7 +59,7 @@ public class JaasBasicAuthFilterTest {
     private UriInfo uriInfo;
 
     @Before
-    public void setup() {
+    public void setup() throws IOException {
         EasyMock.reset(requestContext);
     }
 

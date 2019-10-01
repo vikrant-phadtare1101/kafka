@@ -135,7 +135,7 @@ public class BufferPool {
                         } finally {
                             long endWaitNs = time.nanoseconds();
                             timeNs = Math.max(0L, endWaitNs - startWaitNs);
-                            recordWaitTime(timeNs);
+                            this.waitTime.record(timeNs, time.milliseconds());
                         }
 
                         if (waitingTimeElapsed) {
@@ -183,11 +183,6 @@ public class BufferPool {
             return safeAllocateByteBuffer(size);
         else
             return buffer;
-    }
-
-    // Protected for testing
-    protected void recordWaitTime(long timeNs) {
-        this.waitTime.record(timeNs, time.milliseconds());
     }
 
     /**

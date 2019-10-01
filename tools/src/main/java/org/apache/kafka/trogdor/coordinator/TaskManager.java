@@ -17,10 +17,8 @@
 
 package org.apache.kafka.trogdor.coordinator;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.LongNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.errors.InvalidRequestException;
@@ -34,10 +32,8 @@ import org.apache.kafka.trogdor.common.ThreadUtils;
 import org.apache.kafka.trogdor.rest.RequestConflictException;
 import org.apache.kafka.trogdor.rest.TaskDone;
 import org.apache.kafka.trogdor.rest.TaskPending;
-import org.apache.kafka.trogdor.rest.TaskRequest;
 import org.apache.kafka.trogdor.rest.TaskRunning;
 import org.apache.kafka.trogdor.rest.TaskState;
-import org.apache.kafka.trogdor.rest.TaskStateType;
 import org.apache.kafka.trogdor.rest.TaskStopping;
 import org.apache.kafka.trogdor.rest.TasksRequest;
 import org.apache.kafka.trogdor.rest.TasksResponse;
@@ -145,6 +141,13 @@ public final class TaskManager {
             Utils.join(nodeManagers.keySet(), ", "));
     }
 
+    enum ManagedTaskState {
+        PENDING,
+        RUNNING,
+        STOPPING,
+        DONE;
+    }
+
     class ManagedTask {
         /**
          * The task id.
@@ -152,13 +155,7 @@ public final class TaskManager {
         final private String id;
 
         /**
-         * The original task specification as submitted when the task was created.
-         */
-        final private TaskSpec originalSpec;
-
-        /**
-         * The effective task specification.
-         * The start time will be adjusted to reflect the time when the task was submitted.
+         * The task specification.
          */
         final private TaskSpec spec;
 
@@ -170,7 +167,7 @@ public final class TaskManager {
         /**
          * The task state.
          */
-        private TaskStateType state;
+        private ManagedTaskState state;
 
         /**
          * The time when the task was started, or -1 if the task has not been started.
@@ -203,10 +200,8 @@ public final class TaskManager {
          */
         private String error = "";
 
-        ManagedTask(String id, TaskSpec originalSpec, TaskSpec spec,
-                    TaskController controller, TaskStateType state) {
+        ManagedTask(String id, TaskSpec spec, TaskController controller, ManagedTaskState state) {
             this.id = id;
-            this.originalSpec = originalSpec;
             this.spec = spec;
             this.controller = controller;
             this.state = state;
@@ -302,13 +297,12 @@ public final class TaskManager {
      *
      * @param id                    The ID of the task to create.
      * @param spec                  The specification of the task to create.
-     * @throws RequestConflictException - if a task with the same ID but different spec exists
      */
     public void createTask(final String id, TaskSpec spec)
             throws Throwable {
         try {
             executor.submit(new CreateTask(id, spec)).get();
-        } catch (ExecutionException | JsonProcessingException e) {
+        } catch (ExecutionException e) {
             log.info("createTask(id={}, spec={}) error", id, spec, e);
             throw e.getCause();
         }
@@ -319,15 +313,11 @@ public final class TaskManager {
      */
     class CreateTask implements Callable<Void> {
         private final String id;
-        private final TaskSpec originalSpec;
         private final TaskSpec spec;
 
-        CreateTask(String id, TaskSpec spec) throws JsonProcessingException {
+        CreateTask(String id, TaskSpec spec) {
             this.id = id;
-            this.originalSpec = spec;
-            ObjectNode node = JsonUtil.JSON_SERDE.valueToTree(originalSpec);
-            node.set("startMs", new LongNode(Math.max(time.milliseconds(), originalSpec.startMs())));
-            this.spec = JsonUtil.JSON_SERDE.treeToValue(node, TaskSpec.class);
+            this.spec = spec;
         }
 
         @Override
@@ -337,11 +327,11 @@ public final class TaskManager {
             }
             ManagedTask task = tasks.get(id);
             if (task != null) {
-                if (!task.originalSpec.equals(originalSpec)) {
+                if (!task.spec.equals(spec)) {
                     throw new RequestConflictException("Task ID " + id + " already " +
-                        "exists, and has a different spec " + task.originalSpec);
+                        "exists, and has a different spec " + task.spec);
                 }
-                log.info("Task {} already exists with spec {}", id, originalSpec);
+                log.info("Task {} already exists with spec {}", id, spec);
                 return null;
             }
             TaskController controller = null;
@@ -354,13 +344,13 @@ public final class TaskManager {
             if (failure != null) {
                 log.info("Failed to create a new task {} with spec {}: {}",
                     id, spec, failure);
-                task = new ManagedTask(id, originalSpec, spec, null, TaskStateType.DONE);
+                task = new ManagedTask(id, spec, null, ManagedTaskState.DONE);
                 task.doneMs = time.milliseconds();
                 task.maybeSetError(failure);
                 tasks.put(id, task);
                 return null;
             }
-            task = new ManagedTask(id, originalSpec, spec, controller, TaskStateType.PENDING);
+            task = new ManagedTask(id, spec, controller, ManagedTaskState.PENDING);
             tasks.put(id, task);
             long delayMs = task.startDelayMs(time.milliseconds());
             task.startFuture = scheduler.schedule(executor, new RunTask(task), delayMs);
@@ -383,7 +373,7 @@ public final class TaskManager {
         @Override
         public Void call() throws Exception {
             task.clearStartFuture();
-            if (task.state != TaskStateType.PENDING) {
+            if (task.state != ManagedTaskState.PENDING) {
                 log.info("Can't start task {}, because it is already in state {}.",
                     task.id, task.state);
                 return null;
@@ -394,12 +384,12 @@ public final class TaskManager {
             } catch (Exception e) {
                 log.error("Unable to find nodes for task {}", task.id, e);
                 task.doneMs = time.milliseconds();
-                task.state = TaskStateType.DONE;
+                task.state = ManagedTaskState.DONE;
                 task.maybeSetError("Unable to find nodes for task: " + e.getMessage());
                 return null;
             }
             log.info("Running task {} on node(s): {}", task.id, Utils.join(nodeNames, ", "));
-            task.state = TaskStateType.RUNNING;
+            task.state = ManagedTaskState.RUNNING;
             task.startedMs = time.milliseconds();
             for (String workerName : nodeNames) {
                 long workerId = nextWorkerId++;
@@ -450,7 +440,7 @@ public final class TaskManager {
                     task.cancelled = true;
                     task.clearStartFuture();
                     task.doneMs = time.milliseconds();
-                    task.state = TaskStateType.DONE;
+                    task.state = ManagedTaskState.DONE;
                     log.info("Stopped pending task {}.", id);
                     break;
                 case RUNNING:
@@ -463,14 +453,14 @@ public final class TaskManager {
                             log.info("Task {} is now complete with error: {}", id, task.error);
                         }
                         task.doneMs = time.milliseconds();
-                        task.state = TaskStateType.DONE;
+                        task.state = ManagedTaskState.DONE;
                     } else {
                         for (Map.Entry<String, Long> entry : activeWorkerIds.entrySet()) {
                             nodeManagers.get(entry.getKey()).stopWorker(entry.getValue());
                         }
                         log.info("Cancelling task {} with worker(s) {}",
                             id, Utils.mkString(activeWorkerIds, "", "", " = ", ", "));
-                        task.state = TaskStateType.STOPPING;
+                        task.state = ManagedTaskState.STOPPING;
                     }
                     break;
                 case STOPPING:
@@ -595,14 +585,14 @@ public final class TaskManager {
         TreeMap<String, Long> activeWorkerIds = task.activeWorkerIds();
         if (activeWorkerIds.isEmpty()) {
             task.doneMs = time.milliseconds();
-            task.state = TaskStateType.DONE;
+            task.state = ManagedTaskState.DONE;
             log.info("{}: Task {} is now complete on {} with error: {}",
                 nodeName, task.id, Utils.join(task.workerIds.keySet(), ", "),
                 task.error.isEmpty() ? "(none)" : task.error);
-        } else if ((task.state == TaskStateType.RUNNING) && (!task.error.isEmpty())) {
+        } else if ((task.state == ManagedTaskState.RUNNING) && (!task.error.isEmpty())) {
             log.info("{}: task {} stopped with error {}.  Stopping worker(s): {}",
                 nodeName, task.id, task.error, Utils.mkString(activeWorkerIds, "{", "}", ": ", ", "));
-            task.state = TaskStateType.STOPPING;
+            task.state = ManagedTaskState.STOPPING;
             for (Map.Entry<String, Long> entry : activeWorkerIds.entrySet()) {
                 nodeManagers.get(entry.getKey()).stopWorker(entry.getValue());
             }
@@ -630,41 +620,11 @@ public final class TaskManager {
         public TasksResponse call() throws Exception {
             TreeMap<String, TaskState> states = new TreeMap<>();
             for (ManagedTask task : tasks.values()) {
-                if (request.matches(task.id, task.startedMs, task.doneMs, task.state)) {
+                if (request.matches(task.id, task.startedMs, task.doneMs)) {
                     states.put(task.id, task.taskState());
                 }
             }
             return new TasksResponse(states);
-        }
-    }
-
-    /**
-     * Get information about a single task being managed.
-     *
-     * Returns #{@code null} if the task does not exist
-     */
-    public TaskState task(TaskRequest request) throws ExecutionException, InterruptedException {
-        return executor.submit(new GetTaskState(request)).get();
-    }
-
-    /**
-     * Gets information about the tasks being managed.  Processed by the state change thread.
-     */
-    class GetTaskState implements Callable<TaskState> {
-        private final TaskRequest request;
-
-        GetTaskState(TaskRequest request) {
-            this.request = request;
-        }
-
-        @Override
-        public TaskState call() throws Exception {
-            ManagedTask task = tasks.get(request.taskId());
-            if (task == null) {
-                return null;
-            }
-
-            return task.taskState();
         }
     }
 

@@ -38,7 +38,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.TimeZone;
-import java.util.regex.Pattern;
 
 /**
  * Utility for converting from one Connect value to a different form. This is useful when the caller expects a value of a particular type
@@ -67,7 +66,7 @@ public class Values {
     private static final Schema MAP_SELECTOR_SCHEMA = SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.STRING_SCHEMA).build();
     private static final Schema STRUCT_SELECTOR_SCHEMA = SchemaBuilder.struct().build();
     private static final String TRUE_LITERAL = Boolean.TRUE.toString();
-    private static final String FALSE_LITERAL = Boolean.FALSE.toString();
+    private static final String FALSE_LITERAL = Boolean.TRUE.toString();
     private static final long MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
     private static final String NULL_VALUE = "null";
     private static final String ISO_8601_DATE_FORMAT_PATTERN = "yyyy-MM-dd";
@@ -84,10 +83,6 @@ public class Values {
     private static final int ISO_8601_DATE_LENGTH = ISO_8601_DATE_FORMAT_PATTERN.length();
     private static final int ISO_8601_TIME_LENGTH = ISO_8601_TIME_FORMAT_PATTERN.length() - 2; // subtract single quotes
     private static final int ISO_8601_TIMESTAMP_LENGTH = ISO_8601_TIMESTAMP_FORMAT_PATTERN.length() - 4; // subtract single quotes
-
-    private static final Pattern TWO_BACKSLASHES = Pattern.compile("\\\\");
-
-    private static final Pattern DOUBLEQOUTE = Pattern.compile("\"");
 
     /**
      * Convert the specified value to an {@link Type#BOOLEAN} value. The supplied schema is required if the value is a logical
@@ -488,7 +483,7 @@ public class Values {
                                 Calendar calendar = Calendar.getInstance(UTC);
                                 calendar.setTime((java.util.Date) value);
                                 calendar.set(Calendar.YEAR, 1970);
-                                calendar.set(Calendar.MONTH, 0); // Months are zero-based
+                                calendar.set(Calendar.MONTH, 1);
                                 calendar.set(Calendar.DAY_OF_MONTH, 1);
                                 return Time.toLogical(toSchema, (int) calendar.getTimeInMillis());
                             }
@@ -709,11 +704,10 @@ public class Values {
     }
 
     protected static String escape(String value) {
-        String replace1 = TWO_BACKSLASHES.matcher(value).replaceAll("\\\\\\\\");
-        return DOUBLEQOUTE.matcher(replace1).replaceAll("\\\\\"");
+        return value.replaceAll("\\\\", "\\\\\\\\").replaceAll("\"", "\\\\\"");
     }
 
-    public static DateFormat dateFormatFor(java.util.Date value) {
+    protected static DateFormat dateFormatFor(java.util.Date value) {
         if (value.getTime() < MILLIS_PER_DAY) {
             return new SimpleDateFormat(ISO_8601_TIME_FORMAT_PATTERN);
         }
@@ -872,7 +866,7 @@ public class Values {
                 }
             } else if (tokenLength == ISO_8601_TIMESTAMP_LENGTH) {
                 try {
-                    return new SchemaAndValue(Timestamp.SCHEMA, new SimpleDateFormat(ISO_8601_TIMESTAMP_FORMAT_PATTERN).parse(token));
+                    return new SchemaAndValue(Time.SCHEMA, new SimpleDateFormat(ISO_8601_TIMESTAMP_FORMAT_PATTERN).parse(token));
                 } catch (ParseException e) {
                     // not a valid date
                 }

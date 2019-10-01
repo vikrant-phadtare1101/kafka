@@ -52,7 +52,7 @@ object ToolsUtils {
         if (maxLengthOfDisplayName < mergedKeyName.length) {
           maxLengthOfDisplayName = mergedKeyName.length
         }
-        (mergedKeyName, value.metricValue)
+        (mergedKeyName, value.value())
     }
     println(s"\n%-${maxLengthOfDisplayName}s   %s".format("Metric Name", "Value"))
     sortedMap.foreach {

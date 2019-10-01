@@ -29,11 +29,12 @@ import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.integration.utils.EmbeddedKafkaCluster;
 import org.apache.kafka.streams.integration.utils.IntegrationTestUtils;
+import org.apache.kafka.streams.kstream.ForeachAction;
 import org.apache.kafka.streams.kstream.KTable;
-import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.processor.StateRestoreListener;
 import org.apache.kafka.streams.processor.WallclockTimestampExtractor;
 import org.apache.kafka.test.IntegrationTest;
+import org.apache.kafka.test.TestCondition;
 import org.apache.kafka.test.TestUtils;
 import org.junit.After;
 import org.junit.Before;
@@ -42,7 +43,7 @@ import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
-import java.time.Duration;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -50,6 +51,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 @Category({IntegrationTest.class})
 public class KTableSourceTopicRestartIntegrationTest {
@@ -78,6 +80,7 @@ public class KTableSourceTopicRestartIntegrationTest {
         STREAMS_CONFIG.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass().getName());
         STREAMS_CONFIG.put(StreamsConfig.STATE_DIR_CONFIG, TestUtils.tempDirectory().getPath());
         STREAMS_CONFIG.put(StreamsConfig.CACHE_MAX_BYTES_BUFFERING_CONFIG, 0);
+        STREAMS_CONFIG.put(IntegrationTestUtils.INTERNAL_LEAVE_GROUP_ON_CLOSE, true);
         STREAMS_CONFIG.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 5);
         STREAMS_CONFIG.put(StreamsConfig.DEFAULT_TIMESTAMP_EXTRACTOR_CLASS_CONFIG, WallclockTimestampExtractor.class);
 
@@ -90,15 +93,20 @@ public class KTableSourceTopicRestartIntegrationTest {
 
     @Before
     public void before() {
-        final KTable<String, String> kTable = streamsBuilder.table(SOURCE_TOPIC, Materialized.as("store"));
-        kTable.toStream().foreach(readKeyValues::put);
+        final KTable<String, String> kTable = streamsBuilder.table(SOURCE_TOPIC);
+        kTable.toStream().foreach(new ForeachAction<String, String>() {
+            @Override
+            public void apply(final String key, final String value) {
+                readKeyValues.put(key, value);
+            }
+        });
 
         expectedInitialResultsMap = createExpectedResultsMap("a", "b", "c");
         expectedResultsWithDataWrittenDuringRestoreMap = createExpectedResultsMap("a", "b", "c", "d", "f", "g", "h");
     }
 
     @After
-    public void after() throws Exception {
+    public void after() throws IOException {
         IntegrationTestUtils.purgeLocalStreamsState(STREAMS_CONFIG);
     }
 
@@ -120,12 +128,9 @@ public class KTableSourceTopicRestartIntegrationTest {
 
             produceKeyValues("f", "g", "h");
 
-            assertNumberValuesRead(
-                readKeyValues,
-                expectedResultsWithDataWrittenDuringRestoreMap,
-                "Table did not get all values after restart");
+            assertNumberValuesRead(readKeyValues, expectedResultsWithDataWrittenDuringRestoreMap, "Table did not get all values after restart");
         } finally {
-            streamsOne.close(Duration.ofSeconds(5));
+            streamsOne.close(5, TimeUnit.SECONDS);
         }
     }
 
@@ -148,12 +153,9 @@ public class KTableSourceTopicRestartIntegrationTest {
 
             produceKeyValues("f", "g", "h");
 
-            assertNumberValuesRead(
-                readKeyValues,
-                expectedResultsWithDataWrittenDuringRestoreMap,
-                "Table did not get all values after restart");
+            assertNumberValuesRead(readKeyValues, expectedResultsWithDataWrittenDuringRestoreMap, "Table did not get all values after restart");
         } finally {
-            streamsOne.close(Duration.ofSeconds(5));
+            streamsOne.close(5, TimeUnit.SECONDS);
         }
     }
 
@@ -177,7 +179,7 @@ public class KTableSourceTopicRestartIntegrationTest {
 
             assertNumberValuesRead(readKeyValues, expectedValues, "Table did not get all values after restart");
         } finally {
-            streamsOne.close(Duration.ofSeconds(5));
+            streamsOne.close(5, TimeUnit.SECONDS);
         }
     }
 
@@ -185,7 +187,12 @@ public class KTableSourceTopicRestartIntegrationTest {
                                         final Map<String, String> expectedMap,
                                         final String errorMessage) throws InterruptedException {
         TestUtils.waitForCondition(
-            () -> valueMap.equals(expectedMap),
+            new TestCondition() {
+                @Override
+                public boolean conditionMet() {
+                    return valueMap.equals(expectedMap);
+                }
+            },
             30 * 1000L,
             errorMessage);
     }
@@ -220,7 +227,7 @@ public class KTableSourceTopicRestartIntegrationTest {
                                    final long endingOffset) {
             try {
                 produceKeyValues("d");
-            } catch (final ExecutionException | InterruptedException e) {
+            } catch (ExecutionException | InterruptedException e) {
                 throw new RuntimeException(e);
             }
         }

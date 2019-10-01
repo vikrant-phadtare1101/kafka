@@ -38,9 +38,7 @@ import org.apache.kafka.streams.processor.ProcessorSupplier;
 import org.apache.kafka.streams.processor.StreamPartitioner;
 import org.apache.kafka.streams.processor.TimestampExtractor;
 import org.apache.kafka.streams.processor.To;
-import org.apache.kafka.streams.state.KeyValueBytesStoreSupplier;
 import org.apache.kafka.streams.state.KeyValueStore;
-import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.Stores;
 import org.apache.kafka.streams.test.ConsumerRecordFactory;
 import org.apache.kafka.test.MockProcessorSupplier;
@@ -56,10 +54,8 @@ import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
 
 public class ProcessorTopologyTest {
 
@@ -106,6 +102,8 @@ public class ProcessorTopologyTest {
 
     @Test
     public void testTopologyMetadata() {
+        topology.setApplicationId("X");
+
         topology.addSource("source-1", "topic-1");
         topology.addSource("source-2", "topic-2", "topic-3");
         topology.addProcessor("processor-1", new MockProcessorSupplier<>(), "source-1");
@@ -113,7 +111,7 @@ public class ProcessorTopologyTest {
         topology.addSink("sink-1", "topic-3", "processor-1");
         topology.addSink("sink-2", "topic-4", "processor-1", "processor-2");
 
-        final ProcessorTopology processorTopology = topology.getInternalBuilder("X").build();
+        final ProcessorTopology processorTopology = topology.getInternalBuilder().build();
 
         assertEquals(6, processorTopology.processors().size());
 
@@ -132,7 +130,7 @@ public class ProcessorTopologyTest {
 
     @Test
     public void testDrivingSimpleTopology() {
-        final int partition = 10;
+        int partition = 10;
         driver = new TopologyTestDriver(createSimpleTopology(partition), props);
         driver.pipeInput(recordFactory.create(INPUT_TOPIC_1, "key1", "value1"));
         assertNextOutputRecord(OUTPUT_TOPIC_1, "key1", "value1", partition);
@@ -198,7 +196,7 @@ public class ProcessorTopologyTest {
 
     @Test
     public void testDrivingStatefulTopology() {
-        final String storeName = "entries";
+        String storeName = "entries";
         driver = new TopologyTestDriver(createStatefulTopology(storeName), props);
         driver.pipeInput(recordFactory.create(INPUT_TOPIC_1, "key1", "value1"));
         driver.pipeInput(recordFactory.create(INPUT_TOPIC_1, "key2", "value2"));
@@ -397,58 +395,6 @@ public class ProcessorTopologyTest {
         assertNextOutputRecord(OUTPUT_TOPIC_1, "key3", "value3", HEADERS, 30L);
     }
 
-    @Test
-    public void statelessTopologyShouldNotHavePersistentStore() {
-        final TopologyWrapper topology = new TopologyWrapper();
-        final ProcessorTopology processorTopology = topology.getInternalBuilder("anyAppId").build();
-        assertFalse(processorTopology.hasPersistentLocalStore());
-        assertFalse(processorTopology.hasPersistentGlobalStore());
-    }
-
-    @Test
-    public void inMemoryStoreShouldNotResultInPersistentLocalStore() {
-        final ProcessorTopology processorTopology = createLocalStoreTopology(Stores.inMemoryKeyValueStore("my-store"));
-        assertFalse(processorTopology.hasPersistentLocalStore());
-    }
-
-    @Test
-    public void persistentLocalStoreShouldBeDetected() {
-        final ProcessorTopology processorTopology = createLocalStoreTopology(Stores.persistentKeyValueStore("my-store"));
-        assertTrue(processorTopology.hasPersistentLocalStore());
-    }
-
-    @Test
-    public void inMemoryStoreShouldNotResultInPersistentGlobalStore() {
-        final ProcessorTopology processorTopology = createGlobalStoreTopology(Stores.inMemoryKeyValueStore("my-store"));
-        assertFalse(processorTopology.hasPersistentGlobalStore());
-    }
-
-    @Test
-    public void persistentGlobalStoreShouldBeDetected() {
-        final ProcessorTopology processorTopology = createGlobalStoreTopology(Stores.persistentKeyValueStore("my-store"));
-        assertTrue(processorTopology.hasPersistentGlobalStore());
-    }
-
-    private ProcessorTopology createLocalStoreTopology(final KeyValueBytesStoreSupplier storeSupplier) {
-        final TopologyWrapper topology = new TopologyWrapper();
-        final String processor = "processor";
-        final StoreBuilder<KeyValueStore<String, String>> storeBuilder =
-                Stores.keyValueStoreBuilder(storeSupplier, Serdes.String(), Serdes.String());
-        topology.addSource("source", STRING_DESERIALIZER, STRING_DESERIALIZER, "topic")
-                .addProcessor(processor, () -> new StatefulProcessor(storeSupplier.name()), "source")
-                .addStateStore(storeBuilder, processor);
-        return topology.getInternalBuilder("anyAppId").build();
-    }
-
-    private ProcessorTopology createGlobalStoreTopology(final KeyValueBytesStoreSupplier storeSupplier) {
-        final TopologyWrapper topology = new TopologyWrapper();
-        final StoreBuilder<KeyValueStore<String, String>> storeBuilder =
-                Stores.keyValueStoreBuilder(storeSupplier, Serdes.String(), Serdes.String()).withLoggingDisabled();
-        topology.addGlobalStore(storeBuilder, "global", STRING_DESERIALIZER, STRING_DESERIALIZER, "topic", "processor",
-                define(new StatefulProcessor(storeSupplier.name())));
-        return topology.getInternalBuilder("anyAppId").build();
-    }
-
     private void assertNextOutputRecord(final String topic,
                                         final String key,
                                         final String value) {
@@ -498,7 +444,12 @@ public class ProcessorTopologyTest {
     }
 
     private StreamPartitioner<Object, Object> constantPartitioner(final Integer partition) {
-        return (topic, key, value, numPartitions) -> partition;
+        return new StreamPartitioner<Object, Object>() {
+            @Override
+            public Integer partition(final String topic, final Object key, final Object value, final int numPartitions) {
+                return partition;
+            }
+        };
     }
 
     private Topology createSimpleTopology(final int partition) {
@@ -583,7 +534,7 @@ public class ProcessorTopologyTest {
                 .addSink("sink-2", OUTPUT_TOPIC_2, "source-2");
     }
 
-    private Topology createSimpleMultiSourceTopology(final int partition) {
+    private Topology createSimpleMultiSourceTopology(int partition) {
         return topology.addSource("source-1", STRING_DESERIALIZER, STRING_DESERIALIZER, INPUT_TOPIC_1)
                 .addProcessor("processor-1", define(new ForwardingProcessor()), "source-1")
                 .addSink("sink-1", OUTPUT_TOPIC_1, constantPartitioner(partition), "processor-1")
@@ -666,7 +617,7 @@ public class ProcessorTopologyTest {
             this.numChildren = numChildren;
         }
 
-        @SuppressWarnings("deprecation") // need to test deprecated code until removed
+        @SuppressWarnings("deprecation")
         @Override
         public void process(final String key, final String value) {
             for (int i = 0; i != numChildren; ++i) {
@@ -686,7 +637,7 @@ public class ProcessorTopologyTest {
             this.numChildren = numChildren;
         }
 
-        @SuppressWarnings("deprecation") // need to test deprecated code until removed
+        @SuppressWarnings("deprecation")
         @Override
         public void process(final String key, final String value) {
             for (int i = 0; i != numChildren; ++i) {
@@ -717,10 +668,20 @@ public class ProcessorTopologyTest {
         public void process(final String key, final String value) {
             store.put(key, value);
         }
+
+        @Override
+        public void close() {
+            store.close();
+        }
     }
 
     private <K, V> ProcessorSupplier<K, V> define(final Processor<K, V> processor) {
-        return () -> processor;
+        return new ProcessorSupplier<K, V>() {
+            @Override
+            public Processor<K, V> get() {
+                return processor;
+            }
+        };
     }
 
     /**
@@ -732,13 +693,11 @@ public class ProcessorTopologyTest {
 
         @Override
         public long extract(final ConsumerRecord<Object, Object> record, final long previousTimestamp) {
-            if (record.value().toString().matches(".*@[0-9]+")) {
+            if (record.value().toString().matches(".*@[0-9]+"))
                 return Long.parseLong(record.value().toString().split("@")[1]);
-            }
 
-            if (record.timestamp() >= 0L) {
+            if (record.timestamp() >= 0L)
                 return record.timestamp();
-            }
 
             return DEFAULT_TIMESTAMP;
         }

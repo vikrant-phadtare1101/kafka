@@ -40,7 +40,7 @@ public class KStreamPeekTest {
 
     private final String topicName = "topic";
     private final ConsumerRecordFactory<Integer, String> recordFactory = new ConsumerRecordFactory<>(new IntegerSerializer(), new StringSerializer());
-    private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.Integer(), Serdes.String());
+    private final Properties props = StreamsTestUtils.topologyTestConfig(Serdes.Integer(), Serdes.String());
 
     @Test
     public void shouldObserveStreamElements() {
@@ -69,12 +69,17 @@ public class KStreamPeekTest {
         try {
             stream.peek(null);
             fail("expected null action to throw NPE");
-        } catch (final NullPointerException expected) {
+        } catch (NullPointerException expected) {
             // do nothing
         }
     }
 
     private static <K, V> ForeachAction<K, V> collect(final List<KeyValue<K, V>> into) {
-        return (key, value) -> into.add(new KeyValue<>(key, value));
+        return new ForeachAction<K, V>() {
+            @Override
+            public void apply(final K key, final V value) {
+                into.add(new KeyValue<>(key, value));
+            }
+        };
     }
 }

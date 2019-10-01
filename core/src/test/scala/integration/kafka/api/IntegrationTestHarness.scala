@@ -17,55 +17,42 @@
 
 package kafka.api
 
-import java.time.Duration
-
+import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.clients.consumer.{ConsumerConfig, KafkaConsumer}
 import kafka.utils.TestUtils
 import kafka.utils.Implicits._
 import java.util.Properties
 
-import org.apache.kafka.clients.producer.{KafkaProducer, ProducerConfig}
+import org.apache.kafka.clients.producer.KafkaProducer
 import kafka.server.KafkaConfig
 import kafka.integration.KafkaServerTestHarness
-import org.apache.kafka.clients.admin.{AdminClient, AdminClientConfig}
 import org.apache.kafka.common.network.{ListenerName, Mode}
-import org.apache.kafka.common.serialization.{ByteArrayDeserializer, ByteArraySerializer, Deserializer, Serializer}
 import org.junit.{After, Before}
 
-import scala.collection.mutable
+import scala.collection.mutable.Buffer
 
 /**
  * A helper class for writing integration tests that involve producers, consumers, and servers
  */
 abstract class IntegrationTestHarness extends KafkaServerTestHarness {
-  protected def brokerCount: Int
-  protected def logDirCount: Int = 1
 
-  val producerConfig = new Properties
-  val consumerConfig = new Properties
-  val adminClientConfig = new Properties
-  val serverConfig = new Properties
+  val producerCount: Int
+  val consumerCount: Int
+  val serverCount: Int
+  var logDirCount: Int = 1
+  lazy val producerConfig = new Properties
+  lazy val consumerConfig = new Properties
+  lazy val serverConfig = new Properties
 
-  private val consumers = mutable.Buffer[KafkaConsumer[_, _]]()
-  private val producers = mutable.Buffer[KafkaProducer[_, _]]()
-  private val adminClients = mutable.Buffer[AdminClient]()
+  val consumers = Buffer[KafkaConsumer[Array[Byte], Array[Byte]]]()
+  val producers = Buffer[KafkaProducer[Array[Byte], Array[Byte]]]()
 
   protected def interBrokerListenerName: ListenerName = listenerName
 
-  protected def modifyConfigs(props: Seq[Properties]): Unit = {
-    configureListeners(props)
-    props.foreach(_ ++= serverConfig)
-  }
-
-  override def generateConfigs: Seq[KafkaConfig] = {
-    val cfgs = TestUtils.createBrokerConfigs(brokerCount, zkConnect, interBrokerSecurityProtocol = Some(securityProtocol),
+  override def generateConfigs = {
+    val cfgs = TestUtils.createBrokerConfigs(serverCount, zkConnect, interBrokerSecurityProtocol = Some(securityProtocol),
       trustStoreFile = trustStoreFile, saslProperties = serverSaslProperties, logDirCount = logDirCount)
-    modifyConfigs(cfgs)
-    cfgs.map(KafkaConfig.fromProps)
-  }
-
-  protected def configureListeners(props: Seq[Properties]): Unit = {
-    props.foreach { config =>
+    cfgs.foreach { config =>
       config.remove(KafkaConfig.InterBrokerSecurityProtocolProp)
       config.setProperty(KafkaConfig.InterBrokerListenerNameProp, interBrokerListenerName.value)
 
@@ -76,36 +63,28 @@ abstract class IntegrationTestHarness extends KafkaServerTestHarness {
       config.setProperty(KafkaConfig.ListenersProp, listeners)
       config.setProperty(KafkaConfig.ListenerSecurityProtocolMapProp, listenerSecurityMap)
     }
+    cfgs.foreach(_ ++= serverConfig)
+    cfgs.map(KafkaConfig.fromProps)
   }
 
   @Before
   override def setUp() {
-    doSetup(createOffsetsTopic = true)
-  }
-
-  def doSetup(createOffsetsTopic: Boolean): Unit = {
-    // Generate client security properties before starting the brokers in case certs are needed
-    producerConfig ++= clientSecurityProps("producer")
-    consumerConfig ++= clientSecurityProps("consumer")
-    adminClientConfig ++= clientSecurityProps("adminClient")
-
+    val producerSecurityProps = clientSecurityProps("producer")
+    val consumerSecurityProps = clientSecurityProps("consumer")
     super.setUp()
+    producerConfig.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, classOf[org.apache.kafka.common.serialization.ByteArraySerializer])
+    producerConfig.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, classOf[org.apache.kafka.common.serialization.ByteArraySerializer])
+    producerConfig ++= producerSecurityProps
+    consumerConfig.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, classOf[org.apache.kafka.common.serialization.ByteArrayDeserializer])
+    consumerConfig.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, classOf[org.apache.kafka.common.serialization.ByteArrayDeserializer])
+    consumerConfig ++= consumerSecurityProps
+    for (_ <- 0 until producerCount)
+      producers += createProducer
+    for (_ <- 0 until consumerCount) {
+      consumers += createConsumer
+    }
 
-    producerConfig.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, brokerList)
-    producerConfig.putIfAbsent(ProducerConfig.ACKS_CONFIG, "-1")
-    producerConfig.putIfAbsent(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, classOf[ByteArraySerializer].getName)
-    producerConfig.putIfAbsent(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, classOf[ByteArraySerializer].getName)
-
-    consumerConfig.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokerList)
-    consumerConfig.putIfAbsent(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
-    consumerConfig.putIfAbsent(ConsumerConfig.GROUP_ID_CONFIG, "group")
-    consumerConfig.putIfAbsent(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, classOf[ByteArrayDeserializer].getName)
-    consumerConfig.putIfAbsent(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, classOf[ByteArrayDeserializer].getName)
-
-    adminClientConfig.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, brokerList)
-
-    if (createOffsetsTopic)
-      TestUtils.createOffsetsTopic(zkClient, servers)
+    TestUtils.createOffsetsTopic(zkClient, servers)
   }
 
   def clientSecurityProps(certAlias: String): Properties = {
@@ -113,50 +92,26 @@ abstract class IntegrationTestHarness extends KafkaServerTestHarness {
       clientSaslProperties)
   }
 
-  def createProducer[K, V](keySerializer: Serializer[K] = new ByteArraySerializer,
-                           valueSerializer: Serializer[V] = new ByteArraySerializer,
-                           configOverrides: Properties = new Properties): KafkaProducer[K, V] = {
-    val props = new Properties
-    props ++= producerConfig
-    props ++= configOverrides
-    val producer = new KafkaProducer[K, V](props, keySerializer, valueSerializer)
-    producers += producer
-    producer
+  def createProducer: KafkaProducer[Array[Byte], Array[Byte]] = {
+      TestUtils.createProducer(brokerList,
+                                  securityProtocol = this.securityProtocol,
+                                  trustStoreFile = this.trustStoreFile,
+                                  saslProperties = this.clientSaslProperties,
+                                  props = Some(producerConfig))
   }
 
-  def createConsumer[K, V](keyDeserializer: Deserializer[K] = new ByteArrayDeserializer,
-                           valueDeserializer: Deserializer[V] = new ByteArrayDeserializer,
-                           configOverrides: Properties = new Properties,
-                           configsToRemove: List[String] = List()): KafkaConsumer[K, V] = {
-    val props = new Properties
-    props ++= consumerConfig
-    props ++= configOverrides
-    configsToRemove.foreach(props.remove(_))
-    val consumer = new KafkaConsumer[K, V](props, keyDeserializer, valueDeserializer)
-    consumers += consumer
-    consumer
-  }
-
-  def createAdminClient(configOverrides: Properties = new Properties): AdminClient = {
-    val props = new Properties
-    props ++= adminClientConfig
-    props ++= configOverrides
-    val adminClient = AdminClient.create(props)
-    adminClients += adminClient
-    adminClient
+  def createConsumer: KafkaConsumer[Array[Byte], Array[Byte]] = {
+      TestUtils.createConsumer(brokerList,
+                                  securityProtocol = this.securityProtocol,
+                                  trustStoreFile = this.trustStoreFile,
+                                  saslProperties = this.clientSaslProperties,
+                                  props = Some(consumerConfig))
   }
 
   @After
   override def tearDown() {
-    producers.foreach(_.close(Duration.ZERO))
-    consumers.foreach(_.wakeup())
-    consumers.foreach(_.close(Duration.ZERO))
-    adminClients.foreach(_.close(Duration.ZERO))
-
-    producers.clear()
-    consumers.clear()
-    adminClients.clear()
-
+    producers.foreach(_.close())
+    consumers.foreach(_.close())
     super.tearDown()
   }
 

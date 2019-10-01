@@ -40,7 +40,7 @@ object ApiVersionsRequestTest {
 
 class ApiVersionsRequestTest extends BaseRequestTest {
 
-  override def brokerCount: Int = 1
+  override def numBrokers: Int = 1
 
   @Test
   def testApiVersionsRequest() {

@@ -26,6 +26,7 @@ import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsBuilder;
@@ -34,11 +35,11 @@ import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.errors.TopologyException;
 import org.apache.kafka.streams.integration.utils.EmbeddedKafkaCluster;
 import org.apache.kafka.streams.integration.utils.IntegrationTestUtils;
-import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Produced;
 import org.apache.kafka.test.IntegrationTest;
 import org.apache.kafka.test.StreamsTestUtils;
+import org.apache.kafka.test.TestCondition;
 import org.apache.kafka.test.TestUtils;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -58,7 +59,7 @@ import java.util.regex.Pattern;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.Assert.assertThat;
 import static org.junit.Assert.fail;
 
 @Category({IntegrationTest.class})
@@ -137,11 +138,9 @@ public class FineGrainedAutoResetIntegrationTest {
     @Before
     public void setUp() throws IOException {
 
-        final Properties props = new Properties();
-        props.put(StreamsConfig.CACHE_MAX_BYTES_BUFFERING_CONFIG, 0);
-        props.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 100);
-        props.put(ConsumerConfig.METADATA_MAX_AGE_CONFIG, "1000");
+        Properties props = new Properties();
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.put(IntegrationTestUtils.INTERNAL_LEAVE_GROUP_ON_CLOSE, true);
 
         streamsConfiguration = StreamsTestUtils.getStreamsConfig(
                 "testAutoOffsetId",
@@ -155,7 +154,7 @@ public class FineGrainedAutoResetIntegrationTest {
     }
 
     @Test
-    public void shouldOnlyReadRecordsWhereEarliestSpecifiedWithNoCommittedOffsetsWithGlobalAutoOffsetResetLatest() throws Exception {
+    public void shouldOnlyReadRecordsWhereEarliestSpecifiedWithNoCommittedOffsetsWithGlobalAutoOffsetResetLatest() throws  Exception {
         streamsConfiguration.put(StreamsConfig.consumerPrefix(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG), "latest");
 
         final List<String> expectedReceivedValues = Arrays.asList(topic1TestMessage, topic2TestMessage);
@@ -163,13 +162,13 @@ public class FineGrainedAutoResetIntegrationTest {
     }
 
     @Test
-    public void shouldOnlyReadRecordsWhereEarliestSpecifiedWithNoCommittedOffsetsWithDefaultGlobalAutoOffsetResetEarliest() throws Exception {
+    public void shouldOnlyReadRecordsWhereEarliestSpecifiedWithNoCommittedOffsetsWithDefaultGlobalAutoOffsetResetEarliest() throws  Exception {
         final List<String> expectedReceivedValues = Arrays.asList(topic1TestMessage, topic2TestMessage, topicYTestMessage, topicZTestMessage);
         shouldOnlyReadForEarliest("_1", TOPIC_1_1, TOPIC_2_1, TOPIC_A_1, TOPIC_C_1, TOPIC_Y_1, TOPIC_Z_1, OUTPUT_TOPIC_1, expectedReceivedValues);
     }
 
     @Test
-    public void shouldOnlyReadRecordsWhereEarliestSpecifiedWithInvalidCommittedOffsets() throws Exception {
+    public void shouldOnlyReadRecordsWhereEarliestSpecifiedWithInvalidCommittedOffsets() throws  Exception {
         commitInvalidOffsets();
 
         final List<String> expectedReceivedValues = Arrays.asList(topic1TestMessage, topic2TestMessage, topicYTestMessage, topicZTestMessage);
@@ -190,8 +189,8 @@ public class FineGrainedAutoResetIntegrationTest {
         final StreamsBuilder builder = new StreamsBuilder();
 
 
-        final KStream<String, String> pattern1Stream = builder.stream(Pattern.compile("topic-\\d" + topicSuffix), Consumed.with(Topology.AutoOffsetReset.EARLIEST));
-        final KStream<String, String> pattern2Stream = builder.stream(Pattern.compile("topic-[A-D]" + topicSuffix), Consumed.with(Topology.AutoOffsetReset.LATEST));
+        final KStream<String, String> pattern1Stream = builder.stream(Pattern.compile("topic-\\d" + topicSuffix), Consumed.<String, String>with(Topology.AutoOffsetReset.EARLIEST));
+        final KStream<String, String> pattern2Stream = builder.stream(Pattern.compile("topic-[A-D]" + topicSuffix), Consumed.<String, String>with(Topology.AutoOffsetReset.LATEST));
         final KStream<String, String> namedTopicsStream = builder.stream(Arrays.asList(topicY, topicZ));
 
         pattern1Stream.to(outputTopic, Produced.with(stringSerde, stringSerde));
@@ -226,9 +225,9 @@ public class FineGrainedAutoResetIntegrationTest {
     }
 
     private void commitInvalidOffsets() {
-        final KafkaConsumer<String, String> consumer = new KafkaConsumer<>(TestUtils.consumerConfig(
+        final KafkaConsumer consumer = new KafkaConsumer(TestUtils.consumerConfig(
             CLUSTER.bootstrapServers(),
-            "commit_invalid_offset_app", // Having a separate application id to avoid waiting for last test poll interval timeout.
+            streamsConfiguration.getProperty(StreamsConfig.APPLICATION_ID_CONFIG),
             StringDeserializer.class,
             StringDeserializer.class));
 
@@ -253,7 +252,6 @@ public class FineGrainedAutoResetIntegrationTest {
 
         try {
             builder.stream(Pattern.compile("topic-[A-D]_1"), Consumed.with(Topology.AutoOffsetReset.LATEST));
-            builder.build();
             fail("Should have thrown TopologyException");
         } catch (final TopologyException expected) {
             // do nothing
@@ -267,7 +265,6 @@ public class FineGrainedAutoResetIntegrationTest {
         builder.stream(Pattern.compile("topic-[A-D]_1"), Consumed.with(Topology.AutoOffsetReset.EARLIEST));
         try {
             builder.stream(Arrays.asList(TOPIC_A_1, TOPIC_Z_1), Consumed.with(Topology.AutoOffsetReset.LATEST));
-            builder.build();
             fail("Should have thrown TopologyException");
         } catch (final TopologyException expected) {
             // do nothing
@@ -276,13 +273,10 @@ public class FineGrainedAutoResetIntegrationTest {
 
     @Test
     public void shouldThrowStreamsExceptionNoResetSpecified() throws InterruptedException {
-        final Properties props = new Properties();
-        props.put(StreamsConfig.CACHE_MAX_BYTES_BUFFERING_CONFIG, 0);
-        props.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 100);
-        props.put(ConsumerConfig.METADATA_MAX_AGE_CONFIG, "1000");
+        Properties props = new Properties();
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "none");
 
-        final Properties localConfig = StreamsTestUtils.getStreamsConfig(
+        Properties localConfig = StreamsTestUtils.getStreamsConfig(
                 "testAutoOffsetWithNone",
                 CLUSTER.bootstrapServers(),
                 STRING_SERDE_CLASSNAME,
@@ -294,14 +288,20 @@ public class FineGrainedAutoResetIntegrationTest {
 
         exceptionStream.to(DEFAULT_OUTPUT_TOPIC, Produced.with(stringSerde, stringSerde));
 
-        final KafkaStreams streams = new KafkaStreams(builder.build(), localConfig);
+        KafkaStreams streams = new KafkaStreams(builder.build(), localConfig);
 
         final TestingUncaughtExceptionHandler uncaughtExceptionHandler = new TestingUncaughtExceptionHandler();
 
+        final TestCondition correctExceptionThrownCondition = new TestCondition() {
+            @Override
+            public boolean conditionMet() {
+                return uncaughtExceptionHandler.correctExceptionThrown;
+            }
+        };
+
         streams.setUncaughtExceptionHandler(uncaughtExceptionHandler);
         streams.start();
-        TestUtils.waitForCondition(() -> uncaughtExceptionHandler.correctExceptionThrown,
-                "The expected NoOffsetForPartitionException was never thrown");
+        TestUtils.waitForCondition(correctExceptionThrownCondition, "The expected NoOffsetForPartitionException was never thrown");
         streams.close();
     }
 
@@ -309,7 +309,7 @@ public class FineGrainedAutoResetIntegrationTest {
     private static final class TestingUncaughtExceptionHandler implements Thread.UncaughtExceptionHandler {
         boolean correctExceptionThrown = false;
         @Override
-        public void uncaughtException(final Thread t, final Throwable e) {
+        public void uncaughtException(Thread t, Throwable e) {
             assertThat(e.getClass().getSimpleName(), is("StreamsException"));
             assertThat(e.getCause().getClass().getSimpleName(), is("NoOffsetForPartitionException"));
             correctExceptionThrown = true;

@@ -16,60 +16,96 @@
  */
 package org.apache.kafka.common.requests;
 
-import org.apache.kafka.common.message.LeaveGroupRequestData;
-import org.apache.kafka.common.message.LeaveGroupResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.protocol.types.Schema;
 import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
 
+import static org.apache.kafka.common.protocol.CommonFields.GROUP_ID;
+import static org.apache.kafka.common.protocol.CommonFields.MEMBER_ID;
+
 public class LeaveGroupRequest extends AbstractRequest {
+    private static final Schema LEAVE_GROUP_REQUEST_V0 = new Schema(
+            GROUP_ID,
+            MEMBER_ID);
+
+    /* v1 request is the same as v0. Throttle time has been added to response */
+    private static final Schema LEAVE_GROUP_REQUEST_V1 = LEAVE_GROUP_REQUEST_V0;
+
+    /**
+     * The version number is bumped to indicate that on quota violation brokers send out responses before throttling.
+     */
+    private static final Schema LEAVE_GROUP_REQUEST_V2 = LEAVE_GROUP_REQUEST_V1;
+
+    public static Schema[] schemaVersions() {
+        return new Schema[] {LEAVE_GROUP_REQUEST_V0, LEAVE_GROUP_REQUEST_V1,
+            LEAVE_GROUP_REQUEST_V2};
+    }
 
     public static class Builder extends AbstractRequest.Builder<LeaveGroupRequest> {
+        private final String groupId;
+        private final String memberId;
 
-        private final LeaveGroupRequestData data;
-
-        public Builder(LeaveGroupRequestData data) {
+        public Builder(String groupId, String memberId) {
             super(ApiKeys.LEAVE_GROUP);
-            this.data = data;
+            this.groupId = groupId;
+            this.memberId = memberId;
         }
 
         @Override
         public LeaveGroupRequest build(short version) {
-            return new LeaveGroupRequest(data, version);
+            return new LeaveGroupRequest(groupId, memberId, version);
         }
 
         @Override
         public String toString() {
-            return data.toString();
+            StringBuilder bld = new StringBuilder();
+            bld.append("(type=LeaveGroupRequest").
+                append(", groupId=").append(groupId).
+                append(", memberId=").append(memberId).
+                append(")");
+            return bld.toString();
         }
     }
-    private final LeaveGroupRequestData data;
-    private final short version;
 
-    private LeaveGroupRequest(LeaveGroupRequestData data, short version) {
-        super(ApiKeys.LEAVE_GROUP, version);
-        this.data = data;
-        this.version = version;
+    private final String groupId;
+    private final String memberId;
+
+    private LeaveGroupRequest(String groupId, String memberId, short version) {
+        super(version);
+        this.groupId = groupId;
+        this.memberId = memberId;
     }
 
     public LeaveGroupRequest(Struct struct, short version) {
-        super(ApiKeys.LEAVE_GROUP, version);
-        this.data = new LeaveGroupRequestData(struct, version);
-        this.version = version;
-    }
-
-    public LeaveGroupRequestData data() {
-        return data;
+        super(version);
+        groupId = struct.get(GROUP_ID);
+        memberId = struct.get(MEMBER_ID);
     }
 
     @Override
     public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-        LeaveGroupResponseData response = new LeaveGroupResponseData();
-        if (version() >= 2) {
-            response.setThrottleTimeMs(throttleTimeMs);
+        short versionId = version();
+        switch (versionId) {
+            case 0:
+                return new LeaveGroupResponse(Errors.forException(e));
+            case 1:
+            case 2:
+                return new LeaveGroupResponse(throttleTimeMs, Errors.forException(e));
+            default:
+                throw new IllegalArgumentException(String.format("Version %d is not valid. Valid versions for %s are 0 to %d",
+                        versionId, this.getClass().getSimpleName(), ApiKeys.LEAVE_GROUP.latestVersion()));
         }
-        return new LeaveGroupResponse(response);
+    }
+
+    public String groupId() {
+        return groupId;
+    }
+
+    public String memberId() {
+        return memberId;
     }
 
     public static LeaveGroupRequest parse(ByteBuffer buffer, short version) {
@@ -78,6 +114,9 @@ public class LeaveGroupRequest extends AbstractRequest {
 
     @Override
     protected Struct toStruct() {
-        return data.toStruct(version);
+        Struct struct = new Struct(ApiKeys.LEAVE_GROUP.requestSchema(version()));
+        struct.set(GROUP_ID, groupId);
+        struct.set(MEMBER_ID, memberId);
+        return struct;
     }
 }

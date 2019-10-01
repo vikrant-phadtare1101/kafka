@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.streams.tests;
 
-import java.time.Duration;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -31,6 +30,7 @@ import org.apache.kafka.streams.kstream.ForeachAction;
 import org.apache.kafka.streams.kstream.KStream;
 
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 
 public class ShutdownDeadlockTest {
 
@@ -65,7 +65,7 @@ public class ShutdownDeadlockTest {
         Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
             @Override
             public void run() {
-                streams.close(Duration.ofSeconds(5));
+                streams.close(5, TimeUnit.SECONDS);
             }
         }));
 
@@ -84,7 +84,7 @@ public class ShutdownDeadlockTest {
         synchronized (this) {
             try {
                 wait();
-            } catch (final InterruptedException e) {
+            } catch (InterruptedException e) {
                 // ignored
             }
         }

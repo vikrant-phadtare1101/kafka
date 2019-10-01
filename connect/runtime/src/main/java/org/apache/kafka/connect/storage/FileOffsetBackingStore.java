@@ -25,11 +25,12 @@ import org.slf4j.LoggerFactory;
 
 import java.io.EOFException;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.ObjectOutputStream;
 import java.nio.ByteBuffer;
-import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -68,7 +69,7 @@ public class FileOffsetBackingStore extends MemoryOffsetBackingStore {
 
     @SuppressWarnings("unchecked")
     private void load() {
-        try (SafeObjectInputStream is = new SafeObjectInputStream(Files.newInputStream(file.toPath()))) {
+        try (SafeObjectInputStream is = new SafeObjectInputStream(new FileInputStream(file))) {
             Object obj = is.readObject();
             if (!(obj instanceof HashMap))
                 throw new ConnectException("Expected HashMap but found " + obj.getClass());
@@ -79,8 +80,8 @@ public class FileOffsetBackingStore extends MemoryOffsetBackingStore {
                 ByteBuffer value = (mapEntry.getValue() != null) ? ByteBuffer.wrap(mapEntry.getValue()) : null;
                 data.put(key, value);
             }
-        } catch (NoSuchFileException | EOFException e) {
-            // NoSuchFileException: Ignore, may be new.
+        } catch (FileNotFoundException | EOFException e) {
+            // FileNotFoundException: Ignore, may be new.
             // EOFException: Ignore, this means the file was missing or corrupt
         } catch (IOException | ClassNotFoundException e) {
             throw new ConnectException(e);
@@ -89,7 +90,7 @@ public class FileOffsetBackingStore extends MemoryOffsetBackingStore {
 
     @Override
     protected void save() {
-        try (ObjectOutputStream os = new ObjectOutputStream(Files.newOutputStream(file.toPath()))) {
+        try (ObjectOutputStream os = new ObjectOutputStream(new FileOutputStream(file))) {
             Map<byte[], byte[]> raw = new HashMap<>();
             for (Map.Entry<ByteBuffer, ByteBuffer> mapEntry : data.entrySet()) {
                 byte[] key = (mapEntry.getKey() != null) ? mapEntry.getKey().array() : null;

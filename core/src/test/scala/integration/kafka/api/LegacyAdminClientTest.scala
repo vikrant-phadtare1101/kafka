@@ -35,13 +35,11 @@ import scala.collection.JavaConverters._
 /**
   * Tests for the deprecated Scala AdminClient.
   */
-@deprecated("The Scala AdminClient has been deprecated in favour of org.apache.kafka.clients.admin.AdminClient",
-  since = "0.11.0")
 class LegacyAdminClientTest extends IntegrationTestHarness with Logging {
 
   val producerCount = 1
   val consumerCount = 2
-  val brokerCount = 3
+  val serverCount = 3
   val groupId = "my-test"
   val clientId = "consumer-498"
 
@@ -70,7 +68,7 @@ class LegacyAdminClientTest extends IntegrationTestHarness with Logging {
   override def setUp() {
     super.setUp()
     client = AdminClient.createSimplePlaintext(this.brokerList)
-    createTopic(topic, 2, brokerCount)
+    createTopic(topic, 2, serverCount)
   }
 
   @After
@@ -81,14 +79,13 @@ class LegacyAdminClientTest extends IntegrationTestHarness with Logging {
 
   @Test
   def testOffsetsForTimesWhenOffsetNotFound() {
-    val consumer = createConsumer()
+    val consumer = consumers.head
     assertNull(consumer.offsetsForTimes(Map(tp -> JLong.valueOf(0L)).asJava).get(tp))
   }
 
   @Test
   def testListGroups() {
-    val consumer = createConsumer()
-    subscribeAndWaitForAssignment(topic, consumer)
+    subscribeAndWaitForAssignment(topic, consumers.head)
 
     val groups = client.listAllGroupsFlattened
     assertFalse(groups.isEmpty)
@@ -99,8 +96,7 @@ class LegacyAdminClientTest extends IntegrationTestHarness with Logging {
 
   @Test
   def testListAllBrokerVersionInfo() {
-    val consumer = createConsumer()
-    subscribeAndWaitForAssignment(topic, consumer)
+    subscribeAndWaitForAssignment(topic, consumers.head)
 
     val brokerVersionInfos = client.listAllBrokerVersionInfo
     val brokers = brokerList.split(",")
@@ -115,8 +111,7 @@ class LegacyAdminClientTest extends IntegrationTestHarness with Logging {
 
   @Test
   def testGetConsumerGroupSummary() {
-    val consumer = createConsumer()
-    subscribeAndWaitForAssignment(topic, consumer)
+    subscribeAndWaitForAssignment(topic, consumers.head)
 
     val group = client.describeConsumerGroup(groupId)
     assertEquals("range", group.assignmentStrategy)
@@ -131,8 +126,7 @@ class LegacyAdminClientTest extends IntegrationTestHarness with Logging {
 
   @Test
   def testDescribeConsumerGroup() {
-    val consumer = createConsumer()
-    subscribeAndWaitForAssignment(topic, consumer)
+    subscribeAndWaitForAssignment(topic, consumers.head)
 
     val consumerGroupSummary = client.describeConsumerGroup(groupId)
     assertEquals(1, consumerGroupSummary.consumers.get.size)

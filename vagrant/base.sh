@@ -96,7 +96,6 @@ get_kafka() {
 # Install Kibosh
 apt-get update -y && apt-get install -y git cmake pkg-config libfuse-dev
 pushd /opt
-rm -rf /opt/kibosh
 git clone -q  https://github.com/confluentinc/kibosh.git
 pushd "/opt/kibosh"
 git reset --hard $KIBOSH_VERSION
@@ -127,14 +126,7 @@ get_kafka 1.0.2 2.11
 chmod a+rw /opt/kafka-1.0.2
 get_kafka 1.1.1 2.11
 chmod a+rw /opt/kafka-1.1.1
-get_kafka 2.0.1 2.12
-chmod a+rw /opt/kafka-2.0.1
-get_kafka 2.1.0 2.12
-chmod a+rw /opt/kafka-2.1.0
-get_kafka 2.1.1 2.12
-chmod a+rw /opt/kafka-2.1.1
-get_kafka 2.2.0 2.12
-chmod a+rw /opt/kafka-2.2.0
+
 
 # For EC2 nodes, we want to use /mnt, which should have the local disk. On local
 # VMs, we can just create it if it doesn't exist and use it like we'd use

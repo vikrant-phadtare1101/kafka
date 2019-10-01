@@ -16,9 +16,6 @@
  */
 package org.apache.kafka.clients.consumer.internals;
 
-import org.apache.kafka.common.utils.Time;
-import org.apache.kafka.common.utils.Timer;
-
 /**
  * A helper class for managing the heartbeat to the coordinator
  */
@@ -27,61 +24,45 @@ public final class Heartbeat {
     private final int heartbeatIntervalMs;
     private final int maxPollIntervalMs;
     private final long retryBackoffMs;
-    private final Time time;
-    private final Timer heartbeatTimer;
-    private final Timer sessionTimer;
-    private final Timer pollTimer;
 
-    private volatile long lastHeartbeatSend;
+    private volatile long lastHeartbeatSend; // volatile since it is read by metrics
+    private long lastHeartbeatReceive;
+    private long lastSessionReset;
+    private long lastPoll;
+    private boolean heartbeatFailed;
 
-    public Heartbeat(Time time,
-                     int sessionTimeoutMs,
+    public Heartbeat(int sessionTimeoutMs,
                      int heartbeatIntervalMs,
                      int maxPollIntervalMs,
                      long retryBackoffMs) {
         if (heartbeatIntervalMs >= sessionTimeoutMs)
             throw new IllegalArgumentException("Heartbeat must be set lower than the session timeout");
 
-        this.time = time;
         this.sessionTimeoutMs = sessionTimeoutMs;
         this.heartbeatIntervalMs = heartbeatIntervalMs;
         this.maxPollIntervalMs = maxPollIntervalMs;
         this.retryBackoffMs = retryBackoffMs;
-        this.heartbeatTimer = time.timer(heartbeatIntervalMs);
-        this.sessionTimer = time.timer(sessionTimeoutMs);
-        this.pollTimer = time.timer(maxPollIntervalMs);
-    }
-
-    private void update(long now) {
-        heartbeatTimer.update(now);
-        sessionTimer.update(now);
-        pollTimer.update(now);
     }
 
     public void poll(long now) {
-        update(now);
-        pollTimer.reset(maxPollIntervalMs);
+        this.lastPoll = now;
     }
 
     public void sentHeartbeat(long now) {
         this.lastHeartbeatSend = now;
-        update(now);
-        heartbeatTimer.reset(heartbeatIntervalMs);
+        this.heartbeatFailed = false;
     }
 
     public void failHeartbeat() {
-        update(time.milliseconds());
-        heartbeatTimer.reset(retryBackoffMs);
+        this.heartbeatFailed = true;
     }
 
-    public void receiveHeartbeat() {
-        update(time.milliseconds());
-        sessionTimer.reset(sessionTimeoutMs);
+    public void receiveHeartbeat(long now) {
+        this.lastHeartbeatReceive = now;
     }
 
     public boolean shouldHeartbeat(long now) {
-        update(now);
-        return heartbeatTimer.isExpired();
+        return timeToNextHeartbeat(now) == 0;
     }
     
     public long lastHeartbeatSend() {
@@ -89,34 +70,39 @@ public final class Heartbeat {
     }
 
     public long timeToNextHeartbeat(long now) {
-        update(now);
-        return heartbeatTimer.remainingMs();
+        long timeSinceLastHeartbeat = now - Math.max(lastHeartbeatSend, lastSessionReset);
+        final long delayToNextHeartbeat;
+        if (heartbeatFailed)
+            delayToNextHeartbeat = retryBackoffMs;
+        else
+            delayToNextHeartbeat = heartbeatIntervalMs;
+
+        if (timeSinceLastHeartbeat > delayToNextHeartbeat)
+            return 0;
+        else
+            return delayToNextHeartbeat - timeSinceLastHeartbeat;
     }
 
     public boolean sessionTimeoutExpired(long now) {
-        update(now);
-        return sessionTimer.isExpired();
+        return now - Math.max(lastSessionReset, lastHeartbeatReceive) > sessionTimeoutMs;
     }
 
-    public void resetTimeouts() {
-        update(time.milliseconds());
-        sessionTimer.reset(sessionTimeoutMs);
-        pollTimer.reset(maxPollIntervalMs);
-        heartbeatTimer.reset(heartbeatIntervalMs);
+    public long interval() {
+        return heartbeatIntervalMs;
     }
 
-    public void resetSessionTimeout() {
-        update(time.milliseconds());
-        sessionTimer.reset(sessionTimeoutMs);
+    public void resetTimeouts(long now) {
+        this.lastSessionReset = now;
+        this.lastPoll = now;
+        this.heartbeatFailed = false;
     }
 
     public boolean pollTimeoutExpired(long now) {
-        update(now);
-        return pollTimer.isExpired();
+        return now - lastPoll > maxPollIntervalMs;
     }
 
     public long lastPollTime() {
-        return pollTimer.currentTimeMs();
+        return lastPoll;
     }
 
 }

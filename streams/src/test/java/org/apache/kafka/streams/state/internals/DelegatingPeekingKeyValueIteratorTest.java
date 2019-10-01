@@ -16,9 +16,8 @@
  */
 package org.apache.kafka.streams.state.internals;
 
+import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KeyValue;
-import org.apache.kafka.streams.state.KeyValueStore;
-import org.apache.kafka.test.GenericInMemoryKeyValueStore;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -30,11 +29,11 @@ import static org.junit.Assert.assertTrue;
 public class DelegatingPeekingKeyValueIteratorTest {
 
     private final String name = "name";
-    private KeyValueStore<String, String> store;
+    private InMemoryKeyValueStore<String, String> store;
 
     @Before
     public void setUp() {
-        store = new GenericInMemoryKeyValueStore<>(name);
+        store = new InMemoryKeyValueStore<>(name, Serdes.String(), Serdes.String());
     }
 
     @Test
@@ -60,7 +59,7 @@ public class DelegatingPeekingKeyValueIteratorTest {
     @Test
     public void shouldPeekAndIterate() {
         final String[] kvs = {"a", "b", "c", "d", "e", "f"};
-        for (final String kv : kvs) {
+        for (String kv : kvs) {
             store.put(kv, kv);
         }
 

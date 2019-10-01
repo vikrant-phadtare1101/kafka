@@ -127,6 +127,7 @@ public abstract class AbstractProcessorContext implements InternalProcessorConte
         if (recordContext == null) {
             throw new IllegalStateException("This should not happen as partition() should only be called while a record is processed");
         }
+
         return recordContext.partition();
     }
 
@@ -138,6 +139,7 @@ public abstract class AbstractProcessorContext implements InternalProcessorConte
         if (recordContext == null) {
             throw new IllegalStateException("This should not happen as offset() should only be called while a record is processed");
         }
+
         return recordContext.offset();
     }
 
@@ -146,6 +148,7 @@ public abstract class AbstractProcessorContext implements InternalProcessorConte
         if (recordContext == null) {
             throw new IllegalStateException("This should not happen as headers() should only be called while a record is processed");
         }
+
         return recordContext.headers();
     }
 
@@ -157,6 +160,7 @@ public abstract class AbstractProcessorContext implements InternalProcessorConte
         if (recordContext == null) {
             throw new IllegalStateException("This should not happen as timestamp() should only be called while a record is processed");
         }
+
         return recordContext.timestamp();
     }
 
@@ -199,7 +203,7 @@ public abstract class AbstractProcessorContext implements InternalProcessorConte
     }
 
     @Override
-    public void initialize() {
+    public void initialized() {
         initialized = true;
     }
 

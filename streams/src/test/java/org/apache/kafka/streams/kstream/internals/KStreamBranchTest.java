@@ -39,21 +39,36 @@ public class KStreamBranchTest {
 
     private final String topicName = "topic";
     private final ConsumerRecordFactory<Integer, String> recordFactory = new ConsumerRecordFactory<>(new IntegerSerializer(), new StringSerializer());
-    private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.String(), Serdes.String());
+    private final Properties props = StreamsTestUtils.topologyTestConfig(Serdes.String(), Serdes.String());
 
     @SuppressWarnings("unchecked")
     @Test
     public void testKStreamBranch() {
         final StreamsBuilder builder = new StreamsBuilder();
 
-        final Predicate<Integer, String> isEven = (key, value) -> (key % 2) == 0;
-        final Predicate<Integer, String> isMultipleOfThree = (key, value) -> (key % 3) == 0;
-        final Predicate<Integer, String> isOdd = (key, value) -> (key % 2) != 0;
+        Predicate<Integer, String> isEven = new Predicate<Integer, String>() {
+            @Override
+            public boolean test(Integer key, String value) {
+                return (key % 2) == 0;
+            }
+        };
+        Predicate<Integer, String> isMultipleOfThree = new Predicate<Integer, String>() {
+            @Override
+            public boolean test(Integer key, String value) {
+                return (key % 3) == 0;
+            }
+        };
+        Predicate<Integer, String> isOdd = new Predicate<Integer, String>() {
+            @Override
+            public boolean test(Integer key, String value) {
+                return (key % 2) != 0;
+            }
+        };
 
         final int[] expectedKeys = new int[]{1, 2, 3, 4, 5, 6};
 
-        final KStream<Integer, String> stream;
-        final KStream<Integer, String>[] branches;
+        KStream<Integer, String> stream;
+        KStream<Integer, String>[] branches;
 
         stream = builder.stream(topicName, Consumed.with(Serdes.Integer(), Serdes.String()));
         branches = stream.branch(isEven, isMultipleOfThree, isOdd);
@@ -66,7 +81,7 @@ public class KStreamBranchTest {
         }
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            for (final int expectedKey : expectedKeys) {
+            for (int expectedKey : expectedKeys) {
                 driver.pipeInput(recordFactory.create(topicName, expectedKey, "V" + expectedKey));
             }
         }
@@ -77,14 +92,24 @@ public class KStreamBranchTest {
         assertEquals(2, processors.get(2).processed.size());
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     public void testTypeVariance() {
-        final Predicate<Number, Object> positive = (key, value) -> key.doubleValue() > 0;
+        Predicate<Number, Object> positive = new Predicate<Number, Object>() {
+            @Override
+            public boolean test(Number key, Object value) {
+                return key.doubleValue() > 0;
+            }
+        };
 
-        final Predicate<Number, Object> negative = (key, value) -> key.doubleValue() < 0;
+        Predicate<Number, Object> negative = new Predicate<Number, Object>() {
+            @Override
+            public boolean test(Number key, Object value) {
+                return key.doubleValue() < 0;
+            }
+        };
 
-        new StreamsBuilder()
+        @SuppressWarnings("unchecked")
+        final KStream<Integer, String>[] branches = new StreamsBuilder()
             .<Integer, String>stream("empty")
             .branch(positive, negative);
     }

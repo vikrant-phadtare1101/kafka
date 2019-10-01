@@ -22,16 +22,13 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 
-import java.time.Duration;
-
 import java.util.Collections;
-
 import java.util.Properties;
 
 public class Consumer extends ShutdownableThread {
     private final KafkaConsumer<Integer, String> consumer;
     private final String topic;
-    private final String topic1;
+
     public Consumer(String topic) {
         super("KafkaConsumerExample", false);
         Properties props = new Properties();
@@ -50,7 +47,7 @@ public class Consumer extends ShutdownableThread {
     @Override
     public void doWork() {
         consumer.subscribe(Collections.singletonList(this.topic));
-        ConsumerRecords<Integer, String> records = consumer.poll(Duration.ofSeconds(1));
+        ConsumerRecords<Integer, String> records = consumer.poll(1000);
         for (ConsumerRecord<Integer, String> record : records) {
             System.out.println("Received message: (" + record.key() + ", " + record.value() + ") at offset " + record.offset());
         }
@@ -61,10 +58,8 @@ public class Consumer extends ShutdownableThread {
         return null;
     }
 
-    
-   @Override
+    @Override
     public boolean isInterruptible() {
         return false;
-   
     }
 }

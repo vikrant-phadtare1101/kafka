@@ -40,10 +40,6 @@ public class AuthenticationException extends ApiException {
         super(message);
     }
 
-    public AuthenticationException(Throwable cause) {
-        super(cause);
-    }
-
     public AuthenticationException(String message, Throwable cause) {
         super(message, cause);
     }

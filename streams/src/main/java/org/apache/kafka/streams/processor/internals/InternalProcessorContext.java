@@ -47,9 +47,6 @@ public interface InternalProcessorContext extends ProcessorContext {
      */
     void setCurrentNode(ProcessorNode currentNode);
 
-    /**
-     * Get the current {@link ProcessorNode}
-     */
     ProcessorNode currentNode();
 
     /**
@@ -60,7 +57,7 @@ public interface InternalProcessorContext extends ProcessorContext {
     /**
      * Mark this context as being initialized
      */
-    void initialize();
+    void initialized();
 
     /**
      * Mark this context as being uninitialized

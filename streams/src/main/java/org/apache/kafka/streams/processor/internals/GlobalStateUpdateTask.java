@@ -21,7 +21,6 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.streams.errors.DeserializationExceptionHandler;
 import org.apache.kafka.streams.errors.StreamsException;
-import org.apache.kafka.streams.processor.internals.metrics.ThreadMetrics;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -70,12 +69,12 @@ public class GlobalStateUpdateTask implements GlobalStateMaintainer {
                     source,
                     deserializationExceptionHandler,
                     logContext,
-                    ThreadMetrics.skipRecordSensor(processorContext.metrics())
+                    processorContext.metrics().skippedRecordsSensor()
                 )
             );
         }
         initTopology();
-        processorContext.initialize();
+        processorContext.initialized();
         return stateMgr.checkpointed();
     }
 
@@ -106,7 +105,7 @@ public class GlobalStateUpdateTask implements GlobalStateMaintainer {
     }
 
     public void close() throws IOException {
-        stateMgr.close(true);
+        stateMgr.close(offsets);
     }
 
     private void initTopology() {

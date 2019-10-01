@@ -20,6 +20,7 @@ import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.streams.errors.StreamsException;
+import org.apache.kafka.streams.processor.internals.StreamsPartitionAssignor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,20 +48,20 @@ public class DefaultPartitionGrouper implements PartitionGrouper {
      * @param metadata      metadata of the consuming cluster
      * @return The map from generated task ids to the assigned partitions
      */
-    public Map<TaskId, Set<TopicPartition>> partitionGroups(final Map<Integer, Set<String>> topicGroups, final Cluster metadata) {
-        final Map<TaskId, Set<TopicPartition>> groups = new HashMap<>();
+    public Map<TaskId, Set<TopicPartition>> partitionGroups(Map<Integer, Set<String>> topicGroups, Cluster metadata) {
+        Map<TaskId, Set<TopicPartition>> groups = new HashMap<>();
 
-        for (final Map.Entry<Integer, Set<String>> entry : topicGroups.entrySet()) {
-            final Integer topicGroupId = entry.getKey();
-            final Set<String> topicGroup = entry.getValue();
+        for (Map.Entry<Integer, Set<String>> entry : topicGroups.entrySet()) {
+            Integer topicGroupId = entry.getKey();
+            Set<String> topicGroup = entry.getValue();
 
-            final int maxNumPartitions = maxNumPartitions(metadata, topicGroup);
+            int maxNumPartitions = maxNumPartitions(metadata, topicGroup);
 
             for (int partitionId = 0; partitionId < maxNumPartitions; partitionId++) {
-                final Set<TopicPartition> group = new HashSet<>(topicGroup.size());
+                Set<TopicPartition> group = new HashSet<>(topicGroup.size());
 
-                for (final String topic : topicGroup) {
-                    final List<PartitionInfo> partitions = metadata.partitionsForTopic(topic);
+                for (String topic : topicGroup) {
+                    List<PartitionInfo> partitions = metadata.partitionsForTopic(topic);
                     if (partitionId < partitions.size()) {
                         group.add(new TopicPartition(topic, partitionId));
                     }
@@ -75,18 +76,22 @@ public class DefaultPartitionGrouper implements PartitionGrouper {
     /**
      * @throws StreamsException if no metadata can be received for a topic
      */
-    protected int maxNumPartitions(final Cluster metadata, final Set<String> topics) {
+    protected int maxNumPartitions(Cluster metadata, Set<String> topics) {
         int maxNumPartitions = 0;
-        for (final String topic : topics) {
-            final List<PartitionInfo> partitions = metadata.partitionsForTopic(topic);
-            if (partitions.isEmpty()) {
-                log.error("Empty partitions for topic {}", topic);
-                throw new RuntimeException("Empty partitions for topic " + topic);
-            }
+        for (String topic : topics) {
+            List<PartitionInfo> partitions = metadata.partitionsForTopic(topic);
 
-            final int numPartitions = partitions.size();
-            if (numPartitions > maxNumPartitions) {
-                maxNumPartitions = numPartitions;
+            if (partitions.isEmpty()) {
+
+                log.warn("Skipping creating tasks for the topic group {} since topic {}'s metadata is not available yet;"
+                         + " no tasks for this topic group will be assigned to any client.\n"
+                         + " Make sure all supplied topics in the topology are created before starting"
+                         + " as this could lead to unexpected results", topics, topic);
+                return StreamsPartitionAssignor.NOT_AVAILABLE;
+            } else {
+                int numPartitions = partitions.size();
+                if (numPartitions > maxNumPartitions)
+                    maxNumPartitions = numPartitions;
             }
         }
         return maxNumPartitions;

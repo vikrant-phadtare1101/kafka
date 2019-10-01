@@ -24,7 +24,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 
 class TimestampExtractorTest {
 
-    void testExtractMetadataTimestamp(final TimestampExtractor extractor) {
+    void testExtractMetadataTimestamp(TimestampExtractor extractor) {
         final long metadataTimestamp = 42;
 
         final long timestamp = extractor.extract(
