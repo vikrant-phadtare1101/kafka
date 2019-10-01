@@ -20,9 +20,11 @@ import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.config.SslConfigs;
 import org.apache.kafka.common.config.internals.BrokerSecurityConfigs;
 import org.apache.kafka.common.memory.MemoryPool;
+import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
 import org.apache.kafka.common.security.auth.KafkaPrincipalBuilder;
 import org.apache.kafka.common.security.auth.SslAuthenticationContext;
+import org.apache.kafka.common.security.ssl.SslMetrics;
 import org.apache.kafka.common.security.ssl.SslPrincipalMapper;
 import org.apache.kafka.common.security.ssl.SslFactory;
 import org.apache.kafka.common.utils.Utils;
@@ -35,7 +37,6 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -49,25 +50,35 @@ public class SslChannelBuilder implements ChannelBuilder, ListenerReconfigurable
     private Mode mode;
     private Map<String, ?> configs;
     private SslPrincipalMapper sslPrincipalMapper;
+    private final Metrics metrics;
+    private final String metricsGroup;
 
     /**
-     * Constructs a SSL channel builder. ListenerName is provided only
+     * Constructs an SSL channel builder. ListenerName is provided only
      * for server channel builder and will be null for client channel builder.
      */
-    public SslChannelBuilder(Mode mode, ListenerName listenerName, boolean isInterBrokerListener) {
+    public SslChannelBuilder(Mode mode,
+                             ListenerName listenerName,
+                             boolean isInterBrokerListener,
+                             Metrics metrics,
+                             String metricsGroup) {
         this.mode = mode;
         this.listenerName = listenerName;
         this.isInterBrokerListener = isInterBrokerListener;
+        this.metrics = metrics;
+        this.metricsGroup = metricsGroup;
     }
 
     public void configure(Map<String, ?> configs) throws KafkaException {
         try {
             this.configs = configs;
-            @SuppressWarnings("unchecked")
-            List<String> sslPrincipalMappingRules = (List<String>) configs.get(BrokerSecurityConfigs.SSL_PRINCIPAL_MAPPING_RULES_CONFIG);
+            String sslPrincipalMappingRules = (String) configs.get(BrokerSecurityConfigs.SSL_PRINCIPAL_MAPPING_RULES_CONFIG);
             if (sslPrincipalMappingRules != null)
                 sslPrincipalMapper = SslPrincipalMapper.fromRules(sslPrincipalMappingRules);
-            this.sslFactory = new SslFactory(mode, null, isInterBrokerListener);
+            this.sslFactory = new SslFactory(mode,
+                new SslMetrics(metrics, metricsGroup),
+                null,
+                isInterBrokerListener);
             this.sslFactory.configure(this.configs);
         } catch (Exception e) {
             throw new KafkaException(e);
@@ -112,7 +123,9 @@ public class SslChannelBuilder implements ChannelBuilder, ListenerReconfigurable
 
     protected SslTransportLayer buildTransportLayer(SslFactory sslFactory, String id, SelectionKey key, String host) throws IOException {
         SocketChannel socketChannel = (SocketChannel) key.channel();
-        return SslTransportLayer.create(id, key, sslFactory.createSslEngine(host, socketChannel.socket().getPort()));
+        return SslTransportLayer.create(id, key,
+            sslFactory.createSslEngine(host, socketChannel.socket().getPort()),
+            sslFactory.sslMetrics());
     }
 
     /**
@@ -205,5 +218,13 @@ public class SslChannelBuilder implements ChannelBuilder, ListenerReconfigurable
         public boolean complete() {
             return true;
         }
+    }
+
+    Metrics metrics() {
+        return metrics;
+    }
+
+    String metricsGroup() {
+        return metricsGroup;
     }
 }

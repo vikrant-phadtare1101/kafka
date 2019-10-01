@@ -19,6 +19,7 @@ package org.apache.kafka.common.security.ssl;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.Reconfigurable;
 import org.apache.kafka.common.config.ConfigException;
+import org.apache.kafka.common.config.SecurityConfig;
 import org.apache.kafka.common.config.SslConfigs;
 import org.apache.kafka.common.config.internals.BrokerSecurityConfigs;
 import org.apache.kafka.common.network.Mode;
@@ -51,28 +52,39 @@ public class SslFactory implements Reconfigurable {
     private static final Logger log = LoggerFactory.getLogger(SslFactory.class);
 
     private final Mode mode;
+    private final SslMetrics sslMetrics;
     private final String clientAuthConfigOverride;
     private final boolean keystoreVerifiableUsingTruststore;
     private String endpointIdentification;
     private SslEngineBuilder sslEngineBuilder;
 
-    public SslFactory(Mode mode) {
-        this(mode, null, false);
+    /**
+     * Create an SslFactory.
+     *
+     * @param mode                                  Whether to use client or server mode.
+     * @param sslMetrics                            The metrics to use for the ssl connections we create, or null.
+     */
+    public SslFactory(Mode mode,
+                      SslMetrics sslMetrics) {
+        this(mode, sslMetrics, null, false);
     }
 
     /**
      * Create an SslFactory.
      *
      * @param mode                                  Whether to use client or server mode.
+     * @param sslMetrics                            The metrics to use for the ssl connections we create, or null.
      * @param clientAuthConfigOverride              The value to override ssl.client.auth with, or null
      *                                              if we don't want to override it.
      * @param keystoreVerifiableUsingTruststore     True if we should require the keystore to be verifiable
      *                                              using the truststore.
      */
     public SslFactory(Mode mode,
+                      SslMetrics sslMetrics,
                       String clientAuthConfigOverride,
                       boolean keystoreVerifiableUsingTruststore) {
         this.mode = mode;
+        this.sslMetrics = sslMetrics;
         this.clientAuthConfigOverride = clientAuthConfigOverride;
         this.keystoreVerifiableUsingTruststore = keystoreVerifiableUsingTruststore;
     }
@@ -87,6 +99,7 @@ public class SslFactory implements Reconfigurable {
         Map<String, Object> nextConfigs = new HashMap<>();
         copyMapEntries(nextConfigs, configs, SslConfigs.NON_RECONFIGURABLE_CONFIGS);
         copyMapEntries(nextConfigs, configs, SslConfigs.RECONFIGURABLE_CONFIGS);
+        copyMapEntry(nextConfigs, configs, SecurityConfig.SECURITY_PROVIDERS_CONFIG);
         if (clientAuthConfigOverride != null) {
             nextConfigs.put(BrokerSecurityConfigs.SSL_CLIENT_AUTH_CONFIG, clientAuthConfigOverride);
         }
@@ -114,7 +127,12 @@ public class SslFactory implements Reconfigurable {
 
     @Override
     public void reconfigure(Map<String, ?> newConfigs) throws KafkaException {
-        this.sslEngineBuilder = createNewSslEngineBuilder(newConfigs);
+        SslEngineBuilder newSslEngineBuilder = createNewSslEngineBuilder(newConfigs);
+        if (newSslEngineBuilder != this.sslEngineBuilder) {
+            this.sslEngineBuilder = newSslEngineBuilder;
+            log.info("Created new {} SSL engine builder with keystore {} truststore {}", mode,
+                    newSslEngineBuilder.keystore(), newSslEngineBuilder.truststore());
+        }
     }
 
     private SslEngineBuilder createNewSslEngineBuilder(Map<String, ?> newConfigs) {
@@ -191,9 +209,24 @@ public class SslFactory implements Reconfigurable {
                                               Map<K, ? extends V> srcMap,
                                               Set<K> keySet) {
         for (K k : keySet) {
-            if (srcMap.containsKey(k)) {
-                destMap.put(k, srcMap.get(k));
-            }
+            copyMapEntry(destMap, srcMap, k);
+        }
+    }
+
+    /**
+     * Copy entry from one map into another.
+     *
+     * @param destMap   The map to copy entries into.
+     * @param srcMap    The map to copy entries from.
+     * @param key       The entry with this key will be copied
+     * @param <K>       The map key type.
+     * @param <V>       The map value type.
+     */
+    private static <K, V> void copyMapEntry(Map<K, V> destMap,
+                                            Map<K, ? extends V> srcMap,
+                                            K key) {
+        if (srcMap.containsKey(key)) {
+            destMap.put(key, srcMap.get(key));
         }
     }
 
@@ -359,5 +392,9 @@ public class SslFactory implements Reconfigurable {
                 // ignore
             }
         }
+    }
+
+    public SslMetrics sslMetrics() {
+        return sslMetrics;
     }
 }
