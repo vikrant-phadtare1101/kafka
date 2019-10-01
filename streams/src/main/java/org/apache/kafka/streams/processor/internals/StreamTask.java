@@ -16,6 +16,19 @@
  */
 package org.apache.kafka.streams.processor.internals;
 
+import static java.lang.String.format;
+import static java.util.Collections.singleton;
+import static org.apache.kafka.streams.kstream.internals.metrics.Sensors.recordLatenessSensor;
+
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import org.apache.kafka.clients.consumer.CommitFailedException;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -28,9 +41,10 @@ import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.metrics.stats.Avg;
-import org.apache.kafka.common.metrics.stats.Count;
+import org.apache.kafka.common.metrics.stats.CumulativeCount;
 import org.apache.kafka.common.metrics.stats.Max;
 import org.apache.kafka.common.metrics.stats.Rate;
+import org.apache.kafka.common.metrics.stats.WindowedCount;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.errors.DeserializationExceptionHandler;
@@ -43,22 +57,9 @@ import org.apache.kafka.streams.processor.PunctuationType;
 import org.apache.kafka.streams.processor.Punctuator;
 import org.apache.kafka.streams.processor.TaskId;
 import org.apache.kafka.streams.processor.TimestampExtractor;
-import org.apache.kafka.streams.processor.internals.metrics.CumulativeCount;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
 import org.apache.kafka.streams.processor.internals.metrics.ThreadMetrics;
 import org.apache.kafka.streams.state.internals.ThreadCache;
-
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
-
-import static java.lang.String.format;
-import static java.util.Collections.singleton;
-import static org.apache.kafka.streams.kstream.internals.metrics.Sensors.recordLatenessSensor;
 
 /**
  * A StreamTask is associated with a {@link PartitionGroup}, and is assigned to a StreamThread for processing.
@@ -112,7 +113,7 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator 
             );
             taskCommitTimeSensor.add(
                 new MetricName("commit-rate", group, "The average number of occurrence of commit operation per second.", tagMap),
-                new Rate(TimeUnit.SECONDS, new Count())
+                new Rate(TimeUnit.SECONDS, new WindowedCount())
             );
             taskCommitTimeSensor.add(
                 new MetricName("commit-total", group, "The total number of occurrence of commit operations.", tagMap),
@@ -123,7 +124,7 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator 
             taskEnforcedProcessSensor = metrics.taskLevelSensor(taskName, "enforced-processing", Sensor.RecordingLevel.DEBUG, parent);
             taskEnforcedProcessSensor.add(
                     new MetricName("enforced-processing-rate", group, "The average number of occurrence of enforced-processing operation per second.", tagMap),
-                    new Rate(TimeUnit.SECONDS, new Count())
+                    new Rate(TimeUnit.SECONDS, new WindowedCount())
             );
             taskEnforcedProcessSensor.add(
                     new MetricName("enforced-processing-total", group, "The total number of occurrence of enforced-processing operations.", tagMap),
@@ -236,6 +237,22 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator 
     @Override
     public boolean initializeStateStores() {
         log.trace("Initializing state stores");
+
+        // Currently there is no easy way to tell the ProcessorStateManager to only restore up to
+        // a specific offset. In most cases this is fine. However, in optimized topologies we can
+        // have a source topic that also serves as a changelog, and in this case we want our active
+        // stream task to only play records up to the last consumer committed offset. Here we find
+        // partitions of topics that are both sources and changelogs and set the consumer committed
+        // offset via stateMgr as there is not a more direct route.
+        final Set<String> changelogTopicNames = new HashSet<>(topology.storeToChangelogTopic().values());
+        partitions.stream()
+            .filter(tp -> changelogTopicNames.contains(tp.topic()))
+            .forEach(tp -> {
+                final long offset = committedOffsetForPartition(tp);
+                stateMgr.putOffsetLimit(tp, offset);
+                log.trace("Updating store offset limits {} for changelog {}", offset, tp);
+            });
+
         registerStateStores();
 
         return changelogPartitions().isEmpty();
@@ -286,13 +303,10 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator 
             initializeTransactions();
             recordCollector.init(producer);
 
-            if (stateMgr.checkpoint != null) {
-                try {
-                    stateMgr.checkpoint.delete();
-                    stateMgr.checkpoint = null;
-                } catch (final IOException e) {
-                    throw new ProcessorStateException(String.format("%sError while deleting the checkpoint file", logPrefix), e);
-                }
+            try {
+                stateMgr.clearCheckpoints();
+            } catch (final IOException e) {
+                throw new ProcessorStateException(format("%sError while deleting the checkpoint file", logPrefix), e);
             }
         }
     }
@@ -463,7 +477,6 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator 
             final TopicPartition partition = entry.getKey();
             final long offset = entry.getValue() + 1;
             consumedOffsetsAndMetadata.put(partition, new OffsetAndMetadata(offset));
-            stateMgr.putOffsetLimit(partition, offset);
         }
 
         try {
@@ -487,13 +500,11 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator 
         taskMetrics.taskCommitTimeSensor.record(time.nanoseconds() - startNs);
     }
 
-    @Override
-    protected Map<TopicPartition, Long> activeTaskCheckpointableOffsets() {
-        final Map<TopicPartition, Long> checkpointableOffsets = recordCollector.offsets();
+    private Map<TopicPartition, Long> activeTaskCheckpointableOffsets() {
+        final Map<TopicPartition, Long> checkpointableOffsets = new HashMap<>(recordCollector.offsets());
         for (final Map.Entry<TopicPartition, Long> entry : consumedOffsets.entrySet()) {
             checkpointableOffsets.putIfAbsent(entry.getKey(), entry.getValue());
         }
-
         return checkpointableOffsets;
     }
 
@@ -801,14 +812,14 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator 
      * @throws TaskMigratedException if the task producer got fenced (EOS only)
      */
     public boolean maybePunctuateStreamTime() {
-        final long timestamp = partitionGroup.timestamp();
+        final long streamTime = partitionGroup.streamTime();
 
         // if the timestamp is not known yet, meaning there is not enough data accumulated
         // to reason stream partition time, then skip.
-        if (timestamp == RecordQueue.UNKNOWN) {
+        if (streamTime == RecordQueue.UNKNOWN) {
             return false;
         } else {
-            final boolean punctuated = streamTimePunctuationQueue.mayPunctuate(timestamp, PunctuationType.STREAM_TIME, this);
+            final boolean punctuated = streamTimePunctuationQueue.mayPunctuate(streamTime, PunctuationType.STREAM_TIME, this);
 
             if (punctuated) {
                 commitNeeded = true;
@@ -826,9 +837,9 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator 
      * @throws TaskMigratedException if the task producer got fenced (EOS only)
      */
     public boolean maybePunctuateSystemTime() {
-        final long timestamp = time.milliseconds();
+        final long systemTime = time.milliseconds();
 
-        final boolean punctuated = systemTimePunctuationQueue.mayPunctuate(timestamp, PunctuationType.WALL_CLOCK_TIME, this);
+        final boolean punctuated = systemTimePunctuationQueue.mayPunctuate(systemTime, PunctuationType.WALL_CLOCK_TIME, this);
 
         if (punctuated) {
             commitNeeded = true;
