@@ -16,7 +16,8 @@ package kafka.api
 
 import java.util.Properties
 
-import kafka.server.{DynamicConfig, KafkaConfig, KafkaServer}
+import kafka.server.{ConfigType, DynamicConfig, KafkaConfig, KafkaServer}
+import kafka.utils.TestUtils
 import org.apache.kafka.common.security.auth.KafkaPrincipal
 import org.apache.kafka.common.utils.Sanitizer
 import org.junit.Before
@@ -27,7 +28,7 @@ class ClientIdQuotaTest extends BaseQuotaTest {
   override def consumerClientId = "QuotasTestConsumer-!@#$%^&*()"
 
   @Before
-  override def setUp() {
+  override def setUp(): Unit = {
     this.serverConfig.setProperty(KafkaConfig.ProducerQuotaBytesPerSecondDefaultProp, defaultProducerQuota.toString)
     this.serverConfig.setProperty(KafkaConfig.ConsumerQuotaBytesPerSecondDefaultProp, defaultConsumerQuota.toString)
     super.setUp()
@@ -43,7 +44,7 @@ class ClientIdQuotaTest extends BaseQuotaTest {
         Map("user" -> "", "client-id" -> clientId)
       }
 
-      override def overrideQuotas(producerQuota: Long, consumerQuota: Long, requestQuota: Double) {
+      override def overrideQuotas(producerQuota: Long, consumerQuota: Long, requestQuota: Double): Unit = {
         val producerProps = new Properties()
         producerProps.put(DynamicConfig.Client.ProducerByteRateOverrideProp, producerQuota.toString)
         producerProps.put(DynamicConfig.Client.RequestPercentageOverrideProp, requestQuota.toString)
@@ -55,13 +56,17 @@ class ClientIdQuotaTest extends BaseQuotaTest {
         updateQuotaOverride(consumerClientId, consumerProps)
       }
 
-      override def removeQuotaOverrides() {
+      override def removeQuotaOverrides(): Unit = {
         val emptyProps = new Properties
         updateQuotaOverride(producerClientId, emptyProps)
         updateQuotaOverride(consumerClientId, emptyProps)
+        TestUtils.waitUntilTrue(
+          () => adminZkClient.fetchEntityConfig(ConfigType.Client, Sanitizer.sanitize(producerClientId)).isEmpty &&
+            adminZkClient.fetchEntityConfig(ConfigType.Client, Sanitizer.sanitize(consumerClientId)).isEmpty,
+          s"Quota for either $producerClientId or $consumerClientId was not removed.")
       }
 
-      private def updateQuotaOverride(clientId: String, properties: Properties) {
+      private def updateQuotaOverride(clientId: String, properties: Properties): Unit = {
         adminZkClient.changeClientIdConfig(Sanitizer.sanitize(clientId), properties)
       }
     }
