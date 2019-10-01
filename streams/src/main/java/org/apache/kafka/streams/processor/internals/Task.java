@@ -34,8 +34,6 @@ public interface Task {
      */
     boolean initializeStateStores();
 
-    boolean commitNeeded();
-
     void initializeTopology();
 
     void commit();

@@ -35,7 +35,6 @@ import org.apache.kafka.test.{TestUtils => JTestUtils}
 import org.easymock.EasyMock
 import org.junit.Assert._
 import org.junit.{After, Test}
-import org.scalatest.Assertions.intercept
 
 import scala.collection.JavaConverters._
 import scala.collection.{Map, immutable}
@@ -55,37 +54,20 @@ class AdminZkClientTest extends ZooKeeperTestHarness with Logging with RackAware
     val brokers = List(0, 1, 2, 3, 4)
     TestUtils.createBrokersInZk(zkClient, brokers)
 
-    val topicConfig = new Properties()
-
     // duplicate brokers
     intercept[InvalidReplicaAssignmentException] {
-      adminZkClient.createTopicWithAssignment("test", topicConfig, Map(0->Seq(0,0)))
+      adminZkClient.createOrUpdateTopicPartitionAssignmentPathInZK("test", Map(0->Seq(0,0)))
     }
 
     // inconsistent replication factor
     intercept[InvalidReplicaAssignmentException] {
-      adminZkClient.createTopicWithAssignment("test", topicConfig, Map(0->Seq(0,1), 1->Seq(0)))
-    }
-
-    // partitions should be 0-based
-    intercept[InvalidReplicaAssignmentException] {
-      adminZkClient.createTopicWithAssignment("test", topicConfig, Map(1->Seq(1,2), 2->Seq(1,2)))
-    }
-
-    // partitions should be 0-based and consecutive
-    intercept[InvalidReplicaAssignmentException] {
-      adminZkClient.createTopicWithAssignment("test", topicConfig, Map(0->Seq(1,2), 0->Seq(1,2), 3->Seq(1,2)))
-    }
-
-    // partitions should be 0-based and consecutive
-    intercept[InvalidReplicaAssignmentException] {
-      adminZkClient.createTopicWithAssignment("test", topicConfig, Map(-1->Seq(1,2), 1->Seq(1,2), 2->Seq(1,2), 4->Seq(1,2)))
+      adminZkClient.createOrUpdateTopicPartitionAssignmentPathInZK("test", Map(0->Seq(0,1), 1->Seq(0)))
     }
 
     // good assignment
     val assignment = Map(0 -> List(0, 1, 2),
                          1 -> List(1, 2, 3))
-    adminZkClient.createTopicWithAssignment("test", topicConfig, assignment)
+    adminZkClient.createOrUpdateTopicPartitionAssignmentPathInZK("test", assignment)
     val found = zkClient.getPartitionAssignmentForTopics(Set("test"))
     assertEquals(assignment, found("test"))
   }
@@ -121,10 +103,9 @@ class AdminZkClientTest extends ZooKeeperTestHarness with Logging with RackAware
       11 -> 1
     )
     val topic = "test"
-    val topicConfig = new Properties()
     TestUtils.createBrokersInZk(zkClient, List(0, 1, 2, 3, 4))
     // create the topic
-    adminZkClient.createTopicWithAssignment(topic, topicConfig, expectedReplicaAssignment)
+    adminZkClient.createOrUpdateTopicPartitionAssignmentPathInZK(topic, expectedReplicaAssignment)
     // create leaders for all partitions
     TestUtils.makeLeaderForPartition(zkClient, topic, leaderForPartitionMap, 1)
     val actualReplicaMap = leaderForPartitionMap.keys.map(p => p -> zkClient.getReplicasForPartition(new TopicPartition(topic, p))).toMap
@@ -134,7 +115,7 @@ class AdminZkClientTest extends ZooKeeperTestHarness with Logging with RackAware
 
     intercept[TopicExistsException] {
       // shouldn't be able to create a topic that already exists
-      adminZkClient.createTopicWithAssignment(topic, topicConfig, expectedReplicaAssignment)
+      adminZkClient.createOrUpdateTopicPartitionAssignmentPathInZK(topic, expectedReplicaAssignment)
     }
   }
 
@@ -157,14 +138,14 @@ class AdminZkClientTest extends ZooKeeperTestHarness with Logging with RackAware
     val topic = "test.topic"
 
     // simulate the ZK interactions that can happen when a topic is concurrently created by multiple processes
-    val zkMock: KafkaZkClient = EasyMock.createNiceMock(classOf[KafkaZkClient])
+    val zkMock = EasyMock.createNiceMock(classOf[KafkaZkClient])
     EasyMock.expect(zkMock.topicExists(topic)).andReturn(false)
-    EasyMock.expect(zkMock.getAllTopicsInCluster).andReturn(Set("some.topic", topic, "some.other.topic"))
+    EasyMock.expect(zkMock.getAllTopicsInCluster).andReturn(Seq("some.topic", topic, "some.other.topic"))
     EasyMock.replay(zkMock)
     val adminZkClient = new AdminZkClient(zkMock)
 
     intercept[TopicExistsException] {
-      adminZkClient.validateTopicCreate(topic, Map.empty, new Properties)
+      adminZkClient.validateCreateOrUpdateTopic(topic, Map.empty, new Properties, update = false)
     }
   }
 
@@ -186,7 +167,7 @@ class AdminZkClientTest extends ZooKeeperTestHarness with Logging with RackAware
       assertEquals(props, savedProps)
     }
 
-    TestUtils.assertConcurrent("Concurrent topic creation failed", Seq(() => createTopic, () => createTopic),
+    TestUtils.assertConcurrent("Concurrent topic creation failed", Seq(createTopic, createTopic),
       JTestUtils.DEFAULT_MAX_WAIT_MS.toInt)
   }
 
@@ -323,14 +304,14 @@ class AdminZkClientTest extends ZooKeeperTestHarness with Logging with RackAware
     zkClient.setOrCreateEntityConfigs(ConfigType.Client, clientId, props)
 
     val configInZk: Map[String, Properties] = adminZkClient.fetchAllEntityConfigs(ConfigType.Client)
-    assertEquals("Must have 1 overridden client config", 1, configInZk.size)
+    assertEquals("Must have 1 overriden client config", 1, configInZk.size)
     assertEquals(props, configInZk(clientId))
 
     // Test that the existing clientId overrides are read
     val server = TestUtils.createServer(KafkaConfig.fromProps(TestUtils.createBrokerConfig(0, zkConnect)))
     servers = Seq(server)
-    assertEquals(new Quota(1000, true), server.dataPlaneRequestProcessor.quotas.produce.quota("ANONYMOUS", clientId))
-    assertEquals(new Quota(2000, true), server.dataPlaneRequestProcessor.quotas.fetch.quota("ANONYMOUS", clientId))
+    assertEquals(new Quota(1000, true), server.apis.quotas.produce.quota("ANONYMOUS", clientId))
+    assertEquals(new Quota(2000, true), server.apis.quotas.fetch.quota("ANONYMOUS", clientId))
   }
 
   @Test

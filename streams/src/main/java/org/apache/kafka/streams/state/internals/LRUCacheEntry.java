@@ -19,16 +19,17 @@ package org.apache.kafka.streams.state.internals;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.streams.processor.internals.ProcessorRecordContext;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 /**
  * A cache entry
  */
-class LRUCacheEntry {
-    private final ContextualRecord record;
+class LRUCacheEntry extends ProcessorRecordContext {
+
+    private final byte[] value;
     private final long sizeBytes;
     private boolean isDirty;
-
 
     LRUCacheEntry(final byte[] value) {
         this(value, null, false, -1, -1, -1, "");
@@ -41,16 +42,15 @@ class LRUCacheEntry {
                   final long timestamp,
                   final int partition,
                   final String topic) {
-        final ProcessorRecordContext context = new ProcessorRecordContext(timestamp, offset, partition, topic, headers);
-
-        this.record = new ContextualRecord(
-            value,
-            context
-        );
-
+        super(timestamp, offset, partition, topic, headers);
+        this.value = value;
         this.isDirty = isDirty;
-        this.sizeBytes = 1 + // isDirty
-            record.residentMemorySizeEstimate();
+        this.sizeBytes = (value == null ? 0 : value.length) +
+                1 + // isDirty
+                8 + // timestamp
+                8 + // offset
+                4 + // partition
+                (topic == null ? 0 : topic.length());
     }
 
     void markClean() {
@@ -66,29 +66,25 @@ class LRUCacheEntry {
     }
 
     byte[] value() {
-        return record.value();
-    }
-
-    public ProcessorRecordContext context() {
-        return record.recordContext();
+        return value;
     }
 
     @Override
     public boolean equals(final Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
         final LRUCacheEntry that = (LRUCacheEntry) o;
-        return sizeBytes == that.sizeBytes &&
-            isDirty() == that.isDirty() &&
-            Objects.equals(record, that.record);
+        return timestamp() == that.timestamp() &&
+                offset() == that.offset() &&
+                partition() == that.partition() &&
+                Objects.equals(topic(), that.topic()) &&
+                Objects.equals(headers(), that.headers()) &&
+                Arrays.equals(this.value, that.value()) &&
+                this.isDirty == that.isDirty();
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(record, sizeBytes, isDirty());
+        return Objects.hash(timestamp(), offset(), topic(), partition(), headers(), value, isDirty);
     }
 }

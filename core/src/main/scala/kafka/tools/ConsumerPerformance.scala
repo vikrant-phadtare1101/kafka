@@ -17,20 +17,22 @@
 
 package kafka.tools
 
-import java.text.SimpleDateFormat
-import java.time.Duration
 import java.util
-import java.util.concurrent.atomic.AtomicLong
-import java.util.{Properties, Random}
 
-import com.typesafe.scalalogging.LazyLogging
-import kafka.utils.{CommandLineUtils, ToolsUtils}
+import scala.collection.JavaConverters._
+import java.util.concurrent.atomic.AtomicLong
+
 import org.apache.kafka.clients.consumer.{ConsumerRebalanceListener, KafkaConsumer}
 import org.apache.kafka.common.serialization.ByteArrayDeserializer
 import org.apache.kafka.common.utils.Utils
 import org.apache.kafka.common.{Metric, MetricName, TopicPartition}
+import kafka.utils.{CommandLineUtils, ToolsUtils}
+import java.util.{Collections, Properties, Random}
 
-import scala.collection.JavaConverters._
+import java.text.SimpleDateFormat
+
+import com.typesafe.scalalogging.LazyLogging
+
 import scala.collection.mutable
 
 /**
@@ -52,6 +54,7 @@ object ConsumerPerformance extends LazyLogging {
 
     var startMs, endMs = 0L
     val consumer = new KafkaConsumer[Array[Byte], Array[Byte]](config.props)
+    consumer.subscribe(Collections.singletonList(config.topic))
     startMs = System.currentTimeMillis
     consume(consumer, List(config.topic), config.numMessages, config.recordFetchTimeoutMs, config, totalMessagesRead, totalBytesRead, joinGroupTimeInMs, startMs)
     endMs = System.currentTimeMillis
@@ -118,12 +121,13 @@ object ConsumerPerformance extends LazyLogging {
       }})
 
     // Now start the benchmark
-    var currentTimeMillis = System.currentTimeMillis
-    var lastReportTime: Long = currentTimeMillis
-    var lastConsumedTime = currentTimeMillis
+    val startMs = System.currentTimeMillis
+    var lastReportTime: Long = startMs
+    var lastConsumedTime = System.currentTimeMillis
+    var currentTimeMillis = lastConsumedTime
 
     while (messagesRead < count && currentTimeMillis - lastConsumedTime <= timeout) {
-      val records = consumer.poll(Duration.ofMillis(100)).asScala
+      val records = consumer.poll(100).asScala
       currentTimeMillis = System.currentTimeMillis
       if (records.nonEmpty)
         lastConsumedTime = currentTimeMillis
@@ -250,9 +254,7 @@ object ConsumerPerformance extends LazyLogging {
       .ofType(classOf[Long])
       .defaultsTo(10000)
 
-    options = parser.parse(args: _*)
-
-    CommandLineUtils.printHelpAndExitIfNeeded(this, "This tool helps in performance test for the full zookeeper consumer")
+    val options = parser.parse(args: _*)
 
     CommandLineUtils.checkRequiredArgs(parser, options, topicOpt, numMessagesOpt, bootstrapServersOpt)
 

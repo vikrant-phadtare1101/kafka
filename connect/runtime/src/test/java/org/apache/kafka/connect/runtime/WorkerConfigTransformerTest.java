@@ -64,13 +64,13 @@ public class WorkerConfigTransformerTest {
     }
 
     @Test
-    public void testReplaceVariable() {
+    public void testReplaceVariable() throws Exception {
         Map<String, String> result = configTransformer.transform(MY_CONNECTOR, Collections.singletonMap(MY_KEY, "${test:testPath:testKey}"));
         assertEquals(TEST_RESULT, result.get(MY_KEY));
     }
 
     @Test
-    public void testReplaceVariableWithTTL() {
+    public void testReplaceVariableWithTTL() throws Exception {
         EasyMock.expect(worker.herder()).andReturn(herder);
 
         replayAll();
@@ -82,7 +82,7 @@ public class WorkerConfigTransformerTest {
     }
 
     @Test
-    public void testReplaceVariableWithTTLAndScheduleRestart() {
+    public void testReplaceVariableWithTTLAndScheduleRestart() throws Exception {
         EasyMock.expect(worker.herder()).andReturn(herder);
         EasyMock.expect(herder.restartConnector(1L, MY_CONNECTOR, null)).andReturn(requestId);
 
@@ -93,7 +93,7 @@ public class WorkerConfigTransformerTest {
     }
 
     @Test
-    public void testReplaceVariableWithTTLFirstCancelThenScheduleRestart() {
+    public void testReplaceVariableWithTTLFirstCancelThenScheduleRestart() throws Exception {
         EasyMock.expect(worker.herder()).andReturn(herder);
         EasyMock.expect(herder.restartConnector(1L, MY_CONNECTOR, null)).andReturn(requestId);
 

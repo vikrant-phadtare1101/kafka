@@ -35,10 +35,10 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.Exit;
 
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.Properties;
 
 import static net.sourceforge.argparse4j.impl.Arguments.store;
@@ -56,7 +56,7 @@ import static net.sourceforge.argparse4j.impl.Arguments.store;
  * If logging is left enabled, log output on stdout can be easily ignored by checking
  * whether a given line is valid JSON.
  */
-public class VerifiableProducer implements AutoCloseable {
+public class VerifiableProducer {
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final String topic;
@@ -164,8 +164,8 @@ public class VerifiableProducer implements AutoCloseable {
         parser.addArgument("--message-create-time")
                 .action(store())
                 .required(false)
-                .setDefault(-1L)
-                .type(Long.class)
+                .setDefault(-1)
+                .type(Integer.class)
                 .metavar("CREATETIME")
                 .dest("createTime")
                 .help("Send messages with creation time starting at the arguments value, in milliseconds since epoch");
@@ -198,9 +198,9 @@ public class VerifiableProducer implements AutoCloseable {
      * we use VerifiableProducer from the development tools package, and run it against 0.8.X.X kafka jars.
      * Since this method is not in Utils in the 0.8.X.X jars, we have to cheat a bit and duplicate.
      */
-    public static Properties loadProps(String filename) throws IOException {
+    public static Properties loadProps(String filename) throws IOException, FileNotFoundException {
         Properties props = new Properties();
-        try (InputStream propStream = Files.newInputStream(Paths.get(filename))) {
+        try (InputStream propStream = new FileInputStream(filename)) {
             props.load(propStream);
         }
         return props;
@@ -215,7 +215,7 @@ public class VerifiableProducer implements AutoCloseable {
         int throughput = res.getInt("throughput");
         String configFile = res.getString("producer.config");
         Integer valuePrefix = res.getInt("valuePrefix");
-        Long createTime = res.getLong("createTime");
+        Long createTime = (long) res.getInt("createTime");
         Integer repeatingKeys = res.getInt("repeatingKeys");
 
         if (createTime == -1L)
@@ -517,19 +517,22 @@ public class VerifiableProducer implements AutoCloseable {
             final long startMs = System.currentTimeMillis();
             ThroughputThrottler throttler = new ThroughputThrottler(producer.throughput, startMs);
 
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                // Trigger main thread to stop producing messages
-                producer.stopProducing = true;
+            Runtime.getRuntime().addShutdownHook(new Thread() {
+                @Override
+                public void run() {
+                    // Trigger main thread to stop producing messages
+                    producer.stopProducing = true;
 
-                // Flush any remaining messages
-                producer.close();
+                    // Flush any remaining messages
+                    producer.close();
 
-                // Print a summary
-                long stopMs = System.currentTimeMillis();
-                double avgThroughput = 1000 * ((producer.numAcked) / (double) (stopMs - startMs));
+                    // Print a summary
+                    long stopMs = System.currentTimeMillis();
+                    double avgThroughput = 1000 * ((producer.numAcked) / (double) (stopMs - startMs));
 
-                producer.printJson(new ToolData(producer.numSent, producer.numAcked, producer.throughput, avgThroughput));
-            }));
+                    producer.printJson(new ToolData(producer.numSent, producer.numAcked, producer.throughput, avgThroughput));
+                }
+            });
 
             producer.run(throttler);
         } catch (ArgumentParserException e) {

@@ -19,8 +19,6 @@ package kafka
 
 import java.io._
 import java.nio._
-import java.nio.channels.FileChannel
-import java.nio.file.StandardOpenOption
 
 /* This code tests the correct function of java's FileChannel.truncate--some platforms don't work. */
 object TestTruncate {
@@ -28,7 +26,7 @@ object TestTruncate {
   def main(args: Array[String]): Unit = {
     val name = File.createTempFile("kafka", ".test")
     name.deleteOnExit()
-    val file = FileChannel.open(name.toPath, StandardOpenOption.READ, StandardOpenOption.WRITE)
+    val file = new RandomAccessFile(name, "rw").getChannel()
     val buffer = ByteBuffer.allocate(12)
     buffer.putInt(4).putInt(4).putInt(4)
     buffer.rewind()

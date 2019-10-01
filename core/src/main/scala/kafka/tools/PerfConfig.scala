@@ -17,10 +17,11 @@
 
 package kafka.tools
 
-import kafka.utils.CommandDefaultOptions
+import joptsimple.OptionParser
 
 
-class PerfConfig(args: Array[String]) extends CommandDefaultOptions(args) {
+class PerfConfig(args: Array[String]) {
+  val parser = new OptionParser(false)
   val numMessagesOpt = parser.accepts("messages", "REQUIRED: The number of messages to send or consume")
     .withRequiredArg
     .describedAs("count")
@@ -37,4 +38,5 @@ class PerfConfig(args: Array[String]) extends CommandDefaultOptions(args) {
     .ofType(classOf[String])
     .defaultsTo("yyyy-MM-dd HH:mm:ss:SSS")
   val hideHeaderOpt = parser.accepts("hide-header", "If set, skips printing the header for the stats ")
+  val helpOpt = parser.accepts("help", "Print usage.")
 }

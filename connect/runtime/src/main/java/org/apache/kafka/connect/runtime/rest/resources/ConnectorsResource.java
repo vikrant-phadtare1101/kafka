@@ -19,7 +19,6 @@ package org.apache.kafka.connect.runtime.rest.resources;
 import com.fasterxml.jackson.core.type.TypeReference;
 
 import javax.ws.rs.core.HttpHeaders;
-import org.apache.kafka.connect.errors.NotFoundException;
 import org.apache.kafka.connect.runtime.ConnectorConfig;
 import org.apache.kafka.connect.runtime.Herder;
 import org.apache.kafka.connect.runtime.WorkerConfig;
@@ -51,10 +50,8 @@ import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriBuilder;
-import javax.ws.rs.core.UriInfo;
-
 import java.net.URI;
-import java.util.HashMap;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -85,39 +82,12 @@ public class ConnectorsResource {
 
     @GET
     @Path("/")
-    public Response listConnectors(
-        final @Context UriInfo uriInfo,
-        final @Context HttpHeaders headers
-    ) throws Throwable {
-        if (uriInfo.getQueryParameters().containsKey("expand")) {
-            Map<String, Map<String, Object>> out = new HashMap<>();
-            for (String connector : herder.connectors()) {
-                try {
-                    Map<String, Object> connectorExpansions = new HashMap<>();
-                    for (String expansion : uriInfo.getQueryParameters().get("expand")) {
-                        switch (expansion) {
-                            case "status":
-                                connectorExpansions.put("status", herder.connectorStatus(connector));
-                                break;
-                            case "info":
-                                connectorExpansions.put("info", herder.connectorInfo(connector));
-                                break;
-                            default:
-                                log.info("Ignoring unknown expanion type {}", expansion);
-                        }
-                    }
-                    out.put(connector, connectorExpansions);
-                } catch (NotFoundException e) {
-                    // this likely means that a connector has been removed while we look its info up
-                    // we can just not include this connector in the return entity
-                    log.debug("Unable to get connector info for {} on this worker", connector);
-                }
-
-            }
-            return Response.ok(out).build();
-        } else {
-            return Response.ok(herder.connectors()).build();
-        }
+    public Collection<String> listConnectors(final @QueryParam("forward") Boolean forward,
+                                             final @Context HttpHeaders headers) throws Throwable {
+        FutureCallback<Collection<String>> cb = new FutureCallback<>();
+        herder.connectors(cb);
+        return completeOrForwardRequest(cb, "/connectors", "GET", headers, null, new TypeReference<Collection<String>>() {
+        }, forward);
     }
 
     @POST

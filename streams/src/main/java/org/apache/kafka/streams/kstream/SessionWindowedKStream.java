@@ -26,8 +26,6 @@ import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.QueryableStoreType;
 import org.apache.kafka.streams.state.SessionStore;
 
-import java.time.Duration;
-
 /**
  * {@code SessionWindowedKStream} is an abstraction of a <i>windowed</i> record stream of {@link KeyValue} pairs.
  * It is an intermediate representation after a grouping and windowing of a {@link KStream} before an aggregation is applied to the
@@ -38,7 +36,7 @@ import java.time.Duration;
  * They have no fixed time boundaries, rather the size of the window is determined by the records.
  * Please see {@link SessionWindows} for more details.
  * <p>
- * New events are added to {@link SessionWindows} until their grace period ends (see {@link SessionWindows#grace(Duration)}).
+ * {@link SessionWindows} are retained until their retention time expires (c.f. {@link SessionWindows#until(long)}).
  *
  * Furthermore, updates are sent downstream into a windowed {@link KTable} changelog stream, where
  * "windowed" implies that the {@link KTable} key is a combined key of the original record key and a window ID.

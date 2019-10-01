@@ -80,10 +80,9 @@ public class TopicsSpec extends Message {
     public Map<String, PartitionsSpec> materialize() {
         HashMap<String, PartitionsSpec> all = new HashMap<>();
         for (Map.Entry<String, PartitionsSpec> entry : map.entrySet()) {
-            String topicName = entry.getKey();
-            PartitionsSpec partitions = entry.getValue();
-            for (String expandedTopicName : StringExpander.expand(topicName))
-                all.put(expandedTopicName, partitions);
+            for (String topicName : StringExpander.expand(entry.getKey())) {
+                all.put(topicName, entry.getValue());
+            }
         }
         return all;
     }

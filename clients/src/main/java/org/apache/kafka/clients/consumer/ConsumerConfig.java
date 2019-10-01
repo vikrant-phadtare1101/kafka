@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.clients.consumer;
 
-import org.apache.kafka.clients.ClientDnsLookup;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
@@ -52,16 +51,6 @@ public class ConsumerConfig extends AbstractConfig {
      */
     public static final String GROUP_ID_CONFIG = "group.id";
     private static final String GROUP_ID_DOC = "A unique string that identifies the consumer group this consumer belongs to. This property is required if the consumer uses either the group management functionality by using <code>subscribe(topic)</code> or the Kafka-based offset management strategy.";
-
-    /**
-     * <code>group.instance.id</code>
-     */
-    public static final String GROUP_INSTANCE_ID_CONFIG = "group.instance.id";
-    private static final String GROUP_INSTANCE_ID_DOC = "A unique identifier of the consumer instance provided by end user. " +
-            "Only non-empty strings are permitted. If set, the consumer is treated as a static member, " +
-            "which means that only one instance with this ID is allowed in the consumer group at any time. " +
-            "This can be used in combination with a larger session timeout to avoid group rebalances caused by transient unavailability " +
-            "(e.g. process restarts). If not set, the consumer will join the group as a dynamic member, which is the traditional behavior.";
 
     /** <code>max.poll.records</code> */
     public static final String MAX_POLL_RECORDS_CONFIG = "max.poll.records";
@@ -99,9 +88,6 @@ public class ConsumerConfig extends AbstractConfig {
      * <code>bootstrap.servers</code>
      */
     public static final String BOOTSTRAP_SERVERS_CONFIG = CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG;
-
-    /** <code>client.dns.lookup</code> */
-    public static final String CLIENT_DNS_LOOKUP_CONFIG = CommonClientConfigs.CLIENT_DNS_LOOKUP_CONFIG;
 
     /**
      * <code>enable.auto.commit</code>
@@ -177,11 +163,6 @@ public class ConsumerConfig extends AbstractConfig {
     public static final String CLIENT_ID_CONFIG = CommonClientConfigs.CLIENT_ID_CONFIG;
 
     /**
-     * <code>client.rack</code>
-     */
-    public static final String CLIENT_RACK_CONFIG = CommonClientConfigs.CLIENT_RACK_CONFIG;
-
-    /**
      * <code>reconnect.backoff.ms</code>
      */
     public static final String RECONNECT_BACKOFF_MS_CONFIG = CommonClientConfigs.RECONNECT_BACKOFF_MS_CONFIG;
@@ -250,8 +231,8 @@ public class ConsumerConfig extends AbstractConfig {
 
     /** <code>exclude.internal.topics</code> */
     public static final String EXCLUDE_INTERNAL_TOPICS_CONFIG = "exclude.internal.topics";
-    private static final String EXCLUDE_INTERNAL_TOPICS_DOC = "Whether internal topics matching a subscribed pattern should " +
-            "be excluded from the subscription. It is always possible to explicitly subscribe to an internal topic.";
+    private static final String EXCLUDE_INTERNAL_TOPICS_DOC = "Whether records from internal topics (such as offsets) should be exposed to the consumer. "
+                                                            + "If set to <code>true</code> the only way to receive records from an internal topic is subscribing to it.";
     public static final boolean DEFAULT_EXCLUDE_INTERNAL_TOPICS = true;
 
     /**
@@ -272,18 +253,10 @@ public class ConsumerConfig extends AbstractConfig {
             " which have been aborted. Non-transactional messages will be returned unconditionally in either mode.</p> <p>Messages will always be returned in offset order. Hence, in " +
             " <code>read_committed</code> mode, consumer.poll() will only return messages up to the last stable offset (LSO), which is the one less than the offset of the first open transaction." +
             " In particular any messages appearing after messages belonging to ongoing transactions will be withheld until the relevant transaction has been completed. As a result, <code>read_committed</code>" +
-            " consumers will not be able to read up to the high watermark when there are in flight transactions.</p><p> Further, when in <code>read_committed</code> the seekToEnd method will" +
+            " consumers will not be able to read up to the high watermark when there are in flight transactions.</p><p> Further, when in <code>read_committed</mode> the seekToEnd method will" +
             " return the LSO";
 
     public static final String DEFAULT_ISOLATION_LEVEL = IsolationLevel.READ_UNCOMMITTED.toString().toLowerCase(Locale.ROOT);
-
-    /** <code>allow.auto.create.topics</code> */
-    public static final String ALLOW_AUTO_CREATE_TOPICS_CONFIG = "allow.auto.create.topics";
-    private static final String ALLOW_AUTO_CREATE_TOPICS_DOC = "Allow automatic topic creation on the broker when" +
-            " subscribing to or assigning a topic. A topic being subscribed to will be automatically created only if the" +
-            " broker allows for it using `auto.create.topics.enable` broker configuration. This configuration must" +
-            " be set to `false` when using brokers older than 0.11.0";
-    public static final boolean DEFAULT_ALLOW_AUTO_CREATE_TOPICS = true;
     
     static {
         CONFIG = new ConfigDef().define(BOOTSTRAP_SERVERS_CONFIG,
@@ -292,20 +265,7 @@ public class ConsumerConfig extends AbstractConfig {
                                         new ConfigDef.NonNullValidator(),
                                         Importance.HIGH,
                                         CommonClientConfigs.BOOTSTRAP_SERVERS_DOC)
-                                .define(CLIENT_DNS_LOOKUP_CONFIG,
-                                        Type.STRING,
-                                        ClientDnsLookup.DEFAULT.toString(),
-                                        in(ClientDnsLookup.DEFAULT.toString(),
-                                           ClientDnsLookup.USE_ALL_DNS_IPS.toString(),
-                                           ClientDnsLookup.RESOLVE_CANONICAL_BOOTSTRAP_SERVERS_ONLY.toString()),
-                                        Importance.MEDIUM,
-                                        CommonClientConfigs.CLIENT_DNS_LOOKUP_DOC)
-                                .define(GROUP_ID_CONFIG, Type.STRING, null, Importance.HIGH, GROUP_ID_DOC)
-                                .define(GROUP_INSTANCE_ID_CONFIG,
-                                        Type.STRING,
-                                        null,
-                                        Importance.MEDIUM,
-                                        GROUP_INSTANCE_ID_DOC)
+                                .define(GROUP_ID_CONFIG, Type.STRING, "", Importance.HIGH, GROUP_ID_DOC)
                                 .define(SESSION_TIMEOUT_MS_CONFIG,
                                         Type.INT,
                                         10000,
@@ -344,11 +304,6 @@ public class ConsumerConfig extends AbstractConfig {
                                         "",
                                         Importance.LOW,
                                         CommonClientConfigs.CLIENT_ID_DOC)
-                                .define(CLIENT_RACK_CONFIG,
-                                        Type.STRING,
-                                        "",
-                                        Importance.LOW,
-                                        CommonClientConfigs.CLIENT_RACK_DOC)
                                 .define(MAX_PARTITION_FETCH_BYTES_CONFIG,
                                         Type.INT,
                                         DEFAULT_MAX_PARTITION_FETCH_BYTES,
@@ -358,13 +313,13 @@ public class ConsumerConfig extends AbstractConfig {
                                 .define(SEND_BUFFER_CONFIG,
                                         Type.INT,
                                         128 * 1024,
-                                        atLeast(CommonClientConfigs.SEND_BUFFER_LOWER_BOUND),
+                                        atLeast(-1),
                                         Importance.MEDIUM,
                                         CommonClientConfigs.SEND_BUFFER_DOC)
                                 .define(RECEIVE_BUFFER_CONFIG,
                                         Type.INT,
                                         64 * 1024,
-                                        atLeast(CommonClientConfigs.RECEIVE_BUFFER_LOWER_BOUND),
+                                        atLeast(-1),
                                         Importance.MEDIUM,
                                         CommonClientConfigs.RECEIVE_BUFFER_DOC)
                                 .define(FETCH_MIN_BYTES_CONFIG,
@@ -488,20 +443,15 @@ public class ConsumerConfig extends AbstractConfig {
                                         Importance.MEDIUM,
                                         EXCLUDE_INTERNAL_TOPICS_DOC)
                                 .defineInternal(LEAVE_GROUP_ON_CLOSE_CONFIG,
-                                        Type.BOOLEAN,
-                                        true,
-                                        Importance.LOW)
+                                                Type.BOOLEAN,
+                                                true,
+                                                Importance.LOW)
                                 .define(ISOLATION_LEVEL_CONFIG,
                                         Type.STRING,
                                         DEFAULT_ISOLATION_LEVEL,
                                         in(IsolationLevel.READ_COMMITTED.toString().toLowerCase(Locale.ROOT), IsolationLevel.READ_UNCOMMITTED.toString().toLowerCase(Locale.ROOT)),
                                         Importance.MEDIUM,
                                         ISOLATION_LEVEL_DOC)
-                                .define(ALLOW_AUTO_CREATE_TOPICS_CONFIG,
-                                        Type.BOOLEAN,
-                                        DEFAULT_ALLOW_AUTO_CREATE_TOPICS,
-                                        Importance.MEDIUM,
-                                        ALLOW_AUTO_CREATE_TOPICS_DOC)
                                 // security support
                                 .define(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG,
                                         Type.STRING,
@@ -510,6 +460,7 @@ public class ConsumerConfig extends AbstractConfig {
                                         CommonClientConfigs.SECURITY_PROTOCOL_DOC)
                                 .withClientSslSupport()
                                 .withClientSaslSupport();
+
     }
 
     @Override
@@ -548,16 +499,12 @@ public class ConsumerConfig extends AbstractConfig {
         super(CONFIG, props);
     }
 
-    protected ConsumerConfig(Map<?, ?> props, boolean doLog) {
+    ConsumerConfig(Map<?, ?> props, boolean doLog) {
         super(CONFIG, props, doLog);
     }
 
     public static Set<String> configNames() {
         return CONFIG.names();
-    }
-
-    public static ConfigDef configDef() {
-        return  new ConfigDef(CONFIG);
     }
 
     public static void main(String[] args) {

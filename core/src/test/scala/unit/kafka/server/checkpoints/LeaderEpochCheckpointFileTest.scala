@@ -22,8 +22,9 @@ import kafka.server.epoch.EpochEntry
 import kafka.utils.Logging
 import org.junit.Assert._
 import org.junit.Test
+import org.scalatest.junit.JUnitSuite
 
-class LeaderEpochCheckpointFileTest extends Logging {
+class LeaderEpochCheckpointFileTest extends JUnitSuite with Logging{
 
   @Test
   def shouldPersistAndOverwriteAndReloadFile(): Unit ={

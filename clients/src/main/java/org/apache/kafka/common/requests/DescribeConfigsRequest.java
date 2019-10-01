@@ -100,13 +100,13 @@ public class DescribeConfigsRequest extends AbstractRequest {
     private final boolean includeSynonyms;
 
     public DescribeConfigsRequest(short version, Map<ConfigResource, Collection<String>> resourceToConfigNames, boolean includeSynonyms) {
-        super(ApiKeys.DESCRIBE_CONFIGS, version);
+        super(version);
         this.resourceToConfigNames = Objects.requireNonNull(resourceToConfigNames, "resourceToConfigNames");
         this.includeSynonyms = includeSynonyms;
     }
 
     public DescribeConfigsRequest(Struct struct, short version) {
-        super(ApiKeys.DESCRIBE_CONFIGS, version);
+        super(version);
         Object[] resourcesArray = struct.getArray(RESOURCES_KEY_NAME);
         resourceToConfigNames = new HashMap<>(resourcesArray.length);
         for (Object resourceObj : resourcesArray) {

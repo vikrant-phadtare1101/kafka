@@ -32,7 +32,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
-import java.util.Objects;
 
 import static org.apache.kafka.common.record.Records.LOG_OVERHEAD;
 import static org.apache.kafka.common.record.Records.OFFSET_OFFSET;
@@ -322,8 +321,6 @@ public abstract class AbstractLegacyRecordBatch extends AbstractRecordBatch impl
                 throw new InvalidRecordException("Invalid wrapper magic found in legacy deep record iterator " + wrapperMagic);
 
             CompressionType compressionType = wrapperRecord.compressionType();
-            if (compressionType == CompressionType.ZSTD)
-                throw new InvalidRecordException("Invalid wrapper compressionType found in legacy deep record iterator " + wrapperMagic);
             ByteBuffer wrapperValue = wrapperRecord.value();
             if (wrapperValue == null)
                 throw new InvalidRecordException("Found invalid compressed record set with null value (magic = " +
@@ -440,13 +437,13 @@ public abstract class AbstractLegacyRecordBatch extends AbstractRecordBatch impl
             BasicLegacyRecordBatch that = (BasicLegacyRecordBatch) o;
 
             return offset == that.offset &&
-                Objects.equals(record, that.record);
+                    (record != null ? record.equals(that.record) : that.record == null);
         }
 
         @Override
         public int hashCode() {
             int result = record != null ? record.hashCode() : 0;
-            result = 31 * result + Long.hashCode(offset);
+            result = 31 * result + (int) (offset ^ (offset >>> 32));
             return result;
         }
     }
@@ -517,7 +514,7 @@ public abstract class AbstractLegacyRecordBatch extends AbstractRecordBatch impl
 
             ByteBufferLegacyRecordBatch that = (ByteBufferLegacyRecordBatch) o;
 
-            return Objects.equals(buffer, that.buffer);
+            return buffer != null ? buffer.equals(that.buffer) : that.buffer == null;
         }
 
         @Override

@@ -31,11 +31,13 @@ import org.apache.kafka.streams.errors.StreamsException;
 import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.kstream.internals.InternalNameProvider;
 import org.apache.kafka.streams.kstream.internals.KTableSource;
-import org.apache.kafka.streams.kstream.internals.TimestampedKeyValueStoreMaterializer;
+import org.apache.kafka.streams.kstream.internals.KeyValueStoreMaterializer;
 import org.apache.kafka.streams.kstream.internals.MaterializedInternal;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.test.MockStateRestoreListener;
+import org.apache.kafka.test.TestCondition;
 import org.apache.kafka.test.TestUtils;
 import org.junit.Before;
 import org.junit.Test;
@@ -70,41 +72,42 @@ public class GlobalStreamThreadTest {
     @SuppressWarnings("unchecked")
     @Before
     public void before() {
-        final MaterializedInternal<Object, Object, KeyValueStore<Bytes, byte[]>> materialized =
-            new MaterializedInternal<>(Materialized.with(null, null),
-                new InternalNameProvider() {
-                    @Override
-                    public String newProcessorName(final String prefix) {
-                        return "processorName";
-                    }
+        final MaterializedInternal<Object, Object, KeyValueStore<Bytes, byte[]>> materialized = new MaterializedInternal<>(
+            Materialized.with(null, null));
+        materialized.generateStoreNameIfNeeded(
+            new InternalNameProvider() {
+                @Override
+                public String newProcessorName(final String prefix) {
+                    return "processorName";
+                }
 
-                    @Override
-                    public String newStoreName(final String prefix) {
-                        return GLOBAL_STORE_NAME;
-                    }
-                },
-                "store-"
-            );
+                @Override
+                public String newStoreName(final String prefix) {
+                    return GLOBAL_STORE_NAME;
+                }
+            },
+            "store-"
+        );
 
         builder.addGlobalStore(
-            new TimestampedKeyValueStoreMaterializer<>(materialized).materialize().withLoggingDisabled(),
+            (StoreBuilder) new KeyValueStoreMaterializer<>(materialized).materialize().withLoggingDisabled(),
             "sourceName",
             null,
             null,
             null,
             GLOBAL_STORE_TOPIC_NAME,
             "processorName",
-            new KTableSource<>(GLOBAL_STORE_NAME, GLOBAL_STORE_NAME));
+            new KTableSource<>(GLOBAL_STORE_NAME));
 
         final HashMap<String, Object> properties = new HashMap<>();
         properties.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "blah");
         properties.put(StreamsConfig.APPLICATION_ID_CONFIG, "blah");
         properties.put(StreamsConfig.STATE_DIR_CONFIG, TestUtils.tempDirectory().getAbsolutePath());
         config = new StreamsConfig(properties);
-        globalStreamThread = new GlobalStreamThread(builder.rewriteTopology(config).buildGlobalStateTopology(),
+        globalStreamThread = new GlobalStreamThread(builder.buildGlobalStateTopology(),
                                                     config,
                                                     mockConsumer,
-                                                    new StateDirectory(config, time, true),
+                                                    new StateDirectory(config, time),
                                                     0,
                                                     new Metrics(),
                                                     new MockTime(),
@@ -119,7 +122,7 @@ public class GlobalStreamThreadTest {
         try {
             globalStreamThread.start();
             fail("Should have thrown StreamsException if start up failed");
-        } catch (final StreamsException e) {
+        } catch (StreamsException e) {
             // ok
         }
         assertFalse(globalStreamThread.stillRunning());
@@ -137,7 +140,7 @@ public class GlobalStreamThreadTest {
         globalStreamThread = new GlobalStreamThread(builder.buildGlobalStateTopology(),
                                                     config,
                                                     mockConsumer,
-                                                    new StateDirectory(config, time, true),
+                                                    new StateDirectory(config, time),
                                                     0,
                                                     new Metrics(),
                                                     new MockTime(),
@@ -147,7 +150,7 @@ public class GlobalStreamThreadTest {
         try {
             globalStreamThread.start();
             fail("Should have thrown StreamsException if start up failed");
-        } catch (final StreamsException e) {
+        } catch (StreamsException e) {
             assertThat(e.getCause(), instanceOf(RuntimeException.class));
             assertThat(e.getCause().getMessage(), equalTo("KABOOM!"));
         }
@@ -162,7 +165,7 @@ public class GlobalStreamThreadTest {
     }
 
     @Test(timeout = 30000)
-    public void shouldStopRunningWhenClosedByUser() throws Exception {
+    public void shouldStopRunningWhenClosedByUser() throws InterruptedException {
         initializeConsumer();
         globalStreamThread.start();
         globalStreamThread.shutdown();
@@ -171,7 +174,7 @@ public class GlobalStreamThreadTest {
     }
 
     @Test
-    public void shouldCloseStateStoresOnClose() throws Exception {
+    public void shouldCloseStateStoresOnClose() throws InterruptedException {
         initializeConsumer();
         globalStreamThread.start();
         final StateStore globalStore = builder.globalStateStores().get(GLOBAL_STORE_NAME);
@@ -183,7 +186,7 @@ public class GlobalStreamThreadTest {
 
     @SuppressWarnings("unchecked")
     @Test
-    public void shouldTransitionToDeadOnClose() throws Exception {
+    public void shouldTransitionToDeadOnClose() throws InterruptedException {
         initializeConsumer();
         globalStreamThread.start();
         globalStreamThread.shutdown();
@@ -194,7 +197,7 @@ public class GlobalStreamThreadTest {
 
     @SuppressWarnings("unchecked")
     @Test
-    public void shouldStayDeadAfterTwoCloses() throws Exception {
+    public void shouldStayDeadAfterTwoCloses() throws InterruptedException {
         initializeConsumer();
         globalStreamThread.start();
         globalStreamThread.shutdown();
@@ -206,15 +209,15 @@ public class GlobalStreamThreadTest {
 
     @SuppressWarnings("unchecked")
     @Test
-    public void shouldTransitionToRunningOnStart() throws Exception {
+    public void shouldTransitionToRunningOnStart() throws InterruptedException {
         initializeConsumer();
         globalStreamThread.start();
-
-        TestUtils.waitForCondition(
-            () -> globalStreamThread.state() == RUNNING,
-            10 * 1000,
-            "Thread never started.");
-
+        TestUtils.waitForCondition(new TestCondition() {
+            @Override
+            public boolean conditionMet() {
+                return globalStreamThread.state() == RUNNING;
+            }
+        }, 10 * 1000, "Thread never started.");
         globalStreamThread.shutdown();
     }
 
@@ -222,21 +225,24 @@ public class GlobalStreamThreadTest {
     public void shouldDieOnInvalidOffsetException() throws Exception {
         initializeConsumer();
         globalStreamThread.start();
-
-        TestUtils.waitForCondition(
-            () -> globalStreamThread.state() == RUNNING,
-            10 * 1000,
-            "Thread never started.");
+        TestUtils.waitForCondition(new TestCondition() {
+            @Override
+            public boolean conditionMet() {
+                return globalStreamThread.state() == RUNNING;
+            }
+        }, 10 * 1000, "Thread never started.");
 
         mockConsumer.updateEndOffsets(Collections.singletonMap(topicPartition, 1L));
         mockConsumer.addRecord(new ConsumerRecord<>(GLOBAL_STORE_TOPIC_NAME, 0, 0L, "K1".getBytes(), "V1".getBytes()));
 
-        TestUtils.waitForCondition(
-            () -> mockConsumer.position(topicPartition) == 1L,
-            10 * 1000,
-            "Input record never consumed");
+        TestUtils.waitForCondition(new TestCondition() {
+            @Override
+            public boolean conditionMet() {
+                return mockConsumer.position(topicPartition) == 1L;
+            }
+        }, 10 * 1000, "Input record never consumed");
 
-        mockConsumer.setException(new InvalidOffsetException("Try Again!") {
+        mockConsumer.setPollException(new InvalidOffsetException("Try Again!") {
             @Override
             public Set<TopicPartition> partitions() {
                 return Collections.singleton(topicPartition);
@@ -245,21 +251,20 @@ public class GlobalStreamThreadTest {
         // feed first record for recovery
         mockConsumer.addRecord(new ConsumerRecord<>(GLOBAL_STORE_TOPIC_NAME, 0, 0L, "K1".getBytes(), "V1".getBytes()));
 
-        TestUtils.waitForCondition(
-            () -> globalStreamThread.state() == DEAD,
-            10 * 1000,
-            "GlobalStreamThread should have died.");
+        TestUtils.waitForCondition(new TestCondition() {
+            @Override
+            public boolean conditionMet() {
+                return globalStreamThread.state() == DEAD;
+            }
+        }, 10 * 1000, "GlobalStreamThread should have died.");
     }
 
     private void initializeConsumer() {
-        mockConsumer.updatePartitions(
-            GLOBAL_STORE_TOPIC_NAME,
-            Collections.singletonList(new PartitionInfo(
-                GLOBAL_STORE_TOPIC_NAME,
-                0,
-                null,
-                new Node[0],
-                new Node[0])));
+        mockConsumer.updatePartitions(GLOBAL_STORE_TOPIC_NAME, Collections.singletonList(new PartitionInfo(GLOBAL_STORE_TOPIC_NAME,
+            0,
+            null,
+            new Node[0],
+            new Node[0])));
         mockConsumer.updateBeginningOffsets(Collections.singletonMap(topicPartition, 0L));
         mockConsumer.updateEndOffsets(Collections.singletonMap(topicPartition, 0L));
         mockConsumer.assign(Collections.singleton(topicPartition));

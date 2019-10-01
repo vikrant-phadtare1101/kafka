@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.connect.runtime.standalone;
 
-import org.apache.kafka.connect.connector.policy.ConnectorClientConfigOverridePolicy;
 import org.apache.kafka.connect.errors.AlreadyExistsException;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.NotFoundException;
@@ -63,14 +62,12 @@ public class StandaloneHerder extends AbstractHerder {
 
     private ClusterConfigState configState;
 
-    public StandaloneHerder(Worker worker, String kafkaClusterId,
-                            ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy) {
+    public StandaloneHerder(Worker worker, String kafkaClusterId) {
         this(worker,
                 worker.workerId(),
                 kafkaClusterId,
                 new MemoryStatusBackingStore(),
-                new MemoryConfigBackingStore(worker.configTransformer()),
-             connectorClientConfigOverridePolicy);
+                new MemoryConfigBackingStore(worker.configTransformer()));
     }
 
     // visible for testing
@@ -78,9 +75,8 @@ public class StandaloneHerder extends AbstractHerder {
                      String workerId,
                      String kafkaClusterId,
                      StatusBackingStore statusBackingStore,
-                     MemoryConfigBackingStore configBackingStore,
-                     ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy) {
-        super(worker, workerId, kafkaClusterId, statusBackingStore, configBackingStore, connectorClientConfigOverridePolicy);
+                     MemoryConfigBackingStore configBackingStore) {
+        super(worker, workerId, kafkaClusterId, statusBackingStore, configBackingStore);
         this.configState = ClusterConfigState.EMPTY;
         this.requestExecutorService = Executors.newSingleThreadScheduledExecutor();
         configBackingStore.setUpdateListener(new ConfigUpdateListener());
@@ -107,7 +103,7 @@ public class StandaloneHerder extends AbstractHerder {
         // There's no coordination/hand-off to do here since this is all standalone. Instead, we
         // should just clean up the stuff we normally would, i.e. cleanly checkpoint and shutdown all
         // the tasks.
-        for (String connName : connectors()) {
+        for (String connName : configState.connectors()) {
             removeConnectorTasks(connName);
             worker.stopConnector(connName);
         }
@@ -122,12 +118,12 @@ public class StandaloneHerder extends AbstractHerder {
 
     @Override
     public synchronized void connectors(Callback<Collection<String>> callback) {
-        callback.onCompletion(null, connectors());
+        callback.onCompletion(null, configState.connectors());
     }
-    
+
     @Override
     public synchronized void connectorInfo(String connName, Callback<ConnectorInfo> callback) {
-        ConnectorInfo connectorInfo = connectorInfo(connName);
+        ConnectorInfo connectorInfo = createConnectorInfo(connName);
         if (connectorInfo == null) {
             callback.onCompletion(new NotFoundException("Connector " + connName + " not found"), null);
             return;
@@ -322,7 +318,7 @@ public class StandaloneHerder extends AbstractHerder {
 
     private void updateConnectorTasks(String connName) {
         if (!worker.isRunning(connName)) {
-            log.info("Skipping update of connector {} since it is not running", connName);
+            log.info("Skipping reconfiguration of connector {} since it is not running", connName);
             return;
         }
 

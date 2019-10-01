@@ -16,8 +16,8 @@
  */
 package org.apache.kafka.streams.processor.internals;
 
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.test.MockRestoreCallback;
 import org.apache.kafka.test.MockStateRestoreListener;
 import org.junit.Before;
@@ -25,7 +25,6 @@ import org.junit.Test;
 
 import java.util.Collections;
 
-import static org.apache.kafka.streams.state.internals.RecordConverters.identity;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertTrue;
@@ -36,14 +35,8 @@ public class StateRestorerTest {
     private final MockRestoreCallback callback = new MockRestoreCallback();
     private final MockStateRestoreListener reportingListener = new MockStateRestoreListener();
     private final CompositeRestoreListener compositeRestoreListener = new CompositeRestoreListener(callback);
-    private final StateRestorer restorer = new StateRestorer(
-        new TopicPartition("topic", 1),
-        compositeRestoreListener,
-        null,
-        OFFSET_LIMIT,
-        true,
-        "storeName",
-        identity());
+    private final StateRestorer restorer = new StateRestorer(new TopicPartition("topic", 1), compositeRestoreListener,
+                                                             null, OFFSET_LIMIT, true, "storeName");
 
     @Before
     public void setUp() {
@@ -52,7 +45,7 @@ public class StateRestorerTest {
 
     @Test
     public void shouldCallRestoreOnRestoreCallback() {
-        restorer.restore(Collections.singletonList(new ConsumerRecord<>("", 0, 0L, new byte[0], new byte[0])));
+        restorer.restore(Collections.singletonList(KeyValue.pair(new byte[0], new byte[0])));
         assertThat(callback.restored.size(), equalTo(1));
     }
 
@@ -73,14 +66,10 @@ public class StateRestorerTest {
 
     @Test
     public void shouldBeCompletedIfOffsetAndOffsetLimitAreZero() {
-        final StateRestorer restorer = new StateRestorer(
-            new TopicPartition("topic", 1),
-            compositeRestoreListener,
-            null,
-            0,
-            true,
-            "storeName",
-            identity());
+        final StateRestorer
+            restorer =
+            new StateRestorer(new TopicPartition("topic", 1), compositeRestoreListener, null, 0, true,
+                              "storeName");
         assertTrue(restorer.hasCompleted(0, 10));
     }
 

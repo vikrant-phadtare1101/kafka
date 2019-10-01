@@ -24,7 +24,6 @@ import org.apache.kafka.clients.admin.{AdminClient, AdminClientConfig}
 import org.apache.kafka.common.errors.DelegationTokenDisabledException
 import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.junit.{After, Before, Test}
-import org.scalatest.Assertions.intercept
 
 import scala.collection.JavaConverters._
 import scala.concurrent.ExecutionException
@@ -37,7 +36,7 @@ class DelegationTokenRequestsWithDisableTokenFeatureTest extends BaseRequestTest
   protected override val clientSaslProperties = Some(kafkaClientSaslProperties(kafkaClientSaslMechanism))
   var adminClient: AdminClient = null
 
-  override def brokerCount = 1
+  override def numBrokers = 1
 
   @Before
   override def setUp(): Unit = {

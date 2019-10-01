@@ -28,17 +28,18 @@ import org.apache.kafka.streams.kstream.WindowedSerdes;
 import org.apache.kafka.streams.kstream.internals.TimeWindow;
 import org.apache.kafka.streams.state.StateSerdes;
 import org.apache.kafka.test.KeyValueIteratorStub;
+import org.junit.Before;
 import org.junit.Test;
-
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.core.IsEqual.equalTo;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 public class WindowKeySchemaTest {
 
@@ -53,6 +54,11 @@ public class WindowKeySchemaTest {
     final private WindowKeySchema windowKeySchema = new WindowKeySchema();
     final private Serde<Windowed<String>> keySerde = new WindowedSerdes.TimeWindowedSerde<>(serde);
     final private StateSerdes<String, byte[]> stateSerdes = new StateSerdes<>("dummy", serde, Serdes.ByteArray());
+
+    @Before
+    public void before() {
+        windowKeySchema.init("topic");
+    }
 
     @Test
     public void testHasNextConditionUsingNullKeys() {
@@ -75,7 +81,7 @@ public class WindowKeySchemaTest {
 
     @Test
     public void testUpperBoundWithLargeTimestamps() {
-        final Bytes upper = windowKeySchema.upperRange(Bytes.wrap(new byte[]{0xA, 0xB, 0xC}), Long.MAX_VALUE);
+        Bytes upper = windowKeySchema.upperRange(Bytes.wrap(new byte[]{0xA, 0xB, 0xC}), Long.MAX_VALUE);
 
         assertThat(
             "shorter key with max timestamp should be in range",
@@ -104,7 +110,7 @@ public class WindowKeySchemaTest {
 
     @Test
     public void testUpperBoundWithKeyBytesLargerThanFirstTimestampByte() {
-        final Bytes upper = windowKeySchema.upperRange(Bytes.wrap(new byte[]{0xA, (byte) 0x8F, (byte) 0x9F}), Long.MAX_VALUE);
+        Bytes upper = windowKeySchema.upperRange(Bytes.wrap(new byte[]{0xA, (byte) 0x8F, (byte) 0x9F}), Long.MAX_VALUE);
 
         assertThat(
             "shorter key with max timestamp should be in range",
@@ -123,7 +129,7 @@ public class WindowKeySchemaTest {
 
     @Test
     public void testUpperBoundWithKeyBytesLargerAndSmallerThanFirstTimestampByte() {
-        final Bytes upper = windowKeySchema.upperRange(Bytes.wrap(new byte[]{0xC, 0xC, 0x9}), 0x0AffffffffffffffL);
+        Bytes upper = windowKeySchema.upperRange(Bytes.wrap(new byte[]{0xC, 0xC, 0x9}), 0x0AffffffffffffffL);
 
         assertThat(
             "shorter key with max timestamp should be in range",
@@ -141,25 +147,25 @@ public class WindowKeySchemaTest {
 
     @Test
     public void testUpperBoundWithZeroTimestamp() {
-        final Bytes upper = windowKeySchema.upperRange(Bytes.wrap(new byte[]{0xA, 0xB, 0xC}), 0);
+        Bytes upper = windowKeySchema.upperRange(Bytes.wrap(new byte[]{0xA, 0xB, 0xC}), 0);
         assertThat(upper, equalTo(WindowKeySchema.toStoreKeyBinary(new byte[]{0xA, 0xB, 0xC}, 0, Integer.MAX_VALUE)));
     }
 
     @Test
     public void testLowerBoundWithZeroTimestamp() {
-        final Bytes lower = windowKeySchema.lowerRange(Bytes.wrap(new byte[]{0xA, 0xB, 0xC}), 0);
+        Bytes lower = windowKeySchema.lowerRange(Bytes.wrap(new byte[]{0xA, 0xB, 0xC}), 0);
         assertThat(lower, equalTo(WindowKeySchema.toStoreKeyBinary(new byte[]{0xA, 0xB, 0xC}, 0, 0)));
     }
 
     @Test
     public void testLowerBoundWithMonZeroTimestamp() {
-        final Bytes lower = windowKeySchema.lowerRange(Bytes.wrap(new byte[]{0xA, 0xB, 0xC}), 42);
+        Bytes lower = windowKeySchema.lowerRange(Bytes.wrap(new byte[]{0xA, 0xB, 0xC}), 42);
         assertThat(lower, equalTo(WindowKeySchema.toStoreKeyBinary(new byte[]{0xA, 0xB, 0xC}, 0, 0)));
     }
 
     @Test
     public void testLowerBoundMatchesTrailingZeros() {
-        final Bytes lower = windowKeySchema.lowerRange(Bytes.wrap(new byte[]{0xA, 0xB, 0xC}), Long.MAX_VALUE - 1);
+        Bytes lower = windowKeySchema.lowerRange(Bytes.wrap(new byte[]{0xA, 0xB, 0xC}), Long.MAX_VALUE - 1);
 
         assertThat(
             "appending zeros to key should still be in range",
@@ -195,28 +201,8 @@ public class WindowKeySchemaTest {
     public void shouldSerializeDeserializeExpectedWindowSize() {
         final byte[] bytes = keySerde.serializer().serialize(topic, windowedKey);
         final Windowed<String> result = new TimeWindowedDeserializer<>(serde.deserializer(), endTime - startTime)
-            .deserialize(topic, bytes);
+                .deserialize(topic, bytes);
         assertEquals(windowedKey, result);
-    }
-
-    @Test
-    public void shouldSerializeDeserializeExpectedChangelogWindowSize() {
-        // Key-value containing serialized store key binary and the key's window size
-        final List<KeyValue<Bytes, Integer>> keys = Arrays.asList(
-            KeyValue.pair(WindowKeySchema.toStoreKeyBinary(new Windowed<>(Bytes.wrap(new byte[]{0}), new TimeWindow(0, 1)), 0), 1),
-            KeyValue.pair(WindowKeySchema.toStoreKeyBinary(new Windowed<>(Bytes.wrap(new byte[]{0, 0}), new TimeWindow(0, 10)), 0), 10),
-            KeyValue.pair(WindowKeySchema.toStoreKeyBinary(new Windowed<>(Bytes.wrap(new byte[]{0, 0, 0}), new TimeWindow(10, 30)), 6), 20));
-
-        final List<Long> results = new ArrayList<>();
-        for (final KeyValue<Bytes, Integer> keyValue : keys) {
-            // Let the deserializer know that it's deserializing a changelog windowed key
-            final Serde<Windowed<String>> keySerde = new WindowedSerdes.TimeWindowedSerde<>(serde, keyValue.value).forChangelog(true);
-            final Windowed<String> result = keySerde.deserializer().deserialize(topic, keyValue.key.get());
-            final Window resultWindow = result.window();
-            results.add(resultWindow.end() - resultWindow.start());
-        }
-
-        assertThat(results, equalTo(Arrays.asList(1L, 10L, 20L)));
     }
 
     @Test
@@ -225,19 +211,19 @@ public class WindowKeySchemaTest {
     }
 
     @Test
-    public void shouldDeserializeEmptyByteArrayToNull() {
+    public void shouldDeSerializeEmtpyByteArrayToNull() {
         assertNull(keySerde.deserializer().deserialize(topic, new byte[0]));
     }
 
     @Test
-    public void shouldDeserializeNullToNull() {
+    public void shouldDeSerializeNullToNull() {
         assertNull(keySerde.deserializer().deserialize(topic, null));
     }
 
     @Test
     public void shouldConvertToBinaryAndBack() {
         final Bytes serialized = WindowKeySchema.toStoreKeyBinary(windowedKey, 0, stateSerdes);
-        final Windowed<String> result = WindowKeySchema.fromStoreKey(serialized.get(), endTime - startTime, stateSerdes.keyDeserializer(), stateSerdes.topic());
+        final Windowed<String> result = WindowKeySchema.fromStoreKey(serialized.get(), endTime - startTime, stateSerdes);
         assertEquals(windowedKey, result);
     }
 
@@ -254,7 +240,7 @@ public class WindowKeySchemaTest {
     }
 
     @Test
-    public void shouldExtractWindowFromBinary() {
+    public void shouldExtractWindowFromBindary() {
         final Bytes serialized = WindowKeySchema.toStoreKeyBinary(windowedKey, 0, stateSerdes);
         assertEquals(window, WindowKeySchema.extractStoreWindow(serialized.get(), endTime - startTime));
     }
@@ -268,13 +254,13 @@ public class WindowKeySchemaTest {
     @Test
     public void shouldExtractKeyFromBinary() {
         final Bytes serialized = WindowKeySchema.toStoreKeyBinary(windowedKey, 0, stateSerdes);
-        assertEquals(windowedKey, WindowKeySchema.fromStoreKey(serialized.get(), endTime - startTime, stateSerdes.keyDeserializer(), stateSerdes.topic()));
+        assertEquals(windowedKey, WindowKeySchema.fromStoreKey(serialized.get(), endTime - startTime, stateSerdes));
     }
 
     @Test
     public void shouldExtractBytesKeyFromBinary() {
         final Windowed<Bytes> windowedBytesKey = new Windowed<>(Bytes.wrap(key.getBytes()), window);
         final Bytes serialized = WindowKeySchema.toStoreKeyBinary(windowedBytesKey, 0);
-        assertEquals(windowedBytesKey, WindowKeySchema.fromStoreBytesKey(serialized.get(), endTime - startTime));
+        assertEquals(windowedBytesKey, WindowKeySchema.fromStoreKey(serialized.get(), endTime - startTime));
     }
 }

@@ -20,24 +20,25 @@ import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.errors.InvalidStateStoreException;
 import org.apache.kafka.streams.state.KeyValueIterator;
+import org.apache.kafka.streams.state.KeyValueStore;
 
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
 /**
- * Iterate over multiple KeyValueSegments
+ * Iterate over multiple Segments
  */
-class SegmentIterator<S extends Segment> implements KeyValueIterator<Bytes, byte[]> {
+class SegmentIterator implements KeyValueIterator<Bytes, byte[]> {
 
     private final Bytes from;
     private final Bytes to;
-    protected final Iterator<S> segments;
+    protected final Iterator<Segment> segments;
     protected final HasNextCondition hasNextCondition;
 
-    private S currentSegment;
-    KeyValueIterator<Bytes, byte[]> currentIterator;
+    protected KeyValueStore<Bytes, byte[]> currentSegment;
+    protected KeyValueIterator<Bytes, byte[]> currentIterator;
 
-    SegmentIterator(final Iterator<S> segments,
+    SegmentIterator(final Iterator<Segment> segments,
                     final HasNextCondition hasNextCondition,
                     final Bytes from,
                     final Bytes to) {
@@ -75,7 +76,7 @@ class SegmentIterator<S extends Segment> implements KeyValueIterator<Bytes, byte
                 } else {
                     currentIterator = currentSegment.range(from, to);
                 }
-            } catch (final InvalidStateStoreException e) {
+            } catch (InvalidStateStoreException e) {
                 // segment may have been closed so we ignore it.
             }
         }
@@ -86,7 +87,7 @@ class SegmentIterator<S extends Segment> implements KeyValueIterator<Bytes, byte
         boolean hasNext = false;
         try {
             hasNext = hasNextCondition.hasNext(currentIterator);
-        } catch (final InvalidStateStoreException e) {
+        } catch (InvalidStateStoreException e) {
             //already closed so ignore
         }
         return hasNext;

@@ -123,14 +123,14 @@ public class CreateAclsRequest extends AbstractRequest {
     private final List<AclCreation> aclCreations;
 
     CreateAclsRequest(short version, List<AclCreation> aclCreations) {
-        super(ApiKeys.CREATE_ACLS, version);
+        super(version);
         this.aclCreations = aclCreations;
 
         validate(aclCreations);
     }
 
     public CreateAclsRequest(Struct struct, short version) {
-        super(ApiKeys.CREATE_ACLS, version);
+        super(version);
         this.aclCreations = new ArrayList<>();
         for (Object creationStructObj : struct.getArray(CREATIONS_KEY_NAME)) {
             Struct creationStruct = (Struct) creationStructObj;

@@ -20,7 +20,7 @@ import kafka.common.AdminCommandFailedException
 import kafka.server.{KafkaConfig, KafkaServer}
 import kafka.utils.TestUtils._
 import kafka.utils.{Logging, TestUtils}
-import kafka.zk.{ReassignPartitionsZNode, ZkVersion, ZooKeeperTestHarness}
+import kafka.zk.{ReassignPartitionsZNode, ZooKeeperTestHarness}
 import org.junit.Assert.{assertEquals, assertTrue}
 import org.junit.{After, Before, Test}
 import kafka.admin.ReplicationQuotaUtils._
@@ -51,12 +51,8 @@ class ReassignPartitionsClusterTest extends ZooKeeperTestHarness with Logging {
   }
 
   def startBrokers(brokerIds: Seq[Int]) {
-    servers = brokerIds.map { i =>
-      val props = createBrokerConfig(i, zkConnect, enableControlledShutdown = false, logDirCount = 3)
-      // shorter backoff to reduce test durations when no active partitions are eligible for fetching due to throttling
-      props.put(KafkaConfig.ReplicaFetchBackoffMsProp, "100")
-      props
-    }.map(c => createServer(KafkaConfig.fromProps(c)))
+    servers = brokerIds.map(i => createBrokerConfig(i, zkConnect, enableControlledShutdown = false, logDirCount = 3))
+      .map(c => createServer(KafkaConfig.fromProps(c)))
   }
 
   def createAdminClient(servers: Seq[KafkaServer]): JAdminClient = {
@@ -99,17 +95,16 @@ class ReassignPartitionsClusterTest extends ZooKeeperTestHarness with Logging {
     val newLeaderServer = servers.find(_.config.brokerId == 101).get
 
     TestUtils.waitUntilTrue (
-      () => newLeaderServer.replicaManager.nonOfflinePartition(topicPartition).flatMap(_.leaderReplicaIfLocal).isDefined,
+      () => newLeaderServer.replicaManager.getPartition(topicPartition).flatMap(_.leaderReplicaIfLocal).isDefined,
       "broker 101 should be the new leader", pause = 1L
     )
 
-    assertEquals(100, newLeaderServer.replicaManager.localReplicaOrException(topicPartition)
-      .highWatermark)
+    assertEquals(100, newLeaderServer.replicaManager.getReplicaOrException(topicPartition).highWatermark.messageOffset)
     val newFollowerServer = servers.find(_.config.brokerId == 102).get
-    TestUtils.waitUntilTrue(() => newFollowerServer.replicaManager.localReplicaOrException(topicPartition)
-      .highWatermark == 100,
+    TestUtils.waitUntilTrue(() => newFollowerServer.replicaManager.getReplicaOrException(topicPartition).highWatermark.messageOffset == 100,
       "partition follower's highWatermark should be 100")
   }
+
 
   @Test
   def shouldMoveSinglePartition(): Unit = {
@@ -618,7 +613,7 @@ class ReassignPartitionsClusterTest extends ZooKeeperTestHarness with Logging {
     )
 
     // Set znode directly to avoid non-existent topic validation
-    zkClient.setOrCreatePartitionReassignment(firstMove, ZkVersion.MatchAnyVersion)
+    zkClient.setOrCreatePartitionReassignment(firstMove)
 
     servers.foreach(_.startup())
     waitForReassignmentToComplete()

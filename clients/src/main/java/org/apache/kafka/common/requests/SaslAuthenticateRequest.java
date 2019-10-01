@@ -16,13 +16,15 @@
  */
 package org.apache.kafka.common.requests;
 
-import org.apache.kafka.common.message.SaslAuthenticateRequestData;
-import org.apache.kafka.common.message.SaslAuthenticateResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.protocol.types.Field;
+import org.apache.kafka.common.protocol.types.Schema;
 import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
 
+import static org.apache.kafka.common.protocol.types.Type.BYTES;
 
 /**
  * Request from SASL client containing client SASL authentication token as defined by the
@@ -33,18 +35,28 @@ import java.nio.ByteBuffer;
  * brokers will send SaslHandshake request v0 followed by SASL tokens without the Kafka request headers.
  */
 public class SaslAuthenticateRequest extends AbstractRequest {
+    private static final String SASL_AUTH_BYTES_KEY_NAME = "sasl_auth_bytes";
+
+    private static final Schema SASL_AUTHENTICATE_REQUEST_V0 = new Schema(
+            new Field(SASL_AUTH_BYTES_KEY_NAME, BYTES, "SASL authentication bytes from client as defined by the SASL mechanism."));
+
+    public static Schema[] schemaVersions() {
+        return new Schema[]{SASL_AUTHENTICATE_REQUEST_V0};
+    }
+
+    private final ByteBuffer saslAuthBytes;
 
     public static class Builder extends AbstractRequest.Builder<SaslAuthenticateRequest> {
-        private final SaslAuthenticateRequestData data;
+        private final ByteBuffer saslAuthBytes;
 
-        public Builder(SaslAuthenticateRequestData data) {
+        public Builder(ByteBuffer saslAuthBytes) {
             super(ApiKeys.SASL_AUTHENTICATE);
-            this.data = data;
+            this.saslAuthBytes = saslAuthBytes;
         }
 
         @Override
         public SaslAuthenticateRequest build(short version) {
-            return new SaslAuthenticateRequest(data, version);
+            return new SaslAuthenticateRequest(saslAuthBytes, version);
         }
 
         @Override
@@ -55,35 +67,34 @@ public class SaslAuthenticateRequest extends AbstractRequest {
         }
     }
 
-    private final SaslAuthenticateRequestData data;
-    private final short version;
-
-    public SaslAuthenticateRequest(SaslAuthenticateRequestData data) {
-        this(data, ApiKeys.SASL_AUTHENTICATE.latestVersion());
+    public SaslAuthenticateRequest(ByteBuffer saslAuthBytes) {
+        this(saslAuthBytes, ApiKeys.SASL_AUTHENTICATE.latestVersion());
     }
 
-    public SaslAuthenticateRequest(SaslAuthenticateRequestData data, short version) {
-        super(ApiKeys.SASL_AUTHENTICATE, version);
-        this.data = data;
-        this.version = version;
+    public SaslAuthenticateRequest(ByteBuffer saslAuthBytes, short version) {
+        super(version);
+        this.saslAuthBytes = saslAuthBytes;
     }
 
     public SaslAuthenticateRequest(Struct struct, short version) {
-        super(ApiKeys.SASL_AUTHENTICATE, version);
-        this.data = new SaslAuthenticateRequestData(struct, version);
-        this.version = version;
+        super(version);
+        saslAuthBytes = struct.getBytes(SASL_AUTH_BYTES_KEY_NAME);
     }
 
-    public SaslAuthenticateRequestData data() {
-        return data;
+    public ByteBuffer saslAuthBytes() {
+        return saslAuthBytes;
     }
 
     @Override
     public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-        SaslAuthenticateResponseData response = new SaslAuthenticateResponseData()
-                .setErrorCode(ApiError.fromThrowable(e).error().code())
-                .setErrorMessage(e.getMessage());
-        return new SaslAuthenticateResponse(response);
+        short versionId = version();
+        switch (versionId) {
+            case 0:
+                return new SaslAuthenticateResponse(Errors.forException(e), e.getMessage());
+            default:
+                throw new IllegalArgumentException(String.format("Version %d is not valid. Valid versions for %s are 0 to %d",
+                        versionId, this.getClass().getSimpleName(), ApiKeys.SASL_AUTHENTICATE.latestVersion()));
+        }
     }
 
     public static SaslAuthenticateRequest parse(ByteBuffer buffer, short version) {
@@ -92,7 +103,9 @@ public class SaslAuthenticateRequest extends AbstractRequest {
 
     @Override
     protected Struct toStruct() {
-        return data.toStruct(version);
+        Struct struct = new Struct(ApiKeys.SASL_AUTHENTICATE.requestSchema(version()));
+        struct.set(SASL_AUTH_BYTES_KEY_NAME, saslAuthBytes);
+        return struct;
     }
 }
 

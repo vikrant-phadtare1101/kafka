@@ -27,14 +27,13 @@ import org.apache.kafka.streams.kstream.TimeWindows;
 import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.ProcessorSupplier;
-import org.apache.kafka.streams.processor.RecordContext;
 import org.apache.kafka.streams.processor.TopicNameExtractor;
 import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.internals.KeyValueStoreBuilder;
-import org.apache.kafka.test.MockKeyValueStore;
 import org.apache.kafka.test.MockProcessorSupplier;
+import org.apache.kafka.test.MockStateStore;
 import org.apache.kafka.test.TestUtils;
 import org.easymock.EasyMock;
 import org.junit.Assert;
@@ -47,7 +46,6 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-import static java.time.Duration.ofMillis;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertEquals;
@@ -189,7 +187,7 @@ public class TopologyTest {
     public void shouldNotAllowToAddProcessorWithNullParents() {
         topology.addSource("source", "topic-1");
         try {
-            topology.addProcessor("processor", new MockProcessorSupplier(), (String) null);
+            topology.addProcessor("processor", new MockProcessorSupplier(), null);
             fail("Should throw NullPointerException for processor when null parent names are provided");
         } catch (final NullPointerException expected) { }
     }
@@ -229,7 +227,7 @@ public class TopologyTest {
         topology.addSource("source", "topic-1");
         topology.addProcessor("processor", new MockProcessorSupplier(), "source");
         try {
-            topology.addSink("sink", "topic-2", (String) null);
+            topology.addSink("sink", "topic-2", null);
             fail("Should throw NullPointerException for sink when null parent names are provided");
         } catch (final NullPointerException expected) { }
     }
@@ -258,7 +256,7 @@ public class TopologyTest {
     public void shouldNotAllowToAddStateStoreToNonExistingProcessor() {
         mockStoreBuilder();
         EasyMock.replay(storeBuilder);
-        topology.addStateStore(storeBuilder, "no-such-processor");
+        topology.addStateStore(storeBuilder, "no-such-processsor");
     }
 
     @Test
@@ -312,7 +310,7 @@ public class TopologyTest {
         config.put(StreamsConfig.APPLICATION_ID_CONFIG, "appId");
         config.put(StreamsConfig.STATE_DIR_CONFIG, TestUtils.tempDirectory().getAbsolutePath());
         mockStoreBuilder();
-        EasyMock.expect(storeBuilder.build()).andReturn(new MockKeyValueStore("store", false));
+        EasyMock.expect(storeBuilder.build()).andReturn(new MockStateStore("store", false));
         EasyMock.replay(storeBuilder);
         topology
             .addSource(sourceNodeName, "topic")
@@ -370,23 +368,6 @@ public class TopologyTest {
     @Test
     public void shouldDescribeEmptyTopology() {
         assertThat(topology.describe(), equalTo(expectedDescription));
-    }
-
-    @Test
-    public void sinkShouldReturnNullTopicWithDynamicRouting() {
-        final TopologyDescription.Sink expectedSinkNode =
-            new InternalTopologyBuilder.Sink("sink", (key, value, record) -> record.topic() + "-" + key);
-
-        assertThat(expectedSinkNode.topic(), equalTo(null));
-    }
-
-    @Test
-    public void sinkShouldReturnTopicNameExtractorWithDynamicRouting() {
-        final TopicNameExtractor topicNameExtractor = (key, value, record) -> record.topic() + "-" + key;
-        final TopologyDescription.Sink expectedSinkNode =
-            new InternalTopologyBuilder.Sink("sink", topicNameExtractor);
-
-        assertThat(expectedSinkNode.topicNameExtractor(), equalTo(topicNameExtractor));
     }
 
     @Test
@@ -459,8 +440,8 @@ public class TopologyTest {
     public void sourceAndProcessorWithStateShouldHaveSingleSubtopology() {
         final TopologyDescription.Source expectedSourceNode = addSource("source", "topic");
         final String[] store = new String[] {"store"};
-        final TopologyDescription.Processor expectedProcessorNode =
-            addProcessorWithNewStore("processor", store, expectedSourceNode);
+        final TopologyDescription.Processor expectedProcessorNode
+            = addProcessorWithNewStore("processor", store, expectedSourceNode);
 
         final Set<TopologyDescription.Node> allNodes = new HashSet<>();
         allNodes.add(expectedSourceNode);
@@ -475,8 +456,8 @@ public class TopologyTest {
     public void sourceAndProcessorWithMultipleStatesShouldHaveSingleSubtopology() {
         final TopologyDescription.Source expectedSourceNode = addSource("source", "topic");
         final String[] stores = new String[] {"store1", "store2"};
-        final TopologyDescription.Processor expectedProcessorNode =
-            addProcessorWithNewStore("processor", stores, expectedSourceNode);
+        final TopologyDescription.Processor expectedProcessorNode
+            = addProcessorWithNewStore("processor", stores, expectedSourceNode);
 
         final Set<TopologyDescription.Node> allNodes = new HashSet<>();
         allNodes.add(expectedSourceNode);
@@ -612,16 +593,16 @@ public class TopologyTest {
         final String[] bothStores = new String[] {store1[0], store2[0]};
 
         final TopologyDescription.Source expectedSourceNode1 = addSource("source", "topic");
-        final TopologyDescription.Processor expectedProcessorNode1 =
-            addProcessorWithNewStore("processor1", store1, expectedSourceNode1);
+        final TopologyDescription.Processor expectedProcessorNode1
+            = addProcessorWithNewStore("processor1", store1, expectedSourceNode1);
 
         final TopologyDescription.Source expectedSourceNode2 = addSource("source2", "topic2");
-        final TopologyDescription.Processor expectedProcessorNode2 =
-            addProcessorWithNewStore("processor2", store2, expectedSourceNode2);
+        final TopologyDescription.Processor expectedProcessorNode2
+            = addProcessorWithNewStore("processor2", store2, expectedSourceNode2);
 
         final TopologyDescription.Source expectedSourceNode3 = addSource("source3", "topic3");
-        final TopologyDescription.Processor expectedProcessorNode3 =
-            addProcessorWithExistingStore("processor3", bothStores, expectedSourceNode3);
+        final TopologyDescription.Processor expectedProcessorNode3
+            = addProcessorWithExistingStore("processor3", bothStores, expectedSourceNode3);
 
         final Set<TopologyDescription.Node> allNodes = new HashSet<>();
         allNodes.add(expectedSourceNode1);
@@ -646,34 +627,6 @@ public class TopologyTest {
         addGlobalStoreToTopologyAndExpectedDescription("globalStore1", "source1", "globalTopic1", "processor1", 0);
         addGlobalStoreToTopologyAndExpectedDescription("globalStore2", "source2", "globalTopic2", "processor2", 1);
         assertThat(topology.describe(), equalTo(expectedDescription));
-    }
-
-    @Test
-    public void topologyWithDynamicRoutingShouldDescribeExtractorClass() {
-        final StreamsBuilder builder  = new StreamsBuilder();
-
-        final TopicNameExtractor<Object, Object> topicNameExtractor = new TopicNameExtractor<Object, Object>() {
-            @Override
-            public String extract(final Object key, final Object value, final RecordContext recordContext) {
-                return recordContext.topic() + "-" + key;
-            }
-
-            @Override
-            public String toString() {
-                return "anonymous topic name extractor. topic is [recordContext.topic()]-[key]";
-            }
-        };
-        builder.stream("input-topic").to(topicNameExtractor);
-        final TopologyDescription describe = builder.build().describe();
-
-        assertEquals(
-                "Topologies:\n" +
-                "   Sub-topology: 0\n" +
-                "    Source: KSTREAM-SOURCE-0000000000 (topics: [input-topic])\n" +
-                "      --> KSTREAM-SINK-0000000001\n" +
-                "    Sink: KSTREAM-SINK-0000000001 (extractor class: anonymous topic name extractor. topic is [recordContext.topic()]-[key])\n" +
-                "      <-- KSTREAM-SOURCE-0000000000\n\n",
-                describe.toString());
     }
 
     @Test
@@ -738,7 +691,7 @@ public class TopologyTest {
         final StreamsBuilder builder = new StreamsBuilder();
         builder.stream("input-topic")
             .groupByKey()
-            .windowedBy(TimeWindows.of(ofMillis(1)))
+            .windowedBy(TimeWindows.of(1))
             .count();
         final TopologyDescription describe = builder.build().describe();
         assertEquals(
@@ -758,7 +711,7 @@ public class TopologyTest {
         final StreamsBuilder builder = new StreamsBuilder();
         builder.stream("input-topic")
             .groupByKey()
-            .windowedBy(TimeWindows.of(ofMillis(1)))
+            .windowedBy(TimeWindows.of(1))
             .count(Materialized.as("count-store"));
         final TopologyDescription describe = builder.build().describe();
         assertEquals(
@@ -778,7 +731,7 @@ public class TopologyTest {
         final StreamsBuilder builder = new StreamsBuilder();
         builder.stream("input-topic")
             .groupByKey()
-            .windowedBy(TimeWindows.of(ofMillis(1)))
+            .windowedBy(TimeWindows.of(1))
             .count(Materialized.with(null, Serdes.Long()));
         final TopologyDescription describe = builder.build().describe();
         assertEquals(
@@ -798,7 +751,7 @@ public class TopologyTest {
         final StreamsBuilder builder = new StreamsBuilder();
         builder.stream("input-topic")
             .groupByKey()
-            .windowedBy(SessionWindows.with(ofMillis(1)))
+            .windowedBy(SessionWindows.with(1))
             .count();
         final TopologyDescription describe = builder.build().describe();
         assertEquals(
@@ -818,7 +771,7 @@ public class TopologyTest {
         final StreamsBuilder builder = new StreamsBuilder();
         builder.stream("input-topic")
             .groupByKey()
-            .windowedBy(SessionWindows.with(ofMillis(1)))
+            .windowedBy(SessionWindows.with(1))
             .count(Materialized.as("count-store"));
         final TopologyDescription describe = builder.build().describe();
         assertEquals(
@@ -838,7 +791,7 @@ public class TopologyTest {
         final StreamsBuilder builder = new StreamsBuilder();
         builder.stream("input-topic")
             .groupByKey()
-            .windowedBy(SessionWindows.with(ofMillis(1)))
+            .windowedBy(SessionWindows.with(1))
             .count(Materialized.with(null, Serdes.Long()));
         final TopologyDescription describe = builder.build().describe();
         assertEquals(
@@ -860,7 +813,6 @@ public class TopologyTest {
             .groupBy((key, value) -> null)
             .count();
         final TopologyDescription describe = builder.build().describe();
-
         assertEquals(
             "Topologies:\n" +
                 "   Sub-topology: 0\n" +
@@ -956,12 +908,13 @@ public class TopologyTest {
         final KTable<Object, Object> table = builder.table("input-topic");
         table.mapValues((readOnlyKey, value) -> null);
         final TopologyDescription describe = builder.build().describe();
+        System.out.println(describe);
         Assert.assertEquals(
             "Topologies:\n" +
                 "   Sub-topology: 0\n" +
                 "    Source: KSTREAM-SOURCE-0000000001 (topics: [input-topic])\n" +
                 "      --> KTABLE-SOURCE-0000000002\n" +
-                "    Processor: KTABLE-SOURCE-0000000002 (stores: [])\n" +
+                "    Processor: KTABLE-SOURCE-0000000002 (stores: [input-topic-STATE-STORE-0000000000])\n" +
                 "      --> KTABLE-MAPVALUES-0000000003\n" +
                 "      <-- KSTREAM-SOURCE-0000000001\n" +
                 "    Processor: KTABLE-MAPVALUES-0000000003 (stores: [])\n" +
@@ -983,7 +936,7 @@ public class TopologyTest {
                 "   Sub-topology: 0\n" +
                 "    Source: KSTREAM-SOURCE-0000000001 (topics: [input-topic])\n" +
                 "      --> KTABLE-SOURCE-0000000002\n" +
-                "    Processor: KTABLE-SOURCE-0000000002 (stores: [])\n" +
+                "    Processor: KTABLE-SOURCE-0000000002 (stores: [input-topic-STATE-STORE-0000000000])\n" +
                 "      --> KTABLE-MAPVALUES-0000000004\n" +
                 "      <-- KSTREAM-SOURCE-0000000001\n" +
                 // previously, this was
@@ -1009,7 +962,7 @@ public class TopologyTest {
                 "   Sub-topology: 0\n" +
                 "    Source: KSTREAM-SOURCE-0000000001 (topics: [input-topic])\n" +
                 "      --> KTABLE-SOURCE-0000000002\n" +
-                "    Processor: KTABLE-SOURCE-0000000002 (stores: [])\n" +
+                "    Processor: KTABLE-SOURCE-0000000002 (stores: [input-topic-STATE-STORE-0000000000])\n" +
                 "      --> KTABLE-MAPVALUES-0000000003\n" +
                 "      <-- KSTREAM-SOURCE-0000000001\n" +
                 "    Processor: KTABLE-MAPVALUES-0000000003 (stores: [store-name])\n" +
@@ -1030,7 +983,7 @@ public class TopologyTest {
                 "   Sub-topology: 0\n" +
                 "    Source: KSTREAM-SOURCE-0000000001 (topics: [input-topic])\n" +
                 "      --> KTABLE-SOURCE-0000000002\n" +
-                "    Processor: KTABLE-SOURCE-0000000002 (stores: [])\n" +
+                "    Processor: KTABLE-SOURCE-0000000002 (stores: [input-topic-STATE-STORE-0000000000])\n" +
                 "      --> KTABLE-FILTER-0000000003\n" +
                 "      <-- KSTREAM-SOURCE-0000000001\n" +
                 "    Processor: KTABLE-FILTER-0000000003 (stores: [])\n" +
@@ -1043,14 +996,16 @@ public class TopologyTest {
     public void kTableAnonymousMaterializedFilterShouldPreserveTopologyStructure() {
         final StreamsBuilder builder = new StreamsBuilder();
         final KTable<Object, Object> table = builder.table("input-topic");
-        table.filter((key, value) -> false, Materialized.with(null, null));
+        table.filter(
+            (key, value) -> false,
+            Materialized.with(null, null));
         final TopologyDescription describe = builder.build().describe();
         Assert.assertEquals(
             "Topologies:\n" +
                 "   Sub-topology: 0\n" +
                 "    Source: KSTREAM-SOURCE-0000000001 (topics: [input-topic])\n" +
                 "      --> KTABLE-SOURCE-0000000002\n" +
-                "    Processor: KTABLE-SOURCE-0000000002 (stores: [])\n" +
+                "    Processor: KTABLE-SOURCE-0000000002 (stores: [input-topic-STATE-STORE-0000000000])\n" +
                 "      --> KTABLE-FILTER-0000000004\n" +
                 "      <-- KSTREAM-SOURCE-0000000001\n" +
                 // Previously, this was
@@ -1067,15 +1022,16 @@ public class TopologyTest {
     public void kTableNamedMaterializedFilterShouldPreserveTopologyStructure() {
         final StreamsBuilder builder = new StreamsBuilder();
         final KTable<Object, Object> table = builder.table("input-topic");
-        table.filter((key, value) -> false, Materialized.as("store-name"));
+        table.filter(
+            (key, value) -> false,
+            Materialized.<Object, Object, KeyValueStore<Bytes, byte[]>>as("store-name").withKeySerde(null).withValueSerde(null));
         final TopologyDescription describe = builder.build().describe();
-
         Assert.assertEquals(
             "Topologies:\n" +
                 "   Sub-topology: 0\n" +
                 "    Source: KSTREAM-SOURCE-0000000001 (topics: [input-topic])\n" +
                 "      --> KTABLE-SOURCE-0000000002\n" +
-                "    Processor: KTABLE-SOURCE-0000000002 (stores: [])\n" +
+                "    Processor: KTABLE-SOURCE-0000000002 (stores: [input-topic-STATE-STORE-0000000000])\n" +
                 "      --> KTABLE-FILTER-0000000003\n" +
                 "      <-- KSTREAM-SOURCE-0000000001\n" +
                 "    Processor: KTABLE-FILTER-0000000003 (stores: [store-name])\n" +
@@ -1092,13 +1048,13 @@ public class TopologyTest {
         for (int i = 1; i < sourceTopic.length; ++i) {
             allSourceTopics.append(", ").append(sourceTopic[i]);
         }
-        return new InternalTopologyBuilder.Source(sourceName, new HashSet<>(Arrays.asList(sourceTopic)), null);
+        return new InternalTopologyBuilder.Source(sourceName, allSourceTopics.toString());
     }
 
     private TopologyDescription.Source addSource(final String sourceName,
                                                  final Pattern sourcePattern) {
         topology.addSource(null, sourceName, null, null, null, sourcePattern);
-        return new InternalTopologyBuilder.Source(sourceName, null, sourcePattern);
+        return new InternalTopologyBuilder.Source(sourceName, sourcePattern.toString());
     }
 
     private TopologyDescription.Processor addProcessor(final String processorName,
@@ -1138,8 +1094,8 @@ public class TopologyTest {
         } else {
             topology.connectProcessorAndStateStores(processorName, storeNames);
         }
-        final TopologyDescription.Processor expectedProcessorNode =
-            new InternalTopologyBuilder.Processor(processorName, new HashSet<>(Arrays.asList(storeNames)));
+        final TopologyDescription.Processor expectedProcessorNode
+            = new InternalTopologyBuilder.Processor(processorName, new HashSet<>(Arrays.asList(storeNames)));
 
         for (final TopologyDescription.Node parent : parents) {
             ((InternalTopologyBuilder.AbstractNode) parent).addSuccessor(expectedProcessorNode);
@@ -1158,8 +1114,8 @@ public class TopologyTest {
         }
 
         topology.addSink(sinkName, sinkTopic, null, null, null, parentNames);
-        final TopologyDescription.Sink expectedSinkNode =
-            new InternalTopologyBuilder.Sink(sinkName, sinkTopic);
+        final TopologyDescription.Sink expectedSinkNode
+            = new InternalTopologyBuilder.Sink(sinkName, sinkTopic);
 
         for (final TopologyDescription.Node parent : parents) {
             ((InternalTopologyBuilder.AbstractNode) parent).addSuccessor(expectedSinkNode);

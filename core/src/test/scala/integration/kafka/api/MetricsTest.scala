@@ -19,7 +19,6 @@ import kafka.server.{KafkaConfig, KafkaServer}
 import kafka.utils.{JaasTestUtils, TestUtils}
 import com.yammer.metrics.Metrics
 import com.yammer.metrics.core.{Gauge, Histogram, Meter}
-import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.clients.producer.{KafkaProducer, ProducerConfig, ProducerRecord}
 import org.apache.kafka.common.{Metric, MetricName, TopicPartition}
 import org.apache.kafka.common.config.SaslConfigs
@@ -28,13 +27,14 @@ import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.junit.{After, Before, Test}
 import org.junit.Assert._
-import org.scalatest.Assertions.fail
 
 import scala.collection.JavaConverters._
 
 class MetricsTest extends IntegrationTestHarness with SaslSetup {
 
-  override val brokerCount = 1
+  override val producerCount = 1
+  override val consumerCount = 1
+  override val serverCount = 1
 
   override protected def listenerName = new ListenerName("CLIENT")
   private val kafkaClientSaslMechanism = "PLAIN"
@@ -44,8 +44,7 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
   this.serverConfig.setProperty(KafkaConfig.ZkEnableSecureAclsProp, "false")
   this.serverConfig.setProperty(KafkaConfig.AutoCreateTopicsEnableDoc, "false")
   this.producerConfig.setProperty(ProducerConfig.LINGER_MS_CONFIG, "10")
-  // intentionally slow message down conversion via gzip compression to ensure we can measure the time it takes
-  this.producerConfig.setProperty(ProducerConfig.COMPRESSION_TYPE_CONFIG, "gzip")
+  this.producerConfig.setProperty(ProducerConfig.BATCH_SIZE_CONFIG, "1000000")
   override protected def securityProtocol = SecurityProtocol.SASL_PLAINTEXT
   override protected val serverSaslProperties =
     Some(kafkaServerSaslProperties(kafkaServerSaslMechanisms, kafkaClientSaslMechanism))
@@ -79,18 +78,18 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
 
     // Produce and consume some records
     val numRecords = 10
-    val recordSize = 100000
-    val producer = createProducer()
+    val recordSize = 1000
+    val producer = producers.head
     sendRecords(producer, numRecords, recordSize, tp)
 
-    val consumer = createConsumer()
+    val consumer = this.consumers.head
     consumer.assign(List(tp).asJava)
     consumer.seek(tp, 0)
     TestUtils.consumeRecords(consumer, numRecords)
 
-    verifyKafkaRateMetricsHaveCumulativeCount(producer, consumer)
+    verifyKafkaRateMetricsHaveCumulativeCount()
     verifyClientVersionMetrics(consumer.metrics, "Consumer")
-    verifyClientVersionMetrics(producer.metrics, "Producer")
+    verifyClientVersionMetrics(this.producers.head.metrics, "Producer")
 
     val server = servers.head
     verifyBrokerMessageConversionMetrics(server, recordSize, tp)
@@ -112,17 +111,16 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
 
   // Create a producer that fails authentication to verify authentication failure metrics
   private def generateAuthenticationFailure(tp: TopicPartition): Unit = {
+    val producerProps = new Properties()
     val saslProps = new Properties()
      // Temporary limit to reduce blocking before KIP-152 client-side changes are merged
+    saslProps.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, "1000")
+    saslProps.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, "1000")
     saslProps.put(SaslConfigs.SASL_MECHANISM, "SCRAM-SHA-256")
     // Use acks=0 to verify error metric when connection is closed without a response
-    val producer = TestUtils.createProducer(brokerList,
-      acks = 0,
-      requestTimeoutMs = 1000,
-      maxBlockMs = 1000,
-      securityProtocol = securityProtocol,
-      trustStoreFile = trustStoreFile,
-      saslProperties = Some(saslProps))
+    saslProps.put(ProducerConfig.ACKS_CONFIG, "0")
+    val producer = TestUtils.createProducer(brokerList, securityProtocol = securityProtocol,
+        trustStoreFile = trustStoreFile, saslProperties = Some(saslProps), props = Some(producerProps))
 
     try {
       producer.send(new ProducerRecord(tp.topic, tp.partition, "key".getBytes, "value".getBytes)).get
@@ -133,8 +131,7 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
     }
   }
 
-  private def verifyKafkaRateMetricsHaveCumulativeCount(producer: KafkaProducer[Array[Byte], Array[Byte]],
-                                                        consumer: KafkaConsumer[Array[Byte], Array[Byte]]): Unit =  {
+  private def verifyKafkaRateMetricsHaveCumulativeCount(): Unit =  {
 
     def exists(name: String, rateMetricName: MetricName, allMetricNames: Set[MetricName]): Boolean = {
       allMetricNames.contains(new MetricName(name, rateMetricName.group, "", rateMetricName.tags))
@@ -148,10 +145,12 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
           totalExists || totalTimeExists)
     }
 
+    val consumer = this.consumers.head
     val consumerMetricNames = consumer.metrics.keySet.asScala.toSet
     consumerMetricNames.filter(_.name.endsWith("-rate"))
         .foreach(verify(_, consumerMetricNames))
 
+    val producer = this.producers.head
     val producerMetricNames = producer.metrics.keySet.asScala.toSet
     val producerExclusions = Set("compression-rate") // compression-rate is an Average metric, not Rate
     producerMetricNames.filter(_.name.endsWith("-rate"))
@@ -198,7 +197,18 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
         tempBytes >= recordSize)
 
     verifyYammerMetricRecorded(s"kafka.server:type=BrokerTopicMetrics,name=ProduceMessageConversionsPerSec")
-    verifyYammerMetricRecorded(s"$requestMetricsPrefix,name=MessageConversionsTimeMs,request=Produce", value => value > 0.0)
+
+    // Conversion time less than 1 millisecond is reported as zero, so retry with larger batches until time > 0
+    var iteration = 0
+    TestUtils.retry(5000) {
+      val conversionTimeMs = yammerMetricValue(s"$requestMetricsPrefix,name=MessageConversionsTimeMs,request=Produce").asInstanceOf[Double]
+      if (conversionTimeMs <= 0.0) {
+        iteration += 1
+        sendRecords(producers.head, 1000 * iteration, 100, tp)
+      }
+      assertTrue(s"Message conversion time not recorded $conversionTimeMs", conversionTimeMs > 0.0)
+    }
+
     verifyYammerMetricRecorded(s"$requestMetricsPrefix,name=RequestBytes,request=Fetch")
     verifyYammerMetricRecorded(s"$requestMetricsPrefix,name=TemporaryMemoryBytes,request=Fetch", value => value == 0.0)
 
@@ -229,8 +239,7 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
     verifyYammerMetricRecorded(s"$errorMetricPrefix,request=Metadata,error=NONE")
 
     try {
-      val consumer = createConsumer()
-      consumer.partitionsFor("12{}!")
+      consumers.head.partitionsFor("12{}!")
     } catch {
       case _: InvalidTopicException => // expected
     }
@@ -242,8 +251,7 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
     assertTrue(s"Too many error metrics $currentErrorMetricCount" , currentErrorMetricCount < 10)
 
     // Verify that error metric is updated with producer acks=0 when no response is sent
-    val producer = createProducer()
-    sendRecords(producer, numRecords = 1, recordSize = 100, new TopicPartition("non-existent", 0))
+    sendRecords(producers.head, 1, 100, new TopicPartition("non-existent", 0))
     verifyYammerMetricRecorded(s"$errorMetricPrefix,request=Metadata,error=LEADER_NOT_AVAILABLE")
   }
 
@@ -252,7 +260,7 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
     val matchingMetrics = metrics.asScala.filter {
       case (metricName, _) => metricName.name == name && group.forall(_ == metricName.group)
     }
-    assertTrue(s"Metric not found $name", matchingMetrics.nonEmpty)
+    assertTrue(s"Metric not found $name", matchingMetrics.size > 0)
     verify(matchingMetrics.values)
   }
 
@@ -260,7 +268,7 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
       group: Option[String]): Double = {
     // Use max value of all matching metrics since Selector metrics are recorded for each Processor
     verifyKafkaMetric(name, metrics, entity, group) { matchingMetrics =>
-      matchingMetrics.foldLeft(0.0)((max, metric) => Math.max(max, metric.metricValue.asInstanceOf[Double]))
+      matchingMetrics.foldLeft(0.0)((max, metric) => Math.max(max, metric.value))
     }
   }
 

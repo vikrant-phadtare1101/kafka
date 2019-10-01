@@ -24,11 +24,9 @@ import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.config.TopicConfig;
-import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.errors.StreamsException;
-import org.apache.kafka.streams.processor.internals.testutil.LogCaptureAppender;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -41,7 +39,6 @@ import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class InternalTopicManagerTest {
@@ -125,9 +122,9 @@ public class InternalTopicManagerTest {
             }
         }), mockAdminClient.describeTopics(Collections.singleton(topic3)).values().get(topic3).get());
 
-        final ConfigResource resource = new ConfigResource(ConfigResource.Type.TOPIC, topic);
-        final ConfigResource resource2 = new ConfigResource(ConfigResource.Type.TOPIC, topic2);
-        final ConfigResource resource3 = new ConfigResource(ConfigResource.Type.TOPIC, topic3);
+        ConfigResource resource = new ConfigResource(ConfigResource.Type.TOPIC, topic);
+        ConfigResource resource2 = new ConfigResource(ConfigResource.Type.TOPIC, topic2);
+        ConfigResource resource3 = new ConfigResource(ConfigResource.Type.TOPIC, topic3);
 
         assertEquals(new ConfigEntry(TopicConfig.CLEANUP_POLICY_CONFIG, TopicConfig.CLEANUP_POLICY_DELETE), mockAdminClient.describeConfigs(Collections.singleton(resource)).values().get(resource).get().get(TopicConfig.CLEANUP_POLICY_CONFIG));
         assertEquals(new ConfigEntry(TopicConfig.CLEANUP_POLICY_CONFIG, TopicConfig.CLEANUP_POLICY_COMPACT), mockAdminClient.describeConfigs(Collections.singleton(resource2)).values().get(resource2).get().get(TopicConfig.CLEANUP_POLICY_CONFIG));
@@ -153,7 +150,7 @@ public class InternalTopicManagerTest {
             internalTopicConfig.setNumberOfPartitions(1);
             internalTopicManager.makeReady(Collections.singletonMap(topic, internalTopicConfig));
             fail("Should have thrown StreamsException");
-        } catch (final StreamsException expected) { /* pass */ }
+        } catch (StreamsException expected) { /* pass */ }
     }
 
     @Test
@@ -169,77 +166,28 @@ public class InternalTopicManagerTest {
             mockAdminClient,
             new StreamsConfig(config));
 
-        final InternalTopicConfig internalTopicConfig = new RepartitionTopicConfig(topic, Collections.emptyMap());
+        final InternalTopicConfig internalTopicConfig = new RepartitionTopicConfig(topic, Collections.<String, String>emptyMap());
         internalTopicConfig.setNumberOfPartitions(1);
         internalTopicManager2.makeReady(Collections.singletonMap(topic, internalTopicConfig));
     }
 
     @Test
     public void shouldNotThrowExceptionForEmptyTopicMap() {
-        internalTopicManager.makeReady(Collections.emptyMap());
+        internalTopicManager.makeReady(Collections.<String, InternalTopicConfig>emptyMap());
     }
 
     @Test
     public void shouldExhaustRetriesOnTimeoutExceptionForMakeReady() {
-        mockAdminClient.timeoutNextRequest(1);
+        mockAdminClient.timeoutNextRequest(4);
 
-        final InternalTopicConfig internalTopicConfig = new RepartitionTopicConfig(topic, Collections.emptyMap());
-        internalTopicConfig.setNumberOfPartitions(1);
-        try {
-            internalTopicManager.makeReady(Collections.singletonMap(topic, internalTopicConfig));
-            fail("Should have thrown StreamsException.");
-        } catch (final StreamsException expected) {
-            assertEquals(TimeoutException.class, expected.getCause().getClass());
-        }
-    }
-
-    @Test
-    public void shouldLogWhenTopicNotFoundAndNotThrowException() {
-        LogCaptureAppender.setClassLoggerToDebug(InternalTopicManager.class);
-        final LogCaptureAppender appender = LogCaptureAppender.createAndRegister();
-        mockAdminClient.addTopic(
-            false,
-            topic,
-            Collections.singletonList(new TopicPartitionInfo(0, broker1, cluster, Collections.emptyList())),
-            null);
-
-        final InternalTopicConfig internalTopicConfig = new RepartitionTopicConfig(topic, Collections.emptyMap());
-        internalTopicConfig.setNumberOfPartitions(1);
-
-        final InternalTopicConfig internalTopicConfigII = new RepartitionTopicConfig("internal-topic", Collections.emptyMap());
-        internalTopicConfigII.setNumberOfPartitions(1);
-
-        final Map<String, InternalTopicConfig> topicConfigMap = new HashMap<>();
-        topicConfigMap.put(topic, internalTopicConfig);
-        topicConfigMap.put("internal-topic", internalTopicConfigII);
-
-
-        internalTopicManager.makeReady(topicConfigMap);
-        boolean foundExpectedMessage = false;
-        for (final String message : appender.getMessages()) {
-            foundExpectedMessage |= message.contains("Topic internal-topic is unknown or not found, hence not existed yet.");
-        }
-        assertTrue(foundExpectedMessage);
-
-    }
-
-    @Test
-    public void shouldExhaustRetriesOnMarkedForDeletionTopic() {
-        mockAdminClient.addTopic(
-            false,
-            topic,
-            Collections.singletonList(new TopicPartitionInfo(0, broker1, cluster, Collections.emptyList())),
-            null);
-        mockAdminClient.markTopicForDeletion(topic);
-
-        final InternalTopicConfig internalTopicConfig = new RepartitionTopicConfig(topic, Collections.emptyMap());
+        final InternalTopicConfig internalTopicConfig = new RepartitionTopicConfig(topic, Collections.<String, String>emptyMap());
         internalTopicConfig.setNumberOfPartitions(1);
         try {
             internalTopicManager.makeReady(Collections.singletonMap(topic, internalTopicConfig));
             fail("Should have thrown StreamsException.");
         } catch (final StreamsException expected) {
             assertNull(expected.getCause());
-            assertTrue(expected.getMessage().startsWith("Could not create topics after 1 retries"));
+            assertEquals("Could not create topics. This can happen if the Kafka cluster is temporary not available. You can increase admin client config `retries` to be resilient against this error.", expected.getMessage());
         }
     }
 

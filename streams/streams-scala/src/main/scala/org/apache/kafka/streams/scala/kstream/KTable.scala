@@ -20,10 +20,11 @@
 package org.apache.kafka.streams.scala
 package kstream
 
+import org.apache.kafka.common.serialization.Serde
 import org.apache.kafka.common.utils.Bytes
 import org.apache.kafka.streams.kstream.{KTable => KTableJ, _}
-import org.apache.kafka.streams.scala.FunctionsCompatConversions._
 import org.apache.kafka.streams.scala.ImplicitConversions._
+import org.apache.kafka.streams.scala.FunctionConversions._
 import org.apache.kafka.streams.state.KeyValueStore
 
 /**
@@ -160,18 +161,6 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
     inner.toStream[KR](mapper.asKeyValueMapper)
 
   /**
-   * Suppress some updates from this changelog stream, determined by the supplied [[Suppressed]] configuration.
-   *
-   * This controls what updates downstream table and stream operations will receive.
-   *
-   * @param suppressed Configuration object determining what, if any, updates to suppress.
-   * @return A new KTable with the desired suppression characteristics.
-   * @see `org.apache.kafka.streams.kstream.KTable#suppress`
-   */
-  def suppress(suppressed: Suppressed[_ >: K]): KTable[K, V] =
-    inner.suppress(suppressed)
-
-  /**
    * Create a new `KTable` by transforming the value of each record in this `KTable` into a new value, (with possibly new type).
    * Transform the value of each input record into a new value (with possible new type) of the output record.
    * A `ValueTransformerWithKey` (provided by the given `ValueTransformerWithKeySupplier`) is applied to each input
@@ -224,15 +213,15 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Re-groups the records of this [[KTable]] using the provided key/value mapper
-   * and `Serde`s as specified by `Grouped`.
+   * and `Serde`s as specified by `Serialized`.
    *
    * @param selector      a function that computes a new grouping key and value to be aggregated
-   * @param grouped       the `Grouped` instance used to specify `Serdes`
+   * @param serialized    the `Serialized` instance used to specify `Serdes`
    * @return a [[KGroupedTable]] that contains the re-grouped records of the original [[KTable]]
    * @see `org.apache.kafka.streams.kstream.KTable#groupBy`
    */
-  def groupBy[KR, VR](selector: (K, V) => (KR, VR))(implicit grouped: Grouped[KR, VR]): KGroupedTable[KR, VR] =
-    inner.groupBy(selector.asKeyValueMapper, grouped)
+  def groupBy[KR, VR](selector: (K, V) => (KR, VR))(implicit serialized: Serialized[KR, VR]): KGroupedTable[KR, VR] =
+    inner.groupBy(selector.asKeyValueMapper, serialized)
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed inner equi join.

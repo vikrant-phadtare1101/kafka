@@ -17,8 +17,7 @@
 
 package kafka.tools
 
-import java.io.PrintStream
-import java.nio.file.Files
+import java.io.{FileOutputStream, PrintStream}
 
 import kafka.common.MessageFormatter
 import kafka.tools.ConsoleConsumer.ConsumerWrapper
@@ -27,9 +26,7 @@ import org.apache.kafka.clients.consumer.{ConsumerRecord, MockConsumer, OffsetRe
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.test.MockDeserializer
-import org.mockito.Mockito._
-import org.mockito.ArgumentMatchers
-import ArgumentMatchers._
+import org.easymock.EasyMock
 import org.junit.Assert._
 import org.junit.{Before, Test}
 
@@ -63,53 +60,69 @@ class ConsoleConsumerTest {
       mockConsumer.addRecord(new ConsumerRecord[Array[Byte], Array[Byte]](topic, i % 2, i / 2, "key".getBytes, "value".getBytes))
     }
 
-    val formatter = mock(classOf[MessageFormatter])
+    // Mocks
+    val formatter = EasyMock.createNiceMock(classOf[MessageFormatter])
 
+    // Expectations
+    EasyMock.expect(formatter.writeTo(EasyMock.anyObject(), EasyMock.anyObject())).times(maxMessages)
+    EasyMock.replay(formatter)
+
+    // Test
     ConsoleConsumer.process(maxMessages, formatter, consumer, System.out, skipMessageOnError = false)
     assertEquals(totalMessages, mockConsumer.position(tp1) + mockConsumer.position(tp2))
 
     consumer.resetUnconsumedOffsets()
     assertEquals(maxMessages, mockConsumer.position(tp1) + mockConsumer.position(tp2))
 
-    verify(formatter, times(maxMessages)).writeTo(any(), any())
+    EasyMock.verify(formatter)
   }
 
   @Test
   def shouldLimitReadsToMaxMessageLimit() {
-    val consumer = mock(classOf[ConsumerWrapper])
-    val formatter = mock(classOf[MessageFormatter])
+    //Mocks
+    val consumer = EasyMock.createNiceMock(classOf[ConsumerWrapper])
+    val formatter = EasyMock.createNiceMock(classOf[MessageFormatter])
+
+    //Stubs
     val record = new ConsumerRecord("foo", 1, 1, Array[Byte](), Array[Byte]())
 
+    //Expectations
     val messageLimit: Int = 10
-    when(consumer.receive()).thenReturn(record)
+    EasyMock.expect(formatter.writeTo(EasyMock.anyObject(), EasyMock.anyObject())).times(messageLimit)
+    EasyMock.expect(consumer.receive()).andReturn(record).times(messageLimit)
 
+    EasyMock.replay(consumer)
+    EasyMock.replay(formatter)
+
+    //Test
     ConsoleConsumer.process(messageLimit, formatter, consumer, System.out, true)
-
-    verify(consumer, times(messageLimit)).receive()
-    verify(formatter, times(messageLimit)).writeTo(any(), any())
-
-    consumer.cleanup()
   }
 
   @Test
   def shouldStopWhenOutputCheckErrorFails() {
-    val consumer = mock(classOf[ConsumerWrapper])
-    val formatter = mock(classOf[MessageFormatter])
-    val printStream = mock(classOf[PrintStream])
+    //Mocks
+    val consumer = EasyMock.createNiceMock(classOf[ConsumerWrapper])
+    val formatter = EasyMock.createNiceMock(classOf[MessageFormatter])
+    val printStream = EasyMock.createNiceMock(classOf[PrintStream])
 
+    //Stubs
     val record = new ConsumerRecord("foo", 1, 1, Array[Byte](), Array[Byte]())
 
-    when(consumer.receive()).thenReturn(record)
+    //Expectations
+    EasyMock.expect(consumer.receive()).andReturn(record)
+    EasyMock.expect(formatter.writeTo(EasyMock.anyObject(), EasyMock.eq(printStream)))
     //Simulate an error on System.out after the first record has been printed
-    when(printStream.checkError()).thenReturn(true)
+    EasyMock.expect(printStream.checkError()).andReturn(true)
 
+    EasyMock.replay(consumer)
+    EasyMock.replay(formatter)
+    EasyMock.replay(printStream)
+
+    //Test
     ConsoleConsumer.process(-1, formatter, consumer, printStream, true)
 
-    verify(formatter).writeTo(any(), ArgumentMatchers.eq(printStream))
-    verify(consumer).receive()
-    verify(printStream).checkError()
-
-    consumer.cleanup()
+    //Verify
+    EasyMock.verify(consumer, formatter, printStream)
   }
 
   @Test
@@ -289,7 +302,7 @@ class ConsoleConsumerTest {
   @Test
   def shouldParseConfigsFromFile() {
     val propsFile = TestUtils.tempFile()
-    val propsStream = Files.newOutputStream(propsFile.toPath)
+    val propsStream = new FileOutputStream(propsFile)
     propsStream.write("request.timeout.ms=1000\n".getBytes())
     propsStream.write("group.id=group1".getBytes())
     propsStream.close()
@@ -311,7 +324,7 @@ class ConsoleConsumerTest {
 
     // different in all three places
     var propsFile = TestUtils.tempFile()
-    var propsStream = Files.newOutputStream(propsFile.toPath)
+    var propsStream = new FileOutputStream(propsFile)
     propsStream.write("group.id=group-from-file".getBytes())
     propsStream.close()
     var args: Array[String] = Array(
@@ -331,7 +344,7 @@ class ConsoleConsumerTest {
 
     // the same in all three places
     propsFile = TestUtils.tempFile()
-    propsStream = Files.newOutputStream(propsFile.toPath)
+    propsStream = new FileOutputStream(propsFile)
     propsStream.write("group.id=test-group".getBytes())
     propsStream.close()
     args = Array(
@@ -348,7 +361,7 @@ class ConsoleConsumerTest {
 
     // different via --consumer-property and --consumer.config
     propsFile = TestUtils.tempFile()
-    propsStream = Files.newOutputStream(propsFile.toPath)
+    propsStream = new FileOutputStream(propsFile)
     propsStream.write("group.id=group-from-file".getBytes())
     propsStream.close()
     args = Array(
@@ -382,7 +395,7 @@ class ConsoleConsumerTest {
 
     // different via --group and --consumer.config
     propsFile = TestUtils.tempFile()
-    propsStream = Files.newOutputStream(propsFile.toPath)
+    propsStream = new FileOutputStream(propsFile)
     propsStream.write("group.id=group-from-file".getBytes())
     propsStream.close()
     args = Array(
@@ -432,67 +445,4 @@ class ConsoleConsumerTest {
     assertTrue(formatter.keyDeserializer.get.asInstanceOf[MockDeserializer].isKey)
   }
 
-  @Test
-  def shouldParseGroupIdFromBeginningGivenTogether() {
-    // Start from earliest
-    var args: Array[String] = Array(
-      "--bootstrap-server", "localhost:9092",
-      "--topic", "test",
-      "--group", "test-group",
-      "--from-beginning")
-
-    var config = new ConsoleConsumer.ConsumerConfig(args)
-    assertEquals("localhost:9092", config.bootstrapServer)
-    assertEquals("test", config.topicArg)
-    assertEquals(-2, config.offsetArg)
-    assertEquals(true, config.fromBeginning)
-
-    // Start from latest
-    args = Array(
-      "--bootstrap-server", "localhost:9092",
-      "--topic", "test",
-      "--group", "test-group"
-    )
-
-    config = new ConsoleConsumer.ConsumerConfig(args)
-    assertEquals("localhost:9092", config.bootstrapServer)
-    assertEquals("test", config.topicArg)
-    assertEquals(-1, config.offsetArg)
-    assertEquals(false, config.fromBeginning)
-  }
-
-  @Test(expected = classOf[IllegalArgumentException])
-  def shouldExitOnGroupIdAndPartitionGivenTogether() {
-    Exit.setExitProcedure((_, message) => throw new IllegalArgumentException(message.orNull))
-    //Given
-    val args: Array[String] = Array(
-      "--bootstrap-server", "localhost:9092",
-      "--topic", "test",
-      "--group", "test-group",
-      "--partition", "0")
-
-    //When
-    try {
-      new ConsoleConsumer.ConsumerConfig(args)
-    } finally {
-      Exit.resetExitProcedure()
-    }
-  }
-
-  @Test(expected = classOf[IllegalArgumentException])
-  def shouldExitOnOffsetWithoutPartition() {
-    Exit.setExitProcedure((_, message) => throw new IllegalArgumentException(message.orNull))
-    //Given
-    val args: Array[String] = Array(
-      "--bootstrap-server", "localhost:9092",
-      "--topic", "test",
-      "--offset", "10")
-
-    //When
-    try {
-      new ConsoleConsumer.ConsumerConfig(args)
-    } finally {
-      Exit.resetExitProcedure()
-    }
-  }
 }

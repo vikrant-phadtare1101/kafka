@@ -30,12 +30,10 @@ import org.apache.kafka.common.errors.DelegationTokenDisabledException;
 import org.apache.kafka.common.errors.DelegationTokenExpiredException;
 import org.apache.kafka.common.errors.DelegationTokenNotFoundException;
 import org.apache.kafka.common.errors.DelegationTokenOwnerMismatchException;
-import org.apache.kafka.common.errors.FencedLeaderEpochException;
 import org.apache.kafka.common.errors.ListenerNotFoundException;
 import org.apache.kafka.common.errors.FetchSessionIdNotFoundException;
 import org.apache.kafka.common.errors.GroupAuthorizationException;
 import org.apache.kafka.common.errors.GroupIdNotFoundException;
-import org.apache.kafka.common.errors.GroupMaxSizeReachedException;
 import org.apache.kafka.common.errors.GroupNotEmptyException;
 import org.apache.kafka.common.errors.IllegalGenerationException;
 import org.apache.kafka.common.errors.IllegalSaslStateException;
@@ -60,10 +58,6 @@ import org.apache.kafka.common.errors.InvalidTxnTimeoutException;
 import org.apache.kafka.common.errors.KafkaStorageException;
 import org.apache.kafka.common.errors.LeaderNotAvailableException;
 import org.apache.kafka.common.errors.LogDirNotFoundException;
-import org.apache.kafka.common.errors.FencedInstanceIdException;
-import org.apache.kafka.common.errors.MemberIdRequiredException;
-import org.apache.kafka.common.errors.ElectionNotNeededException;
-import org.apache.kafka.common.errors.EligibleLeadersNotAvailableException;
 import org.apache.kafka.common.errors.NetworkException;
 import org.apache.kafka.common.errors.NotControllerException;
 import org.apache.kafka.common.errors.NotCoordinatorException;
@@ -71,12 +65,10 @@ import org.apache.kafka.common.errors.NotEnoughReplicasAfterAppendException;
 import org.apache.kafka.common.errors.NotEnoughReplicasException;
 import org.apache.kafka.common.errors.NotLeaderForPartitionException;
 import org.apache.kafka.common.errors.OffsetMetadataTooLarge;
-import org.apache.kafka.common.errors.OffsetNotAvailableException;
 import org.apache.kafka.common.errors.OffsetOutOfRangeException;
 import org.apache.kafka.common.errors.OperationNotAttemptedException;
 import org.apache.kafka.common.errors.OutOfOrderSequenceException;
 import org.apache.kafka.common.errors.PolicyViolationException;
-import org.apache.kafka.common.errors.PreferredLeaderNotAvailableException;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.errors.ReassignmentInProgressException;
 import org.apache.kafka.common.errors.RebalanceInProgressException;
@@ -88,27 +80,22 @@ import org.apache.kafka.common.errors.SaslAuthenticationException;
 import org.apache.kafka.common.errors.SecurityDisabledException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.errors.TopicAuthorizationException;
-import org.apache.kafka.common.errors.TopicDeletionDisabledException;
 import org.apache.kafka.common.errors.TopicExistsException;
 import org.apache.kafka.common.errors.TransactionalIdAuthorizationException;
 import org.apache.kafka.common.errors.TransactionCoordinatorFencedException;
-import org.apache.kafka.common.errors.UnknownLeaderEpochException;
 import org.apache.kafka.common.errors.UnknownMemberIdException;
 import org.apache.kafka.common.errors.UnknownProducerIdException;
 import org.apache.kafka.common.errors.UnknownServerException;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.apache.kafka.common.errors.UnsupportedByAuthenticationException;
-import org.apache.kafka.common.errors.UnsupportedCompressionTypeException;
 import org.apache.kafka.common.errors.UnsupportedForMessageFormatException;
 import org.apache.kafka.common.errors.UnsupportedSaslMechanismException;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
-import org.apache.kafka.common.errors.StaleBrokerEpochException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.function.Function;
 
 /**
  * This class contains all the client-server errors--those errors that must be sent from the server to the client. These
@@ -122,196 +109,534 @@ import java.util.function.Function;
  * Do not add exceptions that occur only on the client or only on the server here.
  */
 public enum Errors {
-    UNKNOWN_SERVER_ERROR(-1, "The server experienced an unexpected error when processing the request.",
-            UnknownServerException::new),
-    NONE(0, null, message -> null),
+    UNKNOWN_SERVER_ERROR(-1, "The server experienced an unexpected error when processing the request",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new UnknownServerException(message);
+            }
+        }),
+    NONE(0, null,
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return null;
+            }
+        }),
     OFFSET_OUT_OF_RANGE(1, "The requested offset is not within the range of offsets maintained by the server.",
-            OffsetOutOfRangeException::new),
-    CORRUPT_MESSAGE(2, "This message has failed its CRC checksum, exceeds the valid size, has a null key for a compacted topic, or is otherwise corrupt.",
-            CorruptRecordException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new OffsetOutOfRangeException(message);
+            }
+        }),
+    CORRUPT_MESSAGE(2, "This message has failed its CRC checksum, exceeds the valid size, or is otherwise corrupt.",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new CorruptRecordException(message);
+            }
+        }),
     UNKNOWN_TOPIC_OR_PARTITION(3, "This server does not host this topic-partition.",
-            UnknownTopicOrPartitionException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new UnknownTopicOrPartitionException(message);
+            }
+        }),
     INVALID_FETCH_SIZE(4, "The requested fetch size is invalid.",
-            InvalidFetchSizeException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidFetchSizeException(message);
+            }
+        }),
     LEADER_NOT_AVAILABLE(5, "There is no leader for this topic-partition as we are in the middle of a leadership election.",
-            LeaderNotAvailableException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new LeaderNotAvailableException(message);
+            }
+        }),
     NOT_LEADER_FOR_PARTITION(6, "This server is not the leader for that topic-partition.",
-            NotLeaderForPartitionException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new NotLeaderForPartitionException(message);
+            }
+        }),
     REQUEST_TIMED_OUT(7, "The request timed out.",
-            TimeoutException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new TimeoutException(message);
+            }
+        }),
     BROKER_NOT_AVAILABLE(8, "The broker is not available.",
-            BrokerNotAvailableException::new),
-    REPLICA_NOT_AVAILABLE(9, "The replica is not available for the requested topic-partition.",
-            ReplicaNotAvailableException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new BrokerNotAvailableException(message);
+            }
+        }),
+    REPLICA_NOT_AVAILABLE(9, "The replica is not available for the requested topic-partition",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new ReplicaNotAvailableException(message);
+            }
+        }),
     MESSAGE_TOO_LARGE(10, "The request included a message larger than the max message size the server will accept.",
-            RecordTooLargeException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new RecordTooLargeException(message);
+            }
+        }),
     STALE_CONTROLLER_EPOCH(11, "The controller moved to another broker.",
-            ControllerMovedException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new ControllerMovedException(message);
+            }
+        }),
     OFFSET_METADATA_TOO_LARGE(12, "The metadata field of the offset request was too large.",
-            OffsetMetadataTooLarge::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new OffsetMetadataTooLarge(message);
+            }
+        }),
     NETWORK_EXCEPTION(13, "The server disconnected before a response was received.",
-            NetworkException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new NetworkException(message);
+            }
+        }),
     COORDINATOR_LOAD_IN_PROGRESS(14, "The coordinator is loading and hence can't process requests.",
-            CoordinatorLoadInProgressException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new CoordinatorLoadInProgressException(message);
+            }
+        }),
     COORDINATOR_NOT_AVAILABLE(15, "The coordinator is not available.",
-            CoordinatorNotAvailableException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new CoordinatorNotAvailableException(message);
+            }
+        }),
     NOT_COORDINATOR(16, "This is not the correct coordinator.",
-            NotCoordinatorException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new NotCoordinatorException(message);
+            }
+        }),
     INVALID_TOPIC_EXCEPTION(17, "The request attempted to perform an operation on an invalid topic.",
-            InvalidTopicException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidTopicException(message);
+            }
+        }),
     RECORD_LIST_TOO_LARGE(18, "The request included message batch larger than the configured segment size on the server.",
-            RecordBatchTooLargeException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new RecordBatchTooLargeException(message);
+            }
+        }),
     NOT_ENOUGH_REPLICAS(19, "Messages are rejected since there are fewer in-sync replicas than required.",
-            NotEnoughReplicasException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new NotEnoughReplicasException(message);
+            }
+        }),
     NOT_ENOUGH_REPLICAS_AFTER_APPEND(20, "Messages are written to the log, but to fewer in-sync replicas than required.",
-            NotEnoughReplicasAfterAppendException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new NotEnoughReplicasAfterAppendException(message);
+            }
+        }),
     INVALID_REQUIRED_ACKS(21, "Produce request specified an invalid value for required acks.",
-            InvalidRequiredAcksException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidRequiredAcksException(message);
+            }
+        }),
     ILLEGAL_GENERATION(22, "Specified group generation id is not valid.",
-            IllegalGenerationException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new IllegalGenerationException(message);
+            }
+        }),
     INCONSISTENT_GROUP_PROTOCOL(23,
-            "The group member's supported protocols are incompatible with those of existing members " +
-            "or first group member tried to join with empty protocol type or empty protocol list.",
-            InconsistentGroupProtocolException::new),
-    INVALID_GROUP_ID(24, "The configured groupId is invalid.",
-            InvalidGroupIdException::new),
+            "The group member's supported protocols are incompatible with those of existing members" +
+                " or first group member tried to join with empty protocol type or empty protocol list.",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InconsistentGroupProtocolException(message);
+            }
+        }),
+    INVALID_GROUP_ID(24, "The configured groupId is invalid",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidGroupIdException(message);
+            }
+        }),
     UNKNOWN_MEMBER_ID(25, "The coordinator is not aware of this member.",
-            UnknownMemberIdException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new UnknownMemberIdException(message);
+            }
+        }),
     INVALID_SESSION_TIMEOUT(26,
             "The session timeout is not within the range allowed by the broker " +
             "(as configured by group.min.session.timeout.ms and group.max.session.timeout.ms).",
-            InvalidSessionTimeoutException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidSessionTimeoutException(message);
+            }
+        }),
     REBALANCE_IN_PROGRESS(27, "The group is rebalancing, so a rejoin is needed.",
-            RebalanceInProgressException::new),
-    INVALID_COMMIT_OFFSET_SIZE(28, "The committing offset data size is not valid.",
-            InvalidCommitOffsetSizeException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new RebalanceInProgressException(message);
+            }
+        }),
+    INVALID_COMMIT_OFFSET_SIZE(28, "The committing offset data size is not valid",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidCommitOffsetSizeException(message);
+            }
+        }),
     TOPIC_AUTHORIZATION_FAILED(29, "Topic authorization failed.",
-            TopicAuthorizationException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new TopicAuthorizationException(message);
+            }
+        }),
     GROUP_AUTHORIZATION_FAILED(30, "Group authorization failed.",
-            GroupAuthorizationException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new GroupAuthorizationException(message);
+            }
+        }),
     CLUSTER_AUTHORIZATION_FAILED(31, "Cluster authorization failed.",
-            ClusterAuthorizationException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new ClusterAuthorizationException(message);
+            }
+        }),
     INVALID_TIMESTAMP(32, "The timestamp of the message is out of acceptable range.",
-            InvalidTimestampException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidTimestampException(message);
+            }
+        }),
     UNSUPPORTED_SASL_MECHANISM(33, "The broker does not support the requested SASL mechanism.",
-            UnsupportedSaslMechanismException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new UnsupportedSaslMechanismException(message);
+            }
+        }),
     ILLEGAL_SASL_STATE(34, "Request is not valid given the current SASL state.",
-            IllegalSaslStateException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new IllegalSaslStateException(message);
+            }
+        }),
     UNSUPPORTED_VERSION(35, "The version of API is not supported.",
-            UnsupportedVersionException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new UnsupportedVersionException(message);
+            }
+        }),
     TOPIC_ALREADY_EXISTS(36, "Topic with this name already exists.",
-            TopicExistsException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new TopicExistsException(message);
+            }
+        }),
     INVALID_PARTITIONS(37, "Number of partitions is below 1.",
-            InvalidPartitionsException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidPartitionsException(message);
+            }
+        }),
     INVALID_REPLICATION_FACTOR(38, "Replication factor is below 1 or larger than the number of available brokers.",
-            InvalidReplicationFactorException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidReplicationFactorException(message);
+            }
+        }),
     INVALID_REPLICA_ASSIGNMENT(39, "Replica assignment is invalid.",
-            InvalidReplicaAssignmentException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidReplicaAssignmentException(message);
+            }
+        }),
     INVALID_CONFIG(40, "Configuration is invalid.",
-            InvalidConfigurationException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidConfigurationException(message);
+            }
+        }),
     NOT_CONTROLLER(41, "This is not the correct controller for this cluster.",
-            NotControllerException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new NotControllerException(message);
+            }
+        }),
     INVALID_REQUEST(42, "This most likely occurs because of a request being malformed by the " +
-            "client library or the message was sent to an incompatible broker. See the broker logs " +
-            "for more details.",
-            InvalidRequestException::new),
+                "client library or the message was sent to an incompatible broker. See the broker logs " +
+                "for more details.",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidRequestException(message);
+            }
+        }),
     UNSUPPORTED_FOR_MESSAGE_FORMAT(43, "The message format version on the broker does not support the request.",
-            UnsupportedForMessageFormatException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new UnsupportedForMessageFormatException(message);
+            }
+        }),
     POLICY_VIOLATION(44, "Request parameters do not satisfy the configured policy.",
-            PolicyViolationException::new),
-    OUT_OF_ORDER_SEQUENCE_NUMBER(45, "The broker received an out of order sequence number.",
-            OutOfOrderSequenceException::new),
-    DUPLICATE_SEQUENCE_NUMBER(46, "The broker received a duplicate sequence number.",
-            DuplicateSequenceException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new PolicyViolationException(message);
+            }
+        }),
+    OUT_OF_ORDER_SEQUENCE_NUMBER(45, "The broker received an out of order sequence number",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new OutOfOrderSequenceException(message);
+            }
+        }),
+    DUPLICATE_SEQUENCE_NUMBER(46, "The broker received a duplicate sequence number",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new DuplicateSequenceException(message);
+            }
+        }),
     INVALID_PRODUCER_EPOCH(47, "Producer attempted an operation with an old epoch. Either there is a newer producer " +
             "with the same transactionalId, or the producer's transaction has been expired by the broker.",
-            ProducerFencedException::new),
-    INVALID_TXN_STATE(48, "The producer attempted a transactional operation in an invalid state.",
-            InvalidTxnStateException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new ProducerFencedException(message);
+            }
+        }),
+    INVALID_TXN_STATE(48, "The producer attempted a transactional operation in an invalid state",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidTxnStateException(message);
+            }
+        }),
     INVALID_PRODUCER_ID_MAPPING(49, "The producer attempted to use a producer id which is not currently assigned to " +
-            "its transactional id.",
-            InvalidPidMappingException::new),
+            "its transactional id",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidPidMappingException(message);
+            }
+        }),
     INVALID_TRANSACTION_TIMEOUT(50, "The transaction timeout is larger than the maximum value allowed by " +
-            "the broker (as configured by transaction.max.timeout.ms).",
-            InvalidTxnTimeoutException::new),
+                "the broker (as configured by transaction.max.timeout.ms).",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidTxnTimeoutException(message);
+            }
+        }),
     CONCURRENT_TRANSACTIONS(51, "The producer attempted to update a transaction " +
-            "while another concurrent operation on the same transaction was ongoing.",
-            ConcurrentTransactionsException::new),
+                "while another concurrent operation on the same transaction was ongoing",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new ConcurrentTransactionsException(message);
+            }
+        }),
     TRANSACTION_COORDINATOR_FENCED(52, "Indicates that the transaction coordinator sending a WriteTxnMarker " +
-            "is no longer the current coordinator for a given producer.",
-            TransactionCoordinatorFencedException::new),
-    TRANSACTIONAL_ID_AUTHORIZATION_FAILED(53, "Transactional Id authorization failed.",
-            TransactionalIdAuthorizationException::new),
-    SECURITY_DISABLED(54, "Security features are disabled.",
-            SecurityDisabledException::new),
-    OPERATION_NOT_ATTEMPTED(55, "The broker did not attempt to execute this operation. This may happen for " +
-            "batched RPCs where some operations in the batch failed, causing the broker to respond without " +
-            "trying the rest.",
-            OperationNotAttemptedException::new),
+            "is no longer the current coordinator for a given producer",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new TransactionCoordinatorFencedException(message);
+            }
+        }),
+    TRANSACTIONAL_ID_AUTHORIZATION_FAILED(53, "Transactional Id authorization failed",
+                                                  new ApiExceptionBuilder() {
+        @Override
+        public ApiException build(String message) {
+            return new TransactionalIdAuthorizationException(message);
+        }
+    }),
+    SECURITY_DISABLED(54, "Security features are disabled.", new ApiExceptionBuilder() {
+        @Override
+        public ApiException build(String message) {
+            return new SecurityDisabledException(message);
+        }
+    }),
+    OPERATION_NOT_ATTEMPTED(55, "The broker did not attempt to execute this operation. This may happen for batched RPCs " +
+            "where some operations in the batch failed, causing the broker to respond without trying the rest.",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new OperationNotAttemptedException(message);
+            }
+    }),
     KAFKA_STORAGE_ERROR(56, "Disk error when trying to access log file on the disk.",
-            KafkaStorageException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new KafkaStorageException(message);
+            }
+    }),
     LOG_DIR_NOT_FOUND(57, "The user-specified log directory is not found in the broker config.",
-            LogDirNotFoundException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new LogDirNotFoundException(message);
+            }
+    }),
     SASL_AUTHENTICATION_FAILED(58, "SASL Authentication failed.",
-            SaslAuthenticationException::new),
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new SaslAuthenticationException(message);
+            }
+    }),
     UNKNOWN_PRODUCER_ID(59, "This exception is raised by the broker if it could not locate the producer metadata " +
             "associated with the producerId in question. This could happen if, for instance, the producer's records " +
             "were deleted because their retention time had elapsed. Once the last records of the producerId are " +
             "removed, the producer's metadata is removed from the broker, and future appends by the producer will " +
             "return this exception.",
-            UnknownProducerIdException::new),
-    REASSIGNMENT_IN_PROGRESS(60, "A partition reassignment is in progress.",
-            ReassignmentInProgressException::new),
-    DELEGATION_TOKEN_AUTH_DISABLED(61, "Delegation Token feature is not enabled.",
-            DelegationTokenDisabledException::new),
-    DELEGATION_TOKEN_NOT_FOUND(62, "Delegation Token is not found on server.",
-            DelegationTokenNotFoundException::new),
-    DELEGATION_TOKEN_OWNER_MISMATCH(63, "Specified Principal is not valid Owner/Renewer.",
-            DelegationTokenOwnerMismatchException::new),
-    DELEGATION_TOKEN_REQUEST_NOT_ALLOWED(64, "Delegation Token requests are not allowed on PLAINTEXT/1-way SSL " +
-            "channels and on delegation token authenticated channels.",
-            UnsupportedByAuthenticationException::new),
-    DELEGATION_TOKEN_AUTHORIZATION_FAILED(65, "Delegation Token authorization failed.",
-            DelegationTokenAuthorizationException::new),
-    DELEGATION_TOKEN_EXPIRED(66, "Delegation Token is expired.",
-            DelegationTokenExpiredException::new),
-    INVALID_PRINCIPAL_TYPE(67, "Supplied principalType is not supported.",
-            InvalidPrincipalTypeException::new),
-    NON_EMPTY_GROUP(68, "The group is not empty.",
-            GroupNotEmptyException::new),
-    GROUP_ID_NOT_FOUND(69, "The group id does not exist.",
-            GroupIdNotFoundException::new),
-    FETCH_SESSION_ID_NOT_FOUND(70, "The fetch session ID was not found.",
-            FetchSessionIdNotFoundException::new),
-    INVALID_FETCH_SESSION_EPOCH(71, "The fetch session epoch is invalid.",
-            InvalidFetchSessionEpochException::new),
-    LISTENER_NOT_FOUND(72, "There is no listener on the leader broker that matches the listener on which " +
-            "metadata request was processed.",
-            ListenerNotFoundException::new),
-    TOPIC_DELETION_DISABLED(73, "Topic deletion is disabled.",
-            TopicDeletionDisabledException::new),
-    FENCED_LEADER_EPOCH(74, "The leader epoch in the request is older than the epoch on the broker",
-            FencedLeaderEpochException::new),
-    UNKNOWN_LEADER_EPOCH(75, "The leader epoch in the request is newer than the epoch on the broker",
-            UnknownLeaderEpochException::new),
-    UNSUPPORTED_COMPRESSION_TYPE(76, "The requesting client does not support the compression type of given partition.",
-            UnsupportedCompressionTypeException::new),
-    STALE_BROKER_EPOCH(77, "Broker epoch has changed",
-            StaleBrokerEpochException::new),
-    OFFSET_NOT_AVAILABLE(78, "The leader high watermark has not caught up from a recent leader " +
-            "election so the offsets cannot be guaranteed to be monotonically increasing",
-            OffsetNotAvailableException::new),
-    MEMBER_ID_REQUIRED(79, "The group member needs to have a valid member id before actually entering a consumer group",
-            MemberIdRequiredException::new),
-    PREFERRED_LEADER_NOT_AVAILABLE(80, "The preferred leader was not available",
-            PreferredLeaderNotAvailableException::new),
-    GROUP_MAX_SIZE_REACHED(81, "The consumer group has reached its max size.", GroupMaxSizeReachedException::new),
-    FENCED_INSTANCE_ID(82, "The broker rejected this static consumer since " +
-            "another consumer with the same group.instance.id has registered with a different member.id.",
-            FencedInstanceIdException::new),
-    ELIGIBLE_LEADERS_NOT_AVAILABLE(83, "Eligible topic partition leaders are not available",
-            EligibleLeadersNotAvailableException::new),
-    ELECTION_NOT_NEEDED(84, "Leader election not needed for topic partition", ElectionNotNeededException::new);
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new UnknownProducerIdException(message);
+            }
+    }),
+    REASSIGNMENT_IN_PROGRESS(60, "A partition reassignment is in progress",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new ReassignmentInProgressException(message);
+            }
+        }),
+    DELEGATION_TOKEN_AUTH_DISABLED(61, "Delegation Token feature is not enabled.", new ApiExceptionBuilder() {
+        @Override
+        public ApiException build(String message) {
+            return new DelegationTokenDisabledException(message);
+        }
+    }),
+    DELEGATION_TOKEN_NOT_FOUND(62, "Delegation Token is not found on server.", new ApiExceptionBuilder() {
+        @Override
+        public ApiException build(String message) {
+            return new DelegationTokenNotFoundException(message);
+        }
+    }),
+    DELEGATION_TOKEN_OWNER_MISMATCH(63, "Specified Principal is not valid Owner/Renewer.", new ApiExceptionBuilder() {
+        @Override
+        public ApiException build(String message) {
+            return new DelegationTokenOwnerMismatchException(message);
+        }
+    }),
+    DELEGATION_TOKEN_REQUEST_NOT_ALLOWED(64, "Delegation Token requests are not allowed on PLAINTEXT/1-way SSL channels and " + "on delegation token authenticated channels.", new ApiExceptionBuilder() {
+        @Override
+        public ApiException build(String message) {
+            return new UnsupportedByAuthenticationException(message);
+        }
+    }),
+    DELEGATION_TOKEN_AUTHORIZATION_FAILED(65, "Delegation Token authorization failed.", new ApiExceptionBuilder() {
+        @Override
+        public ApiException build(String message) {
+            return new DelegationTokenAuthorizationException(message);
+        }
+    }),
+    DELEGATION_TOKEN_EXPIRED(66, "Delegation Token is expired.", new ApiExceptionBuilder() {
+        @Override
+        public ApiException build(String message) {
+            return new DelegationTokenExpiredException(message);
+        }
+    }),
+    INVALID_PRINCIPAL_TYPE(67, "Supplied principalType is not supported", new ApiExceptionBuilder() {
+        @Override
+        public ApiException build(String message) {
+            return new InvalidPrincipalTypeException(message);
+        }
+    }),
+    NON_EMPTY_GROUP(68, "The group is not empty", new ApiExceptionBuilder() {
+        @Override
+        public ApiException build(String message) {
+            return new GroupNotEmptyException(message);
+        }
+    }),
+    GROUP_ID_NOT_FOUND(69, "The group id does not exist", new ApiExceptionBuilder() {
+        @Override
+        public ApiException build(String message) {
+            return new GroupIdNotFoundException(message);
+        }
+    }),
+    FETCH_SESSION_ID_NOT_FOUND(70, "The fetch session ID was not found",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new FetchSessionIdNotFoundException(message);
+            }
+    }),
+    INVALID_FETCH_SESSION_EPOCH(71, "The fetch session epoch is invalid",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new InvalidFetchSessionEpochException(message);
+            }
+    }),
+    LISTENER_NOT_FOUND(72, "There is no listener on the leader broker that matches the listener on which metadata request was processed",
+        new ApiExceptionBuilder() {
+            @Override
+            public ApiException build(String message) {
+                return new ListenerNotFoundException(message);
+            }
+    }),;
+
+    private interface ApiExceptionBuilder {
+        ApiException build(String message);
+    }
 
     private static final Logger log = LoggerFactory.getLogger(Errors.class);
 
@@ -320,23 +645,20 @@ public enum Errors {
 
     static {
         for (Errors error : Errors.values()) {
-            if (codeToError.put(error.code(), error) != null)
-                throw new ExceptionInInitializerError("Code " + error.code() + " for error " +
-                        error + " has already been used");
-
+            codeToError.put(error.code(), error);
             if (error.exception != null)
                 classToError.put(error.exception.getClass(), error);
         }
     }
 
     private final short code;
-    private final Function<String, ApiException> builder;
+    private final ApiExceptionBuilder builder;
     private final ApiException exception;
 
-    Errors(int code, String defaultExceptionString, Function<String, ApiException> builder) {
+    Errors(int code, String defaultExceptionString, ApiExceptionBuilder builder) {
         this.code = (short) code;
         this.builder = builder;
-        this.exception = builder.apply(defaultExceptionString);
+        this.exception = builder.build(defaultExceptionString);
     }
 
     /**
@@ -358,7 +680,7 @@ public enum Errors {
             return exception;
         }
         // Return an exception with the given error message.
-        return builder.apply(message);
+        return builder.build(message);
     }
 
     /**

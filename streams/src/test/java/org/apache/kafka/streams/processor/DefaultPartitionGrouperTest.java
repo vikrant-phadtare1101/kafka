@@ -91,14 +91,16 @@ public class DefaultPartitionGrouperTest {
         assertEquals(expectedPartitionsForTask, grouper.partitionGroups(topicGroups, metadata));
     }
 
-    @Test(expected = RuntimeException.class)
+    @Test
     public void shouldNotCreateAnyTasksBecauseOneTopicHasUnknownPartitions() {
         final PartitionGrouper grouper = new DefaultPartitionGrouper();
+        final Map<TaskId, Set<TopicPartition>> expectedPartitionsForTask = new HashMap<>();
         final Map<Integer, Set<String>> topicGroups = new HashMap<>();
-    
+
         final int topicGroupId = 0;
-    
+
         topicGroups.put(topicGroupId, mkSet("topic1", "unknownTopic", "topic2"));
-        grouper.partitionGroups(topicGroups, metadata);
+
+        assertEquals(expectedPartitionsForTask, grouper.partitionGroups(topicGroups, metadata));
     }
 }

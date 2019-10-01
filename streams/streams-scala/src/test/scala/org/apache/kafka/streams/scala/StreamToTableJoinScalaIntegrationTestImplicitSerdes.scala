@@ -18,13 +18,19 @@ package org.apache.kafka.streams.scala
 
 import java.util.Properties
 
+import kafka.utils.MockTime
+import org.apache.kafka.clients.consumer.ConsumerConfig
+import org.apache.kafka.clients.producer.ProducerConfig
+import org.apache.kafka.common.serialization.{LongDeserializer, LongSerializer, StringDeserializer, StringSerializer}
 import org.apache.kafka.streams._
+import org.apache.kafka.streams.integration.utils.{EmbeddedKafkaCluster, IntegrationTestUtils}
 import org.apache.kafka.streams.scala.ImplicitConversions._
 import org.apache.kafka.streams.scala.kstream._
-import org.apache.kafka.streams.scala.utils.StreamToTableJoinScalaIntegrationTestBase
-import org.apache.kafka.test.IntegrationTest
+import org.apache.kafka.streams.scala.utils.StreamToTableJoinTestData
+import org.apache.kafka.test.TestUtils
 import org.junit._
-import org.junit.experimental.categories.Category
+import org.junit.rules.TemporaryFolder
+import org.scalatest.junit.JUnitSuite
 
 /**
  * Test suite that does an example to demonstrate stream-table joins in Kafka Streams
@@ -35,13 +41,33 @@ import org.junit.experimental.categories.Category
  * Note: In the current project settings SAM type conversion is turned off as it's experimental in Scala 2.11.
  * Hence the native Java API based version is more verbose.
  */
-@Category(Array(classOf[IntegrationTest]))
-class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJoinScalaIntegrationTestBase {
+class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends JUnitSuite with StreamToTableJoinTestData {
+
+  private val privateCluster: EmbeddedKafkaCluster = new EmbeddedKafkaCluster(1)
+
+  @Rule def cluster: EmbeddedKafkaCluster = privateCluster
+
+  final val alignedTime = (System.currentTimeMillis() / 1000 + 1) * 1000
+  val mockTime: MockTime = cluster.time
+  mockTime.setCurrentTimeMs(alignedTime)
+
+  val tFolder: TemporaryFolder = new TemporaryFolder(TestUtils.tempDirectory())
+  @Rule def testFolder: TemporaryFolder = tFolder
+
+  @Before
+  def startKafkaCluster(): Unit = {
+    cluster.createTopic(userClicksTopic)
+    cluster.createTopic(userRegionsTopic)
+    cluster.createTopic(outputTopic)
+    cluster.createTopic(userClicksTopicJ)
+    cluster.createTopic(userRegionsTopicJ)
+    cluster.createTopic(outputTopicJ)
+  }
 
   @Test def testShouldCountClicksPerRegion(): Unit = {
 
-    // DefaultSerdes brings into scope implicit serdes (mostly for primitives) that will set up all Grouped, Produced,
-    // Consumed and Joined instances. So all APIs below that accept Grouped, Produced, Consumed or Joined will
+    // DefaultSerdes brings into scope implicit serdes (mostly for primitives) that will set up all Serialized, Produced,
+    // Consumed and Joined instances. So all APIs below that accept Serialized, Produced, Consumed or Joined will
     // get these instances automatically
     import Serdes._
 
@@ -75,51 +101,6 @@ class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJ
 
     val actualClicksPerRegion: java.util.List[KeyValue[String, Long]] =
       produceNConsume(userClicksTopic, userRegionsTopic, outputTopic)
-
-    Assert.assertTrue("Expected to process some data", !actualClicksPerRegion.isEmpty)
-
-    streams.close()
-  }
-
-  @Test def testShouldCountClicksPerRegionWithNamedRepartitionTopic(): Unit = {
-
-    // DefaultSerdes brings into scope implicit serdes (mostly for primitives) that will set up all Grouped, Produced,
-    // Consumed and Joined instances. So all APIs below that accept Grouped, Produced, Consumed or Joined will
-    // get these instances automatically
-    import Serdes._
-
-    val streamsConfiguration: Properties = getStreamsConfiguration()
-
-    val builder = new StreamsBuilder()
-
-    val userClicksStream: KStream[String, Long] = builder.stream(userClicksTopic)
-
-    val userRegionsTable: KTable[String, String] = builder.table(userRegionsTopic)
-
-    // Compute the total per region by summing the individual click counts per region.
-    val clicksPerRegion: KTable[String, Long] =
-      userClicksStream
-
-      // Join the stream against the table.
-        .leftJoin(userRegionsTable)((clicks, region) => (if (region == null) "UNKNOWN" else region, clicks))
-
-        // Change the stream from <user> -> <region, clicks> to <region> -> <clicks>
-        .map((_, regionWithClicks) => regionWithClicks)
-
-        // Compute the total per region by summing the individual click counts per region.
-        .groupByKey
-        .reduce(_ + _)
-
-    // Write the (continuously updating) results to the output topic.
-    clicksPerRegion.toStream.to(outputTopic)
-
-    val streams: KafkaStreams = new KafkaStreams(builder.build(), streamsConfiguration)
-    streams.start()
-
-    val actualClicksPerRegion: java.util.List[KeyValue[String, Long]] =
-      produceNConsume(userClicksTopic, userRegionsTopic, outputTopic)
-
-    Assert.assertTrue("Expected to process some data", !actualClicksPerRegion.isEmpty)
 
     streams.close()
   }
@@ -130,6 +111,8 @@ class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJ
 
     import org.apache.kafka.streams.kstream.{KStream => KStreamJ, KTable => KTableJ, _}
     import org.apache.kafka.streams.{KafkaStreams => KafkaStreamsJ, StreamsBuilder => StreamsBuilderJ}
+
+    import collection.JavaConverters._
 
     val streamsConfiguration: Properties = getStreamsConfiguration()
 
@@ -166,10 +149,10 @@ class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJ
 
     // Compute the total per region by summing the individual click counts per region.
     val clicksPerRegion: KTableJ[String, JLong] = clicksByRegion
-      .groupByKey(Grouped.`with`[String, JLong](Serdes.String, Serdes.JavaLong))
+      .groupByKey(Serialized.`with`(Serdes.String, Serdes.JavaLong))
       .reduce {
         new Reducer[JLong] {
-          def apply(v1: JLong, v2: JLong): JLong = v1 + v2
+          def apply(v1: JLong, v2: JLong) = v1 + v2
         }
       }
 
@@ -181,5 +164,75 @@ class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJ
     streams.start()
     produceNConsume(userClicksTopicJ, userRegionsTopicJ, outputTopicJ)
     streams.close()
+  }
+
+  private def getStreamsConfiguration(): Properties = {
+    val streamsConfiguration: Properties = new Properties()
+
+    streamsConfiguration.put(StreamsConfig.APPLICATION_ID_CONFIG, "stream-table-join-scala-integration-test")
+    streamsConfiguration.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, cluster.bootstrapServers())
+    streamsConfiguration.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, "1000")
+    streamsConfiguration.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
+    streamsConfiguration.put(StreamsConfig.STATE_DIR_CONFIG, testFolder.getRoot.getPath)
+
+    streamsConfiguration
+  }
+
+  private def getUserRegionsProducerConfig(): Properties = {
+    val p = new Properties()
+    p.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, cluster.bootstrapServers())
+    p.put(ProducerConfig.ACKS_CONFIG, "all")
+    p.put(ProducerConfig.RETRIES_CONFIG, "0")
+    p.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, classOf[StringSerializer])
+    p.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, classOf[StringSerializer])
+    p
+  }
+
+  private def getUserClicksProducerConfig(): Properties = {
+    val p = new Properties()
+    p.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, cluster.bootstrapServers())
+    p.put(ProducerConfig.ACKS_CONFIG, "all")
+    p.put(ProducerConfig.RETRIES_CONFIG, "0")
+    p.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, classOf[StringSerializer])
+    p.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, classOf[LongSerializer])
+    p
+  }
+
+  private def getConsumerConfig(): Properties = {
+    val p = new Properties()
+    p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, cluster.bootstrapServers())
+    p.put(ConsumerConfig.GROUP_ID_CONFIG, "join-scala-integration-test-standard-consumer")
+    p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
+    p.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, classOf[StringDeserializer])
+    p.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, classOf[LongDeserializer])
+    p
+  }
+
+  private def produceNConsume(userClicksTopic: String,
+                              userRegionsTopic: String,
+                              outputTopic: String): java.util.List[KeyValue[String, Long]] = {
+
+    import collection.JavaConverters._
+
+    // Publish user-region information.
+    val userRegionsProducerConfig: Properties = getUserRegionsProducerConfig()
+    IntegrationTestUtils.produceKeyValuesSynchronously(userRegionsTopic,
+                                                       userRegions.asJava,
+                                                       userRegionsProducerConfig,
+                                                       mockTime,
+                                                       false)
+
+    // Publish user-click information.
+    val userClicksProducerConfig: Properties = getUserClicksProducerConfig()
+    IntegrationTestUtils.produceKeyValuesSynchronously(userClicksTopic,
+                                                       userClicks.asJava,
+                                                       userClicksProducerConfig,
+                                                       mockTime,
+                                                       false)
+
+    // consume and verify result
+    val consumerConfig = getConsumerConfig()
+
+    IntegrationTestUtils.waitUntilMinKeyValueRecordsReceived(consumerConfig, outputTopic, expectedClicksPerRegion.size)
   }
 }

@@ -53,7 +53,7 @@ import static org.junit.Assert.assertTrue;
 
 public class StreamsMetadataStateTest {
 
-    private StreamsMetadataState metadataState;
+    private StreamsMetadataState discovery;
     private HostInfo hostOne;
     private HostInfo hostTwo;
     private HostInfo hostThree;
@@ -121,8 +121,8 @@ public class StreamsMetadataStateTest {
                 new PartitionInfo("topic-four", 0, null, null, null));
 
         cluster = new Cluster(null, Collections.<Node>emptyList(), partitionInfos, Collections.<String>emptySet(), Collections.<String>emptySet());
-        metadataState = new StreamsMetadataState(TopologyWrapper.getInternalTopologyBuilder(builder.build()), hostOne);
-        metadataState.onChange(hostToPartitions, cluster);
+        discovery = new StreamsMetadataState(TopologyWrapper.getInternalTopologyBuilder(builder.build()), hostOne);
+        discovery.onChange(hostToPartitions, cluster);
         partitioner = new StreamPartitioner<String, Object>() {
             @Override
             public Integer partition(final String topic, final String key, final Object value, final int numPartitions) {
@@ -145,7 +145,7 @@ public class StreamsMetadataStateTest {
         final StreamsMetadata three = new StreamsMetadata(hostThree, Utils.mkSet(globalTable, "table-three"),
                 Collections.singleton(topic3P0));
 
-        final Collection<StreamsMetadata> actual = metadataState.getAllMetadata();
+        Collection<StreamsMetadata> actual = discovery.getAllMetadata();
         assertEquals(3, actual.size());
         assertTrue("expected " + actual + " to contain " + one, actual.contains(one));
         assertTrue("expected " + actual + " to contain " + two, actual.contains(two));
@@ -165,11 +165,11 @@ public class StreamsMetadataStateTest {
         final HostInfo hostFour = new HostInfo("host-four", 8080);
         hostToPartitions.put(hostFour, Utils.mkSet(tp5));
 
-        metadataState.onChange(hostToPartitions, cluster.withPartitions(Collections.singletonMap(tp5, new PartitionInfo("topic-five", 1, null, null, null))));
+        discovery.onChange(hostToPartitions, cluster.withPartitions(Collections.singletonMap(tp5, new PartitionInfo("topic-five", 1, null, null, null))));
 
         final StreamsMetadata expected = new StreamsMetadata(hostFour, Collections.singleton(globalTable),
                 Collections.singleton(tp5));
-        final Collection<StreamsMetadata> actual = metadataState.getAllMetadata();
+        final Collection<StreamsMetadata> actual = discovery.getAllMetadata();
         assertTrue("expected " + actual + " to contain " + expected, actual.contains(expected));
     }
 
@@ -179,7 +179,7 @@ public class StreamsMetadataStateTest {
                 Utils.mkSet(topic1P0, topic2P1, topic4P0));
         final StreamsMetadata two = new StreamsMetadata(hostTwo, Utils.mkSet(globalTable, "table-two", "table-one", "merged-table"),
                 Utils.mkSet(topic2P0, topic1P1));
-        final Collection<StreamsMetadata> actual = metadataState.getAllMetadataForStore("table-one");
+        final Collection<StreamsMetadata> actual = discovery.getAllMetadataForStore("table-one");
         assertEquals(2, actual.size());
         assertTrue("expected " + actual + " to contain " + one, actual.contains(one));
         assertTrue("expected " + actual + " to contain " + two, actual.contains(two));
@@ -187,12 +187,12 @@ public class StreamsMetadataStateTest {
 
     @Test(expected = NullPointerException.class)
     public void shouldThrowIfStoreNameIsNullOnGetAllInstancesWithStore() {
-        metadataState.getAllMetadataForStore(null);
+        discovery.getAllMetadataForStore(null);
     }
 
     @Test
     public void shouldReturnEmptyCollectionOnGetAllInstancesWithStoreWhenStoreDoesntExist() {
-        final Collection<StreamsMetadata> actual = metadataState.getAllMetadataForStore("not-a-store");
+        final Collection<StreamsMetadata> actual = discovery.getAllMetadataForStore("not-a-store");
         assertTrue(actual.isEmpty());
     }
 
@@ -201,12 +201,12 @@ public class StreamsMetadataStateTest {
         final TopicPartition tp4 = new TopicPartition("topic-three", 1);
         hostToPartitions.put(hostTwo, Utils.mkSet(topic2P0, tp4));
 
-        metadataState.onChange(hostToPartitions, cluster.withPartitions(Collections.singletonMap(tp4, new PartitionInfo("topic-three", 1, null, null, null))));
+        discovery.onChange(hostToPartitions, cluster.withPartitions(Collections.singletonMap(tp4, new PartitionInfo("topic-three", 1, null, null, null))));
 
         final StreamsMetadata expected = new StreamsMetadata(hostThree, Utils.mkSet(globalTable, "table-three"),
                 Collections.singleton(topic3P0));
 
-        final StreamsMetadata actual = metadataState.getMetadataWithKey("table-three",
+        final StreamsMetadata actual = discovery.getMetadataWithKey("table-three",
                                                                     "the-key",
                                                                     Serdes.String().serializer());
 
@@ -218,19 +218,19 @@ public class StreamsMetadataStateTest {
         final TopicPartition tp4 = new TopicPartition("topic-three", 1);
         hostToPartitions.put(hostTwo, Utils.mkSet(topic2P0, tp4));
 
-        metadataState.onChange(hostToPartitions, cluster.withPartitions(Collections.singletonMap(tp4, new PartitionInfo("topic-three", 1, null, null, null))));
+        discovery.onChange(hostToPartitions, cluster.withPartitions(Collections.singletonMap(tp4, new PartitionInfo("topic-three", 1, null, null, null))));
 
         final StreamsMetadata expected = new StreamsMetadata(hostTwo, Utils.mkSet(globalTable, "table-two", "table-three", "merged-table"),
                 Utils.mkSet(topic2P0, tp4));
 
-        final StreamsMetadata actual = metadataState.getMetadataWithKey("table-three", "the-key", partitioner);
+        StreamsMetadata actual = discovery.getMetadataWithKey("table-three", "the-key", partitioner);
         assertEquals(expected, actual);
     }
 
     @Test
     public void shouldReturnNotAvailableWhenClusterIsEmpty() {
-        metadataState.onChange(Collections.<HostInfo, Set<TopicPartition>>emptyMap(), Cluster.empty());
-        final StreamsMetadata result = metadataState.getMetadataWithKey("table-one", "a", Serdes.String().serializer());
+        discovery.onChange(Collections.<HostInfo, Set<TopicPartition>>emptyMap(), Cluster.empty());
+        final StreamsMetadata result = discovery.getMetadataWithKey("table-one", "a", Serdes.String().serializer());
         assertEquals(StreamsMetadata.NOT_AVAILABLE, result);
     }
 
@@ -238,12 +238,12 @@ public class StreamsMetadataStateTest {
     public void shouldGetInstanceWithKeyWithMergedStreams() {
         final TopicPartition topic2P2 = new TopicPartition("topic-two", 2);
         hostToPartitions.put(hostTwo, Utils.mkSet(topic2P0, topic1P1, topic2P2));
-        metadataState.onChange(hostToPartitions, cluster.withPartitions(Collections.singletonMap(topic2P2, new PartitionInfo("topic-two", 2, null, null, null))));
+        discovery.onChange(hostToPartitions, cluster.withPartitions(Collections.singletonMap(topic2P2, new PartitionInfo("topic-two", 2, null, null, null))));
 
         final StreamsMetadata expected = new StreamsMetadata(hostTwo, Utils.mkSet("global-table", "table-two", "table-one", "merged-table"),
                 Utils.mkSet(topic2P0, topic1P1, topic2P2));
 
-        final StreamsMetadata actual = metadataState.getMetadataWithKey("merged-table", "123", new StreamPartitioner<String, Object>() {
+        final StreamsMetadata actual = discovery.getMetadataWithKey("merged-table", "123", new StreamPartitioner<String, Object>() {
             @Override
             public Integer partition(final String topic, final String key, final Object value, final int numPartitions) {
                 return 2;
@@ -256,7 +256,7 @@ public class StreamsMetadataStateTest {
 
     @Test
     public void shouldReturnNullOnGetWithKeyWhenStoreDoesntExist() {
-        final StreamsMetadata actual = metadataState.getMetadataWithKey("not-a-store",
+        final StreamsMetadata actual = discovery.getMetadataWithKey("not-a-store",
                 "key",
                 Serdes.String().serializer());
         assertNull(actual);
@@ -264,37 +264,37 @@ public class StreamsMetadataStateTest {
 
     @Test(expected = NullPointerException.class)
     public void shouldThrowWhenKeyIsNull() {
-        metadataState.getMetadataWithKey("table-three", null, Serdes.String().serializer());
+        discovery.getMetadataWithKey("table-three", null, Serdes.String().serializer());
     }
 
     @Test(expected = NullPointerException.class)
     public void shouldThrowWhenSerializerIsNull() {
-        metadataState.getMetadataWithKey("table-three", "key", (Serializer<Object>) null);
+        discovery.getMetadataWithKey("table-three", "key", (Serializer) null);
     }
 
     @Test(expected = NullPointerException.class)
     public void shouldThrowIfStoreNameIsNull() {
-        metadataState.getMetadataWithKey(null, "key", Serdes.String().serializer());
+        discovery.getMetadataWithKey(null, "key", Serdes.String().serializer());
     }
 
     @SuppressWarnings("unchecked")
     @Test(expected = NullPointerException.class)
     public void shouldThrowIfStreamPartitionerIsNull() {
-        metadataState.getMetadataWithKey(null, "key", (StreamPartitioner) null);
+        discovery.getMetadataWithKey(null, "key", (StreamPartitioner) null);
     }
 
     @Test
     public void shouldHaveGlobalStoreInAllMetadata() {
-        final Collection<StreamsMetadata> metadata = metadataState.getAllMetadataForStore(globalTable);
+        final Collection<StreamsMetadata> metadata = discovery.getAllMetadataForStore(globalTable);
         assertEquals(3, metadata.size());
-        for (final StreamsMetadata streamsMetadata : metadata) {
+        for (StreamsMetadata streamsMetadata : metadata) {
             assertTrue(streamsMetadata.stateStoreNames().contains(globalTable));
         }
     }
 
     @Test
     public void shouldGetMyMetadataForGlobalStoreWithKey() {
-        final StreamsMetadata metadata = metadataState.getMetadataWithKey(globalTable, "key", Serdes.String().serializer());
+        final StreamsMetadata metadata = discovery.getMetadataWithKey(globalTable, "key", Serdes.String().serializer());
         assertEquals(hostOne, metadata.hostInfo());
     }
 
@@ -307,7 +307,7 @@ public class StreamsMetadataStateTest {
 
     @Test
     public void shouldGetMyMetadataForGlobalStoreWithKeyAndPartitioner() {
-        final StreamsMetadata metadata = metadataState.getMetadataWithKey(globalTable, "key", partitioner);
+        final StreamsMetadata metadata = discovery.getMetadataWithKey(globalTable, "key", partitioner);
         assertEquals(hostOne, metadata.hostInfo());
     }
 

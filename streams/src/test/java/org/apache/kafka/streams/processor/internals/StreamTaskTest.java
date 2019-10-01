@@ -21,19 +21,17 @@ import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.clients.producer.MockProducer;
 import org.apache.kafka.common.KafkaException;
-import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.errors.TimeoutException;
-import org.apache.kafka.common.metrics.JmxReporter;
 import org.apache.kafka.common.metrics.KafkaMetric;
-import org.apache.kafka.common.metrics.MetricConfig;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.record.TimestampType;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.Deserializer;
+import org.apache.kafka.common.serialization.IntegerDeserializer;
 import org.apache.kafka.common.serialization.IntegerSerializer;
-import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.MockTime;
@@ -50,10 +48,10 @@ import org.apache.kafka.streams.processor.TaskId;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
 import org.apache.kafka.streams.processor.internals.testutil.LogCaptureAppender;
 import org.apache.kafka.streams.state.internals.OffsetCheckpoint;
-import org.apache.kafka.test.MockKeyValueStore;
 import org.apache.kafka.test.MockProcessorNode;
 import org.apache.kafka.test.MockSourceNode;
 import org.apache.kafka.test.MockStateRestoreListener;
+import org.apache.kafka.test.MockStateStore;
 import org.apache.kafka.test.MockTimestampExtractor;
 import org.apache.kafka.test.NoOpRecordCollector;
 import org.apache.kafka.test.TestUtils;
@@ -63,7 +61,6 @@ import org.junit.Test;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
@@ -89,9 +86,9 @@ import static org.junit.Assert.fail;
 
 public class StreamTaskTest {
 
-    private final Serializer<Integer> intSerializer = Serdes.Integer().serializer();
-    private final Serializer<byte[]> bytesSerializer = Serdes.ByteArray().serializer();
-    private final Deserializer<Integer> intDeserializer = Serdes.Integer().deserializer();
+    private final Serializer<Integer> intSerializer = new IntegerSerializer();
+    private final Deserializer<Integer> intDeserializer = new IntegerDeserializer();
+    private final Serializer<byte[]> bytesSerializer = new ByteArraySerializer();
     private final String topic1 = "topic1";
     private final String topic2 = "topic2";
     private final TopicPartition partition1 = new TopicPartition(topic1, 1);
@@ -115,13 +112,13 @@ public class StreamTaskTest {
     private final MockProcessorNode<Integer, Integer> processorSystemTime = new MockProcessorNode<>(10L, PunctuationType.WALL_CLOCK_TIME);
 
     private final String storeName = "store";
-    private final StateStore stateStore = new MockKeyValueStore(storeName, false);
+    private final StateStore stateStore = new MockStateStore(storeName, false);
     private final TopicPartition changelogPartition = new TopicPartition("store-changelog", 0);
     private final Long offset = 543L;
 
-    private final ProcessorTopology topology = withSources(
-        asList(source1, source2, processorStreamTime, processorSystemTime),
-        mkMap(mkEntry(topic1, source1), mkEntry(topic2, source2))
+    private final ProcessorTopology topology = ProcessorTopology.withSources(
+        Utils.<ProcessorNode>mkList(source1, source2, processorStreamTime, processorSystemTime),
+        mkMap(mkEntry(topic1, (SourceNode) source1), mkEntry(topic2, (SourceNode) source2))
     );
 
     private final MockConsumer<byte[], byte[]> consumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
@@ -136,7 +133,8 @@ public class StreamTaskTest {
     };
     private final byte[] recordValue = intSerializer.serialize(null, 10);
     private final byte[] recordKey = intSerializer.serialize(null, 1);
-    private final Metrics metrics = new Metrics(new MetricConfig().recordLevel(Sensor.RecordingLevel.DEBUG));
+    private final Metrics metrics = new Metrics();
+    private final Sensor skippedRecordsSensor = metrics.sensor("skipped-records");
     private final StreamsMetricsImpl streamsMetrics = new MockStreamsMetrics(metrics);
     private final TaskId taskId00 = new TaskId(0, 0);
     private final MockTime time = new MockTime();
@@ -152,29 +150,6 @@ public class StreamTaskTest {
         }
     };
 
-    static ProcessorTopology withRepartitionTopics(final List<ProcessorNode> processorNodes,
-                                                   final Map<String, SourceNode> sourcesByTopic,
-                                                   final Set<String> repartitionTopics) {
-        return new ProcessorTopology(processorNodes,
-                                     sourcesByTopic,
-                                     Collections.emptyMap(),
-                                     Collections.emptyList(),
-                                     Collections.emptyList(),
-                                     Collections.emptyMap(),
-                                     repartitionTopics);
-    }
-
-    static ProcessorTopology withSources(final List<ProcessorNode> processorNodes,
-                                         final Map<String, SourceNode> sourcesByTopic) {
-        return new ProcessorTopology(processorNodes,
-                                     sourcesByTopic,
-                                     Collections.emptyMap(),
-                                     Collections.emptyList(),
-                                     Collections.emptyList(),
-                                     Collections.emptyMap(),
-                                     Collections.emptySet());
-    }
-
     private StreamsConfig createConfig(final boolean enableEoS) {
         final String canonicalPath;
         try {
@@ -188,15 +163,14 @@ public class StreamTaskTest {
             mkEntry(StreamsConfig.BUFFERED_RECORDS_PER_PARTITION_CONFIG, "3"),
             mkEntry(StreamsConfig.STATE_DIR_CONFIG, canonicalPath),
             mkEntry(StreamsConfig.DEFAULT_TIMESTAMP_EXTRACTOR_CLASS_CONFIG, MockTimestampExtractor.class.getName()),
-            mkEntry(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, enableEoS ? StreamsConfig.EXACTLY_ONCE : StreamsConfig.AT_LEAST_ONCE),
-            mkEntry(StreamsConfig.MAX_TASK_IDLE_MS_CONFIG, "100")
+            mkEntry(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, enableEoS ? StreamsConfig.EXACTLY_ONCE : StreamsConfig.AT_LEAST_ONCE)
         )));
     }
 
     @Before
     public void setup() {
         consumer.assign(asList(partition1, partition2));
-        stateDirectory = new StateDirectory(createConfig(false), new MockTime(), true);
+        stateDirectory = new StateDirectory(createConfig(false), new MockTime());
     }
 
     @After
@@ -218,7 +192,7 @@ public class StreamTaskTest {
     public void shouldHandleInitTransactionsTimeoutExceptionOnCreation() {
         final LogCaptureAppender appender = LogCaptureAppender.createAndRegister();
 
-        final ProcessorTopology topology = withSources(
+        final ProcessorTopology topology = ProcessorTopology.withSources(
             asList(source1, source2, processorStreamTime, processorSystemTime),
             mkMap(mkEntry(topic1, (SourceNode) source1), mkEntry(topic2, (SourceNode) source2))
         );
@@ -245,8 +219,7 @@ public class StreamTaskTest {
                     public void initTransactions() {
                         throw new TimeoutException("test");
                     }
-                },
-                null
+                }
             );
             fail("Expected an exception");
         } catch (final StreamsException expected) {
@@ -267,7 +240,7 @@ public class StreamTaskTest {
     public void shouldHandleInitTransactionsTimeoutExceptionOnResume() {
         final LogCaptureAppender appender = LogCaptureAppender.createAndRegister();
 
-        final ProcessorTopology topology = withSources(
+        final ProcessorTopology topology = ProcessorTopology.withSources(
             asList(source1, source2, processorStreamTime, processorSystemTime),
             mkMap(mkEntry(topic1, (SourceNode) source1), mkEntry(topic2, (SourceNode) source2))
         );
@@ -299,8 +272,7 @@ public class StreamTaskTest {
                         super.initTransactions();
                     }
                 }
-            },
-            null
+            }
         );
         testTask.initializeTopology();
         testTask.suspend();
@@ -400,11 +372,6 @@ public class StreamTaskTest {
         assertNotNull(getMetric("%s-latency-avg", "The average latency of %s operation.", "all"));
         assertNotNull(getMetric("%s-latency-max", "The max latency of %s operation.", "all"));
         assertNotNull(getMetric("%s-rate", "The average number of occurrence of %s operation per second.", "all"));
-
-        final JmxReporter reporter = new JmxReporter("kafka.streams");
-        metrics.addReporter(reporter);
-        assertTrue(reporter.containsMbean(String.format("kafka.streams:type=stream-task-metrics,client-id=test,task-id=%s", task.id.toString())));
-        assertTrue(reporter.containsMbean("kafka.streams:type=stream-task-metrics,client-id=test,task-id=all"));
     }
 
     private KafkaMetric getMetric(final String nameFormat, final String descriptionFormat, final String taskId) {
@@ -473,6 +440,97 @@ public class StreamTaskTest {
 
     @SuppressWarnings("unchecked")
     @Test
+    public void testMaybePunctuateStreamTime() {
+        task = createStatelessTask(createConfig(false));
+        task.initializeStateStores();
+        task.initializeTopology();
+
+        task.addRecords(partition1, asList(
+            getConsumerRecord(partition1, 0),
+            getConsumerRecord(partition1, 20),
+            getConsumerRecord(partition1, 32),
+            getConsumerRecord(partition1, 40),
+            getConsumerRecord(partition1, 60)
+        ));
+
+        task.addRecords(partition2, asList(
+            getConsumerRecord(partition2, 25),
+            getConsumerRecord(partition2, 35),
+            getConsumerRecord(partition2, 45),
+            getConsumerRecord(partition2, 61)
+        ));
+
+        assertTrue(task.maybePunctuateStreamTime());
+
+        assertTrue(task.process());
+        assertEquals(8, task.numBuffered());
+        assertEquals(1, source1.numReceived);
+        assertEquals(0, source2.numReceived);
+
+        assertTrue(task.maybePunctuateStreamTime());
+
+        assertTrue(task.process());
+        assertEquals(7, task.numBuffered());
+        assertEquals(2, source1.numReceived);
+        assertEquals(0, source2.numReceived);
+
+        assertFalse(task.maybePunctuateStreamTime());
+
+        assertTrue(task.process());
+        assertEquals(6, task.numBuffered());
+        assertEquals(2, source1.numReceived);
+        assertEquals(1, source2.numReceived);
+
+        assertTrue(task.maybePunctuateStreamTime());
+
+        assertTrue(task.process());
+        assertEquals(5, task.numBuffered());
+        assertEquals(3, source1.numReceived);
+        assertEquals(1, source2.numReceived);
+
+        assertFalse(task.maybePunctuateStreamTime());
+
+        assertTrue(task.process());
+        assertEquals(4, task.numBuffered());
+        assertEquals(3, source1.numReceived);
+        assertEquals(2, source2.numReceived);
+
+        assertTrue(task.maybePunctuateStreamTime());
+
+        assertTrue(task.process());
+        assertEquals(3, task.numBuffered());
+        assertEquals(4, source1.numReceived);
+        assertEquals(2, source2.numReceived);
+
+        assertFalse(task.maybePunctuateStreamTime());
+
+        assertTrue(task.process());
+        assertEquals(2, task.numBuffered());
+        assertEquals(4, source1.numReceived);
+        assertEquals(3, source2.numReceived);
+
+        assertTrue(task.maybePunctuateStreamTime());
+
+        assertTrue(task.process());
+        assertEquals(1, task.numBuffered());
+        assertEquals(5, source1.numReceived);
+        assertEquals(3, source2.numReceived);
+
+        assertFalse(task.maybePunctuateStreamTime());
+
+        assertTrue(task.process());
+        assertEquals(0, task.numBuffered());
+        assertEquals(5, source1.numReceived);
+        assertEquals(4, source2.numReceived);
+
+        assertFalse(task.process());
+        assertFalse(task.maybePunctuateStreamTime());
+
+        processorStreamTime.mockProcessor.checkAndClearPunctuateResult(PunctuationType.STREAM_TIME, 0L, 20L, 32L, 40L, 60L);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
     public void shouldPunctuateOnceStreamTimeAfterGap() {
         task = createStatelessTask(createConfig(false));
         task.initializeStateStores();
@@ -492,73 +550,74 @@ public class StreamTaskTest {
             getConsumerRecord(partition2, 161)
         ));
 
-        // st: -1
-        assertFalse(task.maybePunctuateStreamTime()); // punctuate at 20
+        assertTrue(task.maybePunctuateStreamTime()); // punctuate at 20
 
-        // st: 20
         assertTrue(task.process());
         assertEquals(7, task.numBuffered());
         assertEquals(1, source1.numReceived);
         assertEquals(0, source2.numReceived);
-        assertTrue(task.maybePunctuateStreamTime());
 
-        // st: 25
+        assertFalse(task.maybePunctuateStreamTime());
+
         assertTrue(task.process());
         assertEquals(6, task.numBuffered());
         assertEquals(1, source1.numReceived);
         assertEquals(1, source2.numReceived);
+
+        assertTrue(task.maybePunctuateStreamTime()); // punctuate at 142
+
+        // only one punctuation after 100ms gap
         assertFalse(task.maybePunctuateStreamTime());
 
-        // st: 142
-        // punctuate at 142
         assertTrue(task.process());
         assertEquals(5, task.numBuffered());
         assertEquals(2, source1.numReceived);
         assertEquals(1, source2.numReceived);
-        assertTrue(task.maybePunctuateStreamTime());
 
-        // st: 145
-        // only one punctuation after 100ms gap
+        assertFalse(task.maybePunctuateStreamTime());
+
         assertTrue(task.process());
         assertEquals(4, task.numBuffered());
         assertEquals(2, source1.numReceived);
         assertEquals(2, source2.numReceived);
-        assertFalse(task.maybePunctuateStreamTime());
 
-        // st: 155
-        // punctuate at 155
+        assertTrue(task.maybePunctuateStreamTime()); // punctuate at 155
+
         assertTrue(task.process());
         assertEquals(3, task.numBuffered());
         assertEquals(3, source1.numReceived);
         assertEquals(2, source2.numReceived);
-        assertTrue(task.maybePunctuateStreamTime());
 
-        // st: 159
+        assertFalse(task.maybePunctuateStreamTime());
+
         assertTrue(task.process());
         assertEquals(2, task.numBuffered());
         assertEquals(3, source1.numReceived);
         assertEquals(3, source2.numReceived);
-        assertFalse(task.maybePunctuateStreamTime());
 
-        // st: 160, aligned at 0
+        assertTrue(task.maybePunctuateStreamTime()); // punctuate at 160, still aligned on the initial punctuation
+
         assertTrue(task.process());
         assertEquals(1, task.numBuffered());
         assertEquals(4, source1.numReceived);
         assertEquals(3, source2.numReceived);
-        assertTrue(task.maybePunctuateStreamTime());
 
-        // st: 161
+        assertFalse(task.maybePunctuateStreamTime());
+
         assertTrue(task.process());
         assertEquals(0, task.numBuffered());
         assertEquals(4, source1.numReceived);
         assertEquals(4, source2.numReceived);
+
+        assertFalse(task.process());
         assertFalse(task.maybePunctuateStreamTime());
 
         processorStreamTime.mockProcessor.checkAndClearPunctuateResult(PunctuationType.STREAM_TIME, 20L, 142L, 155L, 160L);
     }
 
+    @SuppressWarnings("unchecked")
     @Test
-    public void shouldRespectPunctuateCancellationStreamTime() {
+    public void testCancelPunctuateStreamTime() {
         task = createStatelessTask(createConfig(false));
         task.initializeStateStores();
         task.initializeTopology();
@@ -575,19 +634,12 @@ public class StreamTaskTest {
             getConsumerRecord(partition2, 45)
         ));
 
-        assertFalse(task.maybePunctuateStreamTime());
-
-        // st is now 20
-        assertTrue(task.process());
-
         assertTrue(task.maybePunctuateStreamTime());
 
-        // st is now 25
         assertTrue(task.process());
 
         assertFalse(task.maybePunctuateStreamTime());
 
-        // st is now 30
         assertTrue(task.process());
 
         processorStreamTime.mockProcessor.scheduleCancellable.cancel();
@@ -596,123 +648,6 @@ public class StreamTaskTest {
 
         processorStreamTime.mockProcessor.checkAndClearPunctuateResult(PunctuationType.STREAM_TIME, 20L);
     }
-
-    @Test
-    public void shouldRespectPunctuateCancellationSystemTime() {
-        task = createStatelessTask(createConfig(false));
-        task.initializeStateStores();
-        task.initializeTopology();
-        final long now = time.milliseconds();
-        time.sleep(10);
-        assertTrue(task.maybePunctuateSystemTime());
-        processorSystemTime.mockProcessor.scheduleCancellable.cancel();
-        time.sleep(10);
-        assertFalse(task.maybePunctuateSystemTime());
-        processorSystemTime.mockProcessor.checkAndClearPunctuateResult(PunctuationType.WALL_CLOCK_TIME, now + 10);
-    }
-
-    @Test
-    public void shouldRespectCommitNeeded() {
-        task = createStatelessTask(createConfig(false));
-        task.initializeStateStores();
-        task.initializeTopology();
-
-        assertFalse(task.commitNeeded());
-
-        task.addRecords(partition1, singletonList(getConsumerRecord(partition1, 0)));
-        assertTrue(task.process());
-        assertTrue(task.commitNeeded());
-
-        task.commit();
-        assertFalse(task.commitNeeded());
-
-        assertTrue(task.maybePunctuateStreamTime());
-        assertTrue(task.commitNeeded());
-
-        task.commit();
-        assertFalse(task.commitNeeded());
-
-        time.sleep(10);
-        assertTrue(task.maybePunctuateSystemTime());
-        assertTrue(task.commitNeeded());
-
-        task.commit();
-        assertFalse(task.commitNeeded());
-    }
-
-    @Test
-    public void shouldRespectCommitRequested() {
-        task = createStatelessTask(createConfig(false));
-        task.initializeStateStores();
-        task.initializeTopology();
-
-        task.requestCommit();
-        assertTrue(task.commitRequested());
-    }
-
-    @Test
-    public void shouldBeProcessableIfAllPartitionsBuffered() {
-        task = createStatelessTask(createConfig(false));
-        task.initializeStateStores();
-        task.initializeTopology();
-
-        assertFalse(task.isProcessable(0L));
-
-        final byte[] bytes = ByteBuffer.allocate(4).putInt(1).array();
-
-        task.addRecords(partition1, Collections.singleton(new ConsumerRecord<>(topic1, 1, 0, bytes, bytes)));
-
-        assertFalse(task.isProcessable(0L));
-
-        task.addRecords(partition2, Collections.singleton(new ConsumerRecord<>(topic2, 1, 0, bytes, bytes)));
-
-        assertTrue(task.isProcessable(0L));
-    }
-
-    @Test
-    public void shouldBeProcessableIfWaitedForTooLong() {
-        task = createStatelessTask(createConfig(false));
-        task.initializeStateStores();
-        task.initializeTopology();
-
-        final MetricName enforcedProcessMetric = metrics.metricName("enforced-processing-total", "stream-task-metrics", mkMap(mkEntry("client-id", "test"), mkEntry("task-id", taskId00.toString())));
-
-        assertFalse(task.isProcessable(0L));
-        assertEquals(0.0, metrics.metric(enforcedProcessMetric).metricValue());
-
-        final byte[] bytes = ByteBuffer.allocate(4).putInt(1).array();
-
-        task.addRecords(partition1, Collections.singleton(new ConsumerRecord<>(topic1, 1, 0, bytes, bytes)));
-
-        assertFalse(task.isProcessable(time.milliseconds()));
-
-        assertFalse(task.isProcessable(time.milliseconds() + 50L));
-
-        assertTrue(task.isProcessable(time.milliseconds() + 100L));
-        assertEquals(1.0, metrics.metric(enforcedProcessMetric).metricValue());
-
-        // once decided to enforce, continue doing that
-        assertTrue(task.isProcessable(time.milliseconds() + 101L));
-        assertEquals(2.0, metrics.metric(enforcedProcessMetric).metricValue());
-
-        task.addRecords(partition2, Collections.singleton(new ConsumerRecord<>(topic2, 1, 0, bytes, bytes)));
-
-        assertTrue(task.isProcessable(time.milliseconds() + 130L));
-        assertEquals(2.0, metrics.metric(enforcedProcessMetric).metricValue());
-
-        // one resumed to normal processing, the timer should be reset
-        task.process();
-
-        assertFalse(task.isProcessable(time.milliseconds() + 150L));
-        assertEquals(2.0, metrics.metric(enforcedProcessMetric).metricValue());
-
-        assertFalse(task.isProcessable(time.milliseconds() + 249L));
-        assertEquals(2.0, metrics.metric(enforcedProcessMetric).metricValue());
-
-        assertTrue(task.isProcessable(time.milliseconds() + 250L));
-        assertEquals(3.0, metrics.metric(enforcedProcessMetric).metricValue());
-    }
-
 
     @Test
     public void shouldPunctuateSystemTimeWhenIntervalElapsed() {
@@ -769,6 +704,20 @@ public class StreamTaskTest {
         assertTrue(task.maybePunctuateSystemTime());
         assertFalse(task.maybePunctuateSystemTime());
         processorSystemTime.mockProcessor.checkAndClearPunctuateResult(PunctuationType.WALL_CLOCK_TIME, now + 100, now + 110, now + 122, now + 130, now + 235, now + 240);
+    }
+
+    @Test
+    public void testCancelPunctuateSystemTime() {
+        task = createStatelessTask(createConfig(false));
+        task.initializeStateStores();
+        task.initializeTopology();
+        final long now = time.milliseconds();
+        time.sleep(10);
+        assertTrue(task.maybePunctuateSystemTime());
+        processorSystemTime.mockProcessor.scheduleCancellable.cancel();
+        time.sleep(10);
+        assertFalse(task.maybePunctuateSystemTime());
+        processorSystemTime.mockProcessor.checkAndClearPunctuateResult(PunctuationType.WALL_CLOCK_TIME, now + 10);
     }
 
     @Test
@@ -849,7 +798,8 @@ public class StreamTaskTest {
                 public void flush() {
                     flushed.set(true);
                 }
-            });
+            }
+        );
         streamTask.flushState();
         assertTrue(flushed.get());
     }
@@ -1140,7 +1090,7 @@ public class StreamTaskTest {
     }
 
     @Test
-    public void shouldWrapProducerFencedExceptionWithTaskMigratedExceptionForBeginTransaction() {
+    public void shouldWrapProducerFencedExceptionWithTaskMigragedExceptionForBeginTransaction() {
         task = createStatelessTask(createConfig(true));
         producer.fenceProducer();
 
@@ -1215,7 +1165,6 @@ public class StreamTaskTest {
         } catch (final TaskMigratedException expected) {
             assertTrue(expected.getCause() instanceof ProducerFencedException);
         }
-        task = null;
 
         assertFalse(producer.transactionCommitted());
     }
@@ -1406,9 +1355,9 @@ public class StreamTaskTest {
     public void shouldReturnOffsetsForRepartitionTopicsForPurging() {
         final TopicPartition repartition = new TopicPartition("repartition", 1);
 
-        final ProcessorTopology topology = withRepartitionTopics(
-            asList(source1, source2),
-            mkMap(mkEntry(topic1, source1), mkEntry(repartition.topic(), source2)),
+        final ProcessorTopology topology = ProcessorTopology.withRepartitionTopics(
+            Utils.<ProcessorNode>mkList(source1, source2),
+            mkMap(mkEntry(topic1, (SourceNode) source1), mkEntry(repartition.topic(), (SourceNode) source2)),
             Collections.singleton(repartition.topic())
         );
         consumer.assign(asList(partition1, repartition));
@@ -1424,7 +1373,8 @@ public class StreamTaskTest {
             stateDirectory,
             null,
             time,
-            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer));
+            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer)
+        );
         task.initializeStateStores();
         task.initializeTopology();
 
@@ -1477,11 +1427,11 @@ public class StreamTaskTest {
     }
 
     private StreamTask createStatefulTask(final StreamsConfig config, final boolean logged) {
-        final ProcessorTopology topology = ProcessorTopologyFactories.with(
-            asList(source1, source2),
-            mkMap(mkEntry(topic1, source1), mkEntry(topic2, source2)),
+        final ProcessorTopology topology = ProcessorTopology.with(
+            Utils.<ProcessorNode>mkList(source1, source2),
+            mkMap(mkEntry(topic1, (SourceNode) source1), mkEntry(topic2, (SourceNode) source2)),
             singletonList(stateStore),
-            logged ? Collections.singletonMap(storeName, storeName + "-changelog") : Collections.emptyMap());
+            logged ? Collections.singletonMap(storeName, storeName + "-changelog") : Collections.<String, String>emptyMap());
 
         return new StreamTask(
             taskId00,
@@ -1494,15 +1444,16 @@ public class StreamTaskTest {
             stateDirectory,
             null,
             time,
-            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer));
+            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer)
+        );
     }
 
     private StreamTask createStatefulTaskThatThrowsExceptionOnClose() {
-        final ProcessorTopology topology = ProcessorTopologyFactories.with(
-            asList(source1, source3),
-            mkMap(mkEntry(topic1, source1), mkEntry(topic2, source3)),
+        final ProcessorTopology topology = ProcessorTopology.with(
+            Utils.<ProcessorNode>mkList(source1, source3),
+            mkMap(mkEntry(topic1, (SourceNode) source1), mkEntry(topic2, (SourceNode) source3)),
             singletonList(stateStore),
-            Collections.emptyMap());
+            Collections.<String, String>emptyMap());
 
         return new StreamTask(
             taskId00,
@@ -1515,13 +1466,14 @@ public class StreamTaskTest {
             stateDirectory,
             null,
             time,
-            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer));
+            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer)
+        );
     }
 
     private StreamTask createStatelessTask(final StreamsConfig streamsConfig) {
-        final ProcessorTopology topology = withSources(
-            asList(source1, source2, processorStreamTime, processorSystemTime),
-            mkMap(mkEntry(topic1, source1), mkEntry(topic2, source2))
+        final ProcessorTopology topology = ProcessorTopology.withSources(
+            Utils.<ProcessorNode>mkList(source1, source2, processorStreamTime, processorSystemTime),
+            mkMap(mkEntry(topic1, (SourceNode) source1), mkEntry(topic2, (SourceNode) source2))
         );
 
         source1.addChild(processorStreamTime);
@@ -1540,14 +1492,15 @@ public class StreamTaskTest {
             stateDirectory,
             null,
             time,
-            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer));
+            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer)
+        );
     }
 
     // this task will throw exception when processing (on partition2), flushing, suspending and closing
     private StreamTask createTaskThatThrowsException(final boolean enableEos) {
-        final ProcessorTopology topology = withSources(
-            asList(source1, source3, processorStreamTime, processorSystemTime),
-            mkMap(mkEntry(topic1, source1), mkEntry(topic2, source3))
+        final ProcessorTopology topology = ProcessorTopology.withSources(
+            Utils.<ProcessorNode>mkList(source1, source3, processorStreamTime, processorSystemTime),
+            mkMap(mkEntry(topic1, (SourceNode) source1), mkEntry(topic2, (SourceNode) source3))
         );
 
         source1.addChild(processorStreamTime);
@@ -1566,7 +1519,8 @@ public class StreamTaskTest {
             stateDirectory,
             null,
             time,
-            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer)) {
+            () -> producer = new MockProducer<>(false, bytesSerializer, bytesSerializer)
+        ) {
             @Override
             protected void flushState() {
                 throw new RuntimeException("KABOOM!");
@@ -1579,7 +1533,7 @@ public class StreamTaskTest {
             topicPartition.topic(),
             topicPartition.partition(),
             offset,
-            offset, // use the offset as the timestamp
+            0L,
             TimestampType.CREATE_TIME,
             0L,
             0,

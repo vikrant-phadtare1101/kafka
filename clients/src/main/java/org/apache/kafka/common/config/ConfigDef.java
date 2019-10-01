@@ -22,17 +22,16 @@ import org.apache.kafka.common.utils.Utils;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.BiConsumer;
-import java.util.function.Supplier;
-import java.util.regex.Pattern;
 
 /**
  * This class is used for specifying the set of expected configurations. For each configuration, you can specify
@@ -55,10 +54,10 @@ import java.util.regex.Pattern;
  * defs.define(&quot;config_with_validator&quot;, Type.INT, 42, Range.atLeast(0), &quot;Configuration with user provided validator.&quot;);
  * defs.define(&quot;config_with_dependents&quot;, Type.INT, &quot;Configuration with dependents.&quot;, &quot;group&quot;, 1, &quot;Config With Dependents&quot;, Arrays.asList(&quot;config_with_default&quot;,&quot;config_with_validator&quot;));
  *
- * Map&lt;String, String&gt; props = new HashMap&lt;&gt;();
+ * Map&lt;String, String&gt; props = new HashMap&lt;&gt();
  * props.put(&quot;config_with_default&quot;, &quot;some value&quot;);
  * props.put(&quot;config_with_dependents&quot;, &quot;some other value&quot;);
- *
+ * 
  * Map&lt;String, Object&gt; configs = defs.parse(props);
  * // will return &quot;some value&quot;
  * String someConfig = (String) configs.get(&quot;config_with_default&quot;);
@@ -74,9 +73,6 @@ import java.util.regex.Pattern;
  * functionality for accessing configs.
  */
 public class ConfigDef {
-
-    private static final Pattern COMMA_WITH_WHITESPACE = Pattern.compile("\\s*,\\s*");
-
     /**
      * A unique Java object which represents the lack of a default value.
      */
@@ -187,7 +183,7 @@ public class ConfigDef {
      */
     public ConfigDef define(String name, Type type, Object defaultValue, Validator validator, Importance importance, String documentation,
                             String group, int orderInGroup, Width width, String displayName, Recommender recommender) {
-        return define(name, type, defaultValue, validator, importance, documentation, group, orderInGroup, width, displayName, Collections.emptyList(), recommender);
+        return define(name, type, defaultValue, validator, importance, documentation, group, orderInGroup, width, displayName, Collections.<String>emptyList(), recommender);
     }
 
     /**
@@ -264,7 +260,7 @@ public class ConfigDef {
      */
     public ConfigDef define(String name, Type type, Object defaultValue, Importance importance, String documentation,
                             String group, int orderInGroup, Width width, String displayName, Recommender recommender) {
-        return define(name, type, defaultValue, null, importance, documentation, group, orderInGroup, width, displayName, Collections.emptyList(), recommender);
+        return define(name, type, defaultValue, null, importance, documentation, group, orderInGroup, width, displayName, Collections.<String>emptyList(), recommender);
     }
 
     /**
@@ -337,7 +333,7 @@ public class ConfigDef {
      */
     public ConfigDef define(String name, Type type, Importance importance, String documentation, String group, int orderInGroup,
                             Width width, String displayName, Recommender recommender) {
-        return define(name, type, NO_DEFAULT_VALUE, null, importance, documentation, group, orderInGroup, width, displayName, Collections.emptyList(), recommender);
+        return define(name, type, NO_DEFAULT_VALUE, null, importance, documentation, group, orderInGroup, width, displayName, Collections.<String>emptyList(), recommender);
     }
 
     /**
@@ -599,15 +595,23 @@ public class ConfigDef {
         if (!configKeys.containsKey(name)) {
             return;
         }
+        
         ConfigKey key = configKeys.get(name);
         ConfigValue value = configs.get(name);
+        
         if (key.recommender != null) {
             try {
                 List<Object> recommendedValues = key.recommender.validValues(name, parsed);
                 List<Object> originalRecommendedValues = value.recommendedValues();
                 if (!originalRecommendedValues.isEmpty()) {
                     Set<Object> originalRecommendedValueSet = new HashSet<>(originalRecommendedValues);
-                    recommendedValues.removeIf(o -> !originalRecommendedValueSet.contains(o));
+                    Iterator<Object> it = recommendedValues.iterator();
+                    while (it.hasNext()) {
+                        Object o = it.next();
+                        if (!originalRecommendedValueSet.contains(o)) {
+                            it.remove();
+                        }
+                    }
                 }
                 value.recommendedValues(recommendedValues);
                 value.visible(key.recommender.visible(name, parsed));
@@ -701,15 +705,22 @@ public class ConfigDef {
                         if (trimmed.isEmpty())
                             return Collections.emptyList();
                         else
-                            return Arrays.asList(COMMA_WITH_WHITESPACE.split(trimmed, -1));
+                            return Arrays.asList(trimmed.split("\\s*,\\s*", -1));
                     else
                         throw new ConfigException(name, value, "Expected a comma separated list.");
                 case CLASS:
                     if (value instanceof Class)
                         return value;
-                    else if (value instanceof String)
-                        return Class.forName(trimmed, true, Utils.getContextOrKafkaClassLoader());
-                    else
+                    else if (value instanceof String) {
+                        ClassLoader contextOrKafkaClassLoader = Utils.getContextOrKafkaClassLoader();
+                        // Use loadClass here instead of Class.forName because the name we use here may be an alias
+                        // and not match the name of the class that gets loaded. If that happens, Class.forName can
+                        // throw an exception.
+                        Class<?> klass = contextOrKafkaClassLoader.loadClass(trimmed);
+                        // Invoke forName here with the true name of the requested class to cause class
+                        // initialization to take place.
+                        return Class.forName(klass.getName(), true, contextOrKafkaClassLoader);
+                    } else
                         throw new ConfigException(name, value, "Expected a Class instance or class name.");
                 default:
                     throw new IllegalStateException("Unknown type.");
@@ -841,11 +852,6 @@ public class ConfigDef {
         private final Number min;
         private final Number max;
 
-        /**
-         *  A numeric range with inclusive upper bound and inclusive lower bound
-         * @param min  the lower bound
-         * @param max  the upper bound
-         */
         private Range(Number min, Number max) {
             this.min = min;
             this.max = max;
@@ -861,7 +867,7 @@ public class ConfigDef {
         }
 
         /**
-         * A numeric range that checks both the upper (inclusive) and lower bound
+         * A numeric range that checks both the upper and lower bound
          */
         public static Range between(Number min, Number max) {
             return new Range(min, max);
@@ -944,39 +950,9 @@ public class ConfigDef {
         @Override
         public void ensureValid(String name, Object value) {
             if (value == null) {
-                // Pass in the string null to avoid the spotbugs warning
+                // Pass in the string null to avoid the findbugs warning
                 throw new ConfigException(name, "null", "entry must be non null");
             }
-        }
-
-        public String toString() {
-            return "non-null string";
-        }
-    }
-
-    public static class LambdaValidator implements Validator {
-        BiConsumer<String, Object> ensureValid;
-        Supplier<String> toStringFunction;
-
-        private LambdaValidator(BiConsumer<String, Object> ensureValid,
-                                Supplier<String> toStringFunction) {
-            this.ensureValid = ensureValid;
-            this.toStringFunction = toStringFunction;
-        }
-
-        public static LambdaValidator with(BiConsumer<String, Object> ensureValid,
-                                           Supplier<String> toStringFunction) {
-            return new LambdaValidator(ensureValid, toStringFunction);
-        }
-
-        @Override
-        public void ensureValid(String name, Object value) {
-            ensureValid.accept(name, value);
-        }
-
-        @Override
-        public String toString() {
-            return toStringFunction.get();
         }
     }
 
@@ -996,19 +972,6 @@ public class ConfigDef {
             for (Validator validator: validators) {
                 validator.ensureValid(name, value);
             }
-        }
-
-        @Override
-        public String toString() {
-            if (validators == null) return "";
-            StringBuilder desc = new StringBuilder();
-            for (Validator v: validators) {
-                if (desc.length() > 0) {
-                    desc.append(',').append(' ');
-                }
-                desc.append(String.valueOf(v));
-            }
-            return desc.toString();
         }
     }
 
@@ -1060,10 +1023,6 @@ public class ConfigDef {
                 throw new ConfigException(name, value, "String may not contain control sequences but had the following ASCII chars: " + Utils.join(foundIllegalCharacters, ", "));
             }
         }
-
-        public String toString() {
-            return "non-empty string without ISO control characters";
-        }
     }
 
     public static class ConfigKey {
@@ -1105,10 +1064,6 @@ public class ConfigDef {
 
         public boolean hasDefault() {
             return !NO_DEFAULT_VALUE.equals(this.defaultValue);
-        }
-
-        public Type type() {
-            return type;
         }
     }
 
@@ -1165,7 +1120,7 @@ public class ConfigDef {
      * If <code>dynamicUpdateModes</code> is non-empty, a "Dynamic Update Mode" column
      * will be included n the table with the value of the update mode. Default
      * mode is "read-only".
-     * @param dynamicUpdateModes Config name -&gt; update mode mapping
+     * @param dynamicUpdateModes Config name -> update mode mapping
      */
     public String toHtmlTable(Map<String, String> dynamicUpdateModes) {
         boolean hasUpdateModes = !dynamicUpdateModes.isEmpty();
@@ -1295,30 +1250,32 @@ public class ConfigDef {
         }
 
         List<ConfigKey> configs = new ArrayList<>(configKeys.values());
-        Collections.sort(configs, (k1, k2) -> compare(k1, k2, groupOrd));
-        return configs;
-    }
-
-    private int compare(ConfigKey k1, ConfigKey k2, Map<String, Integer> groupOrd) {
-        int cmp = k1.group == null
-            ? (k2.group == null ? 0 : -1)
-            : (k2.group == null ? 1 : Integer.compare(groupOrd.get(k1.group), groupOrd.get(k2.group)));
-        if (cmp == 0) {
-            cmp = Integer.compare(k1.orderInGroup, k2.orderInGroup);
-            if (cmp == 0) {
-                // first take anything with no default value
-                if (!k1.hasDefault() && k2.hasDefault())
-                    cmp = -1;
-                else if (!k2.hasDefault() && k1.hasDefault())
-                    cmp = 1;
-                else {
-                    cmp = k1.importance.compareTo(k2.importance);
-                    if (cmp == 0)
-                        return k1.name.compareTo(k2.name);
+        Collections.sort(configs, new Comparator<ConfigKey>() {
+            @Override
+            public int compare(ConfigKey k1, ConfigKey k2) {
+                int cmp = k1.group == null
+                        ? (k2.group == null ? 0 : -1)
+                        : (k2.group == null ? 1 : Integer.compare(groupOrd.get(k1.group), groupOrd.get(k2.group)));
+                if (cmp == 0) {
+                    cmp = Integer.compare(k1.orderInGroup, k2.orderInGroup);
+                    if (cmp == 0) {
+                        // first take anything with no default value
+                        if (!k1.hasDefault() && k2.hasDefault()) {
+                            cmp = -1;
+                        } else if (!k2.hasDefault() && k1.hasDefault()) {
+                            cmp = 1;
+                        } else {
+                            cmp = k1.importance.compareTo(k2.importance);
+                            if (cmp == 0) {
+                                return k1.name.compareTo(k2.name);
+                            }
+                        }
+                    }
                 }
+                return cmp;
             }
-        }
-        return cmp;
+        });
+        return configs;
     }
 
     public void embed(final String keyPrefix, final String groupPrefix, final int startingOrd, final ConfigDef child) {
@@ -1346,14 +1303,10 @@ public class ConfigDef {
      */
     private static Validator embeddedValidator(final String keyPrefix, final Validator base) {
         if (base == null) return null;
-        return new Validator() {
+        return new ConfigDef.Validator() {
+            @Override
             public void ensureValid(String name, Object value) {
                 base.ensureValid(name.substring(keyPrefix.length()), value);
-            }
-
-            @Override
-            public String toString() {
-                return base.toString();
             }
         };
     }

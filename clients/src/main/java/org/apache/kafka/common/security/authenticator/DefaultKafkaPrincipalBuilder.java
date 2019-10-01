@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.common.security.authenticator;
 
-import javax.security.auth.x500.X500Principal;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.network.Authenticator;
@@ -33,8 +32,6 @@ import org.apache.kafka.common.security.kerberos.KerberosShortNamer;
 import javax.net.ssl.SSLPeerUnverifiedException;
 import javax.net.ssl.SSLSession;
 import javax.security.sasl.SaslServer;
-import org.apache.kafka.common.security.ssl.SslPrincipalMapper;
-
 import java.io.Closeable;
 import java.io.IOException;
 import java.security.Principal;
@@ -58,7 +55,6 @@ public class DefaultKafkaPrincipalBuilder implements KafkaPrincipalBuilder, Clos
     private final Authenticator authenticator;
     private final TransportLayer transportLayer;
     private final KerberosShortNamer kerberosShortNamer;
-    private final SslPrincipalMapper sslPrincipalMapper;
 
     /**
      * Construct a new instance which wraps an instance of the older {@link org.apache.kafka.common.security.auth.PrincipalBuilder}.
@@ -77,31 +73,27 @@ public class DefaultKafkaPrincipalBuilder implements KafkaPrincipalBuilder, Clos
                 requireNonNull(authenticator),
                 requireNonNull(transportLayer),
                 requireNonNull(oldPrincipalBuilder),
-                kerberosShortNamer,
-                null);
+                kerberosShortNamer);
     }
 
     @SuppressWarnings("deprecation")
     private DefaultKafkaPrincipalBuilder(Authenticator authenticator,
                                          TransportLayer transportLayer,
                                          org.apache.kafka.common.security.auth.PrincipalBuilder oldPrincipalBuilder,
-                                         KerberosShortNamer kerberosShortNamer,
-                                         SslPrincipalMapper sslPrincipalMapper) {
+                                         KerberosShortNamer kerberosShortNamer) {
         this.authenticator = authenticator;
         this.transportLayer = transportLayer;
         this.oldPrincipalBuilder = oldPrincipalBuilder;
         this.kerberosShortNamer = kerberosShortNamer;
-        this.sslPrincipalMapper =  sslPrincipalMapper;
     }
 
     /**
      * Construct a new instance.
      *
      * @param kerberosShortNamer Kerberos name rewrite rules or null if none have been configured
-     * @param sslPrincipalMapper SSL Principal mapper or null if none have been configured
      */
-    public DefaultKafkaPrincipalBuilder(KerberosShortNamer kerberosShortNamer, SslPrincipalMapper sslPrincipalMapper) {
-        this(null, null, null, kerberosShortNamer, sslPrincipalMapper);
+    public DefaultKafkaPrincipalBuilder(KerberosShortNamer kerberosShortNamer) {
+        this(null, null, null, kerberosShortNamer);
     }
 
     @Override
@@ -118,7 +110,7 @@ public class DefaultKafkaPrincipalBuilder implements KafkaPrincipalBuilder, Clos
                 return convertToKafkaPrincipal(oldPrincipalBuilder.buildPrincipal(transportLayer, authenticator));
 
             try {
-                return applySslPrincipalMapper(sslSession.getPeerPrincipal());
+                return convertToKafkaPrincipal(sslSession.getPeerPrincipal());
             } catch (SSLPeerUnverifiedException se) {
                 return KafkaPrincipal.ANONYMOUS;
             }
@@ -141,19 +133,6 @@ public class DefaultKafkaPrincipalBuilder implements KafkaPrincipalBuilder, Clos
         } catch (IOException e) {
             throw new KafkaException("Failed to set name for '" + kerberosName +
                     "' based on Kerberos authentication rules.", e);
-        }
-    }
-
-    private KafkaPrincipal applySslPrincipalMapper(Principal principal) {
-        try {
-            if (!(principal instanceof X500Principal) || principal == KafkaPrincipal.ANONYMOUS) {
-                return new KafkaPrincipal(KafkaPrincipal.USER_TYPE, principal.getName());
-            } else {
-                return new KafkaPrincipal(KafkaPrincipal.USER_TYPE, sslPrincipalMapper.getName(principal.getName()));
-            }
-        } catch (IOException e) {
-            throw new KafkaException("Failed to map name for '" + principal.getName() +
-                    "' based on SSL principal mapping rules.", e);
         }
     }
 

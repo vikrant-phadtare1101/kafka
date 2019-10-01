@@ -26,9 +26,9 @@ import java.util.List;
  */
 public interface CompoundStat extends Stat {
 
-    List<NamedMeasurable> stats();
+    public List<NamedMeasurable> stats();
 
-    class NamedMeasurable {
+    public static class NamedMeasurable {
 
         private final MetricName name;
         private final Measurable stat;

@@ -45,7 +45,7 @@ public class PluginUtilsTest {
     }
 
     @Test
-    public void testJavaLibraryClasses() {
+    public void testJavaLibraryClasses() throws Exception {
         assertFalse(PluginUtils.shouldLoadInIsolation("java."));
         assertFalse(PluginUtils.shouldLoadInIsolation("java.lang.Object"));
         assertFalse(PluginUtils.shouldLoadInIsolation("java.lang.String"));
@@ -64,13 +64,13 @@ public class PluginUtilsTest {
     }
 
     @Test
-    public void testThirdPartyClasses() {
+    public void testThirdPartyClasses() throws Exception {
         assertFalse(PluginUtils.shouldLoadInIsolation("org.slf4j."));
         assertFalse(PluginUtils.shouldLoadInIsolation("org.slf4j.LoggerFactory"));
     }
 
     @Test
-    public void testConnectFrameworkClasses() {
+    public void testConnectFrameworkClasses() throws Exception {
         assertFalse(PluginUtils.shouldLoadInIsolation("org.apache.kafka.common."));
         assertFalse(PluginUtils.shouldLoadInIsolation(
                 "org.apache.kafka.common.config.AbstractConfig")
@@ -120,7 +120,7 @@ public class PluginUtilsTest {
     }
 
     @Test
-    public void testAllowedConnectFrameworkClasses() {
+    public void testAllowedConnectFrameworkClasses() throws Exception {
         assertTrue(PluginUtils.shouldLoadInIsolation("org.apache.kafka.connect.transforms."));
         assertTrue(PluginUtils.shouldLoadInIsolation(
                 "org.apache.kafka.connect.transforms.ExtractField")
@@ -173,7 +173,7 @@ public class PluginUtilsTest {
     }
 
     @Test
-    public void testClientConfigProvider() {
+    public void testClientConfigProvider() throws Exception {
         assertFalse(PluginUtils.shouldLoadInIsolation(
                 "org.apache.kafka.common.config.provider.ConfigProvider")
         );
@@ -182,25 +182,6 @@ public class PluginUtilsTest {
         );
         assertTrue(PluginUtils.shouldLoadInIsolation(
                 "org.apache.kafka.common.config.provider.FutureConfigProvider")
-        );
-    }
-
-    @Test
-    public void testConnectorClientConfigOverridePolicy() {
-        assertFalse(PluginUtils.shouldLoadInIsolation(
-                "org.apache.kafka.connect.connector.policy.ConnectorClientConfigOverridePolicy")
-        );
-        assertTrue(PluginUtils.shouldLoadInIsolation(
-                "org.apache.kafka.connect.connector.policy.AbstractConnectorClientConfigOverridePolicy")
-        );
-        assertTrue(PluginUtils.shouldLoadInIsolation(
-                "org.apache.kafka.connect.connector.policy.AllConnectorClientConfigOverridePolicy")
-        );
-        assertTrue(PluginUtils.shouldLoadInIsolation(
-                "org.apache.kafka.connect.connector.policy.NoneConnectorClientConfigOverridePolicy")
-        );
-        assertTrue(PluginUtils.shouldLoadInIsolation(
-                "org.apache.kafka.connect.connector.policy.PrincipalConnectorClientConfigOverridePolicy")
         );
     }
 

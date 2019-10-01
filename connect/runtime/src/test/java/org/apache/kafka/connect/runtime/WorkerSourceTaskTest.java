@@ -54,7 +54,6 @@ import org.powermock.core.classloader.annotations.PowerMockIgnore;
 import org.powermock.modules.junit4.PowerMockRunner;
 import org.powermock.reflect.Whitebox;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -170,7 +169,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
             }
         });
 
-        producer.close(EasyMock.anyObject(Duration.class));
+        producer.close(EasyMock.anyLong(), EasyMock.anyObject(TimeUnit.class));
         EasyMock.expectLastCall();
 
         transformationChain.close();
@@ -218,7 +217,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         statusListener.onShutdown(taskId);
         EasyMock.expectLastCall();
 
-        producer.close(EasyMock.anyObject(Duration.class));
+        producer.close(EasyMock.anyLong(), EasyMock.anyObject(TimeUnit.class));
         EasyMock.expectLastCall();
 
         transformationChain.close();
@@ -267,7 +266,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         statusListener.onShutdown(taskId);
         EasyMock.expectLastCall();
 
-        producer.close(EasyMock.anyObject(Duration.class));
+        producer.close(EasyMock.anyLong(), EasyMock.anyObject(TimeUnit.class));
         EasyMock.expectLastCall();
 
         transformationChain.close();
@@ -316,7 +315,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         EasyMock.expectLastCall();
         expectOffsetFlush(true);
 
-        producer.close(EasyMock.anyObject(Duration.class));
+        producer.close(EasyMock.anyLong(), EasyMock.anyObject(TimeUnit.class));
         EasyMock.expectLastCall();
 
         transformationChain.close();
@@ -360,7 +359,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         statusListener.onShutdown(taskId);
         EasyMock.expectLastCall();
 
-        producer.close(EasyMock.anyObject(Duration.class));
+        producer.close(EasyMock.anyLong(), EasyMock.anyObject(TimeUnit.class));
         EasyMock.expectLastCall();
 
         transformationChain.close();
@@ -405,7 +404,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         statusListener.onShutdown(taskId);
         EasyMock.expectLastCall();
 
-        producer.close(EasyMock.anyObject(Duration.class));
+        producer.close(EasyMock.anyLong(), EasyMock.anyObject(TimeUnit.class));
         EasyMock.expectLastCall();
 
         transformationChain.close();
@@ -595,7 +594,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         statusListener.onShutdown(taskId);
         EasyMock.expectLastCall();
 
-        producer.close(EasyMock.anyObject(Duration.class));
+        producer.close(EasyMock.anyLong(), EasyMock.anyObject(TimeUnit.class));
         EasyMock.expectLastCall();
 
         transformationChain.close();
@@ -862,7 +861,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         if (minimumPollCountExpected > 0) {
             assertTrue(pollBatchTimeMax >= 0.0d);
         }
-        assertTrue(Double.isNaN(pollBatchTimeAvg) || pollBatchTimeAvg > 0.0d);
+        assertTrue(pollBatchTimeAvg >= 0.0d);
         double activeCount = metrics.currentMetricValueAsDouble(sourceTaskGroup, "source-record-active-count");
         double activeCountMax = metrics.currentMetricValueAsDouble(sourceTaskGroup, "source-record-active-count-max");
         assertEquals(0, activeCount, 0.000001d);

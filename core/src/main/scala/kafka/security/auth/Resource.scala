@@ -23,10 +23,8 @@ object Resource {
   val Separator = ":"
   val ClusterResourceName = "kafka-cluster"
   val ClusterResource = Resource(Cluster, Resource.ClusterResourceName, PatternType.LITERAL)
+  val ProducerIdResourceName = "producer-id"
   val WildCardResource = "*"
-
-  @deprecated("This resource name is not used by Kafka and will be removed in a future release", since = "2.1")
-  val ProducerIdResourceName = "producer-id" // This is not used since we don't have a producer id resource
 
   def fromString(str: String): Resource = {
     ResourceType.values.find(resourceType => str.startsWith(resourceType.name + Separator)) match {
@@ -55,8 +53,11 @@ object Resource {
  */
 case class Resource(resourceType: ResourceType, name: String, patternType: PatternType) {
 
-  if (!patternType.isSpecific)
-    throw new IllegalArgumentException(s"patternType must not be $patternType")
+  if (patternType == PatternType.MATCH || patternType == PatternType.ANY)
+    throw new IllegalArgumentException("patternType must not be " + patternType)
+
+  if (patternType == PatternType.UNKNOWN)
+    throw new IllegalArgumentException("patternType must not be UNKNOWN")
 
   /**
     * Create an instance of this class with the provided parameters.

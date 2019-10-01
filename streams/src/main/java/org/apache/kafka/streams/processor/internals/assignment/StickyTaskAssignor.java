@@ -109,7 +109,7 @@ public class StickyTaskAssignor<ID> implements TaskAssignor<ID, TaskId> {
         }
 
         // assign any remaining unassigned tasks
-        final List<TaskId> sortedTasks = new ArrayList<>(unassigned);
+        List<TaskId> sortedTasks = new ArrayList<>(unassigned);
         Collections.sort(sortedTasks);
         for (final TaskId taskId : sortedTasks) {
             allocateTaskWithClientCandidates(taskId, clients.keySet(), true);
@@ -117,7 +117,7 @@ public class StickyTaskAssignor<ID> implements TaskAssignor<ID, TaskId> {
     }
 
     private void allocateTaskWithClientCandidates(final TaskId taskId, final Set<ID> clientsWithin, final boolean active) {
-        final ClientState client = findClient(taskId, clientsWithin);
+        final ClientState client = findClient(taskId, clientsWithin, active);
         taskPairs.addPairs(taskId, client.assignedTasks());
         client.assign(taskId, active);
     }
@@ -139,7 +139,7 @@ public class StickyTaskAssignor<ID> implements TaskAssignor<ID, TaskId> {
     }
 
 
-    private ClientState findClient(final TaskId taskId, final Set<ID> clientsWithin) {
+    private ClientState findClient(final TaskId taskId, final Set<ID> clientsWithin, boolean active) {
 
         // optimize the case where there is only 1 id to search within.
         if (clientsWithin.size() == 1) {
@@ -148,14 +148,14 @@ public class StickyTaskAssignor<ID> implements TaskAssignor<ID, TaskId> {
 
         final ClientState previous = findClientsWithPreviousAssignedTask(taskId, clientsWithin);
         if (previous == null) {
-            return leastLoaded(taskId, clientsWithin);
+            return leastLoaded(taskId, clientsWithin, active);
         }
 
         if (shouldBalanceLoad(previous)) {
             final ClientState standby = findLeastLoadedClientWithPreviousStandByTask(taskId, clientsWithin);
             if (standby == null
                     || shouldBalanceLoad(standby)) {
-                return leastLoaded(taskId, clientsWithin);
+                return leastLoaded(taskId, clientsWithin, active);
             }
             return standby;
         }
@@ -168,7 +168,7 @@ public class StickyTaskAssignor<ID> implements TaskAssignor<ID, TaskId> {
     }
 
     private boolean hasClientsWithMoreAvailableCapacity(final ClientState client) {
-        for (final ClientState clientState : clients.values()) {
+        for (ClientState clientState : clients.values()) {
             if (clientState.hasMoreAvailableCapacityThan(client)) {
                 return true;
             }
@@ -192,20 +192,21 @@ public class StickyTaskAssignor<ID> implements TaskAssignor<ID, TaskId> {
         }
         final HashSet<ID> constrainTo = new HashSet<>(ids);
         constrainTo.retainAll(clientsWithin);
-        return leastLoaded(taskId, constrainTo);
+        return leastLoaded(taskId, constrainTo, false);
     }
 
-    private ClientState leastLoaded(final TaskId taskId, final Set<ID> clientIds) {
-        final ClientState leastLoaded = findLeastLoaded(taskId, clientIds, true);
+    private ClientState leastLoaded(final TaskId taskId, final Set<ID> clientIds, final boolean active) {
+        final ClientState leastLoaded = findLeastLoaded(taskId, clientIds, true, active);
         if (leastLoaded == null) {
-            return findLeastLoaded(taskId, clientIds, false);
+            return findLeastLoaded(taskId, clientIds, false, active);
         }
         return leastLoaded;
     }
 
     private ClientState findLeastLoaded(final TaskId taskId,
                                         final Set<ID> clientIds,
-                                        final boolean checkTaskPairs) {
+                                        final boolean checkTaskPairs,
+                                        final boolean active) {
         ClientState leastLoaded = null;
         for (final ID id : clientIds) {
             final ClientState client = clients.get(id);
@@ -216,7 +217,7 @@ public class StickyTaskAssignor<ID> implements TaskAssignor<ID, TaskId> {
             if (leastLoaded == null || client.hasMoreAvailableCapacityThan(leastLoaded)) {
                 if (!checkTaskPairs) {
                     leastLoaded = client;
-                } else if (taskPairs.hasNewPair(taskId, client.assignedTasks())) {
+                } else if (taskPairs.hasNewPair(taskId, client.assignedTasks(), active)) {
                     leastLoaded = client;
                 }
             }
@@ -234,7 +235,7 @@ public class StickyTaskAssignor<ID> implements TaskAssignor<ID, TaskId> {
 
             for (final TaskId prevAssignedTask : clientState.getValue().previousStandbyTasks()) {
                 if (!previousStandbyTaskAssignment.containsKey(prevAssignedTask)) {
-                    previousStandbyTaskAssignment.put(prevAssignedTask, new HashSet<>());
+                    previousStandbyTaskAssignment.put(prevAssignedTask, new HashSet<ID>());
                 }
                 previousStandbyTaskAssignment.get(prevAssignedTask).add(clientState.getKey());
             }
@@ -244,7 +245,7 @@ public class StickyTaskAssignor<ID> implements TaskAssignor<ID, TaskId> {
 
     private int sumCapacity(final Collection<ClientState> values) {
         int capacity = 0;
-        for (final ClientState client : values) {
+        for (ClientState client : values) {
             capacity += client.capacity();
         }
         return capacity;
@@ -260,11 +261,15 @@ public class StickyTaskAssignor<ID> implements TaskAssignor<ID, TaskId> {
         }
 
         boolean hasNewPair(final TaskId task1,
-                           final Set<TaskId> taskIds) {
+                           final Set<TaskId> taskIds,
+                           final boolean active) {
             if (pairs.size() == maxPairs) {
                 return false;
             }
             for (final TaskId taskId : taskIds) {
+                if (!active && !pairs.contains(pair(task1, taskId))) {
+                    return true;
+                }
                 if (!pairs.contains(pair(task1, taskId))) {
                     return true;
                 }
@@ -296,12 +301,8 @@ public class StickyTaskAssignor<ID> implements TaskAssignor<ID, TaskId> {
 
             @Override
             public boolean equals(final Object o) {
-                if (this == o) {
-                    return true;
-                }
-                if (o == null || getClass() != o.getClass()) {
-                    return false;
-                }
+                if (this == o) return true;
+                if (o == null || getClass() != o.getClass()) return false;
                 final Pair pair = (Pair) o;
                 return Objects.equals(task1, pair.task1) &&
                         Objects.equals(task2, pair.task2);

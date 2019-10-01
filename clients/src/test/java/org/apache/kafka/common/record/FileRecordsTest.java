@@ -23,6 +23,7 @@ import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.test.TestUtils;
+import org.easymock.EasyMock;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -34,7 +35,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Optional;
+import java.util.Random;
 
 import static java.util.Arrays.asList;
 import static org.apache.kafka.common.utils.Utils.utf8;
@@ -42,16 +43,8 @@ import static org.apache.kafka.test.TestUtils.tempFile;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.atLeastOnce;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 public class FileRecordsTest {
 
@@ -67,30 +60,6 @@ public class FileRecordsTest {
     public void setup() throws IOException {
         this.fileRecords = createFileRecords(values);
         this.time = new MockTime();
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void testAppendProtectsFromOverflow() throws Exception {
-        File fileMock = mock(File.class);
-        FileChannel fileChannelMock = mock(FileChannel.class);
-        when(fileChannelMock.size()).thenReturn((long) Integer.MAX_VALUE);
-
-        FileRecords records = new FileRecords(fileMock, fileChannelMock, 0, Integer.MAX_VALUE, false);
-        append(records, values);
-    }
-
-    @Test(expected = KafkaException.class)
-    public void testOpenOversizeFile() throws Exception {
-        File fileMock = mock(File.class);
-        FileChannel fileChannelMock = mock(FileChannel.class);
-        when(fileChannelMock.size()).thenReturn(Integer.MAX_VALUE + 5L);
-
-        new FileRecords(fileMock, fileChannelMock, 0, Integer.MAX_VALUE, false);
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void testOutOfRangeSlice() throws Exception {
-        this.fileRecords.slice(fileRecords.sizeInBytes() + 1, 15).sizeInBytes();
     }
 
     /**
@@ -223,7 +192,7 @@ public class FileRecordsTest {
         position += message2Size + batches.get(2).sizeInBytes();
 
         int message4Size = batches.get(3).sizeInBytes();
-        assertEquals("Should be able to find fourth message from a non-existent offset",
+        assertEquals("Should be able to find fourth message from a non-existant offset",
                 new FileRecords.LogOffsetPosition(50L, position, message4Size),
                 fileRecords.searchForOffsetWithSize(3, position));
         assertEquals("Should be able to find fourth message by correct offset",
@@ -264,16 +233,16 @@ public class FileRecordsTest {
      */
     @Test
     public void testTruncateNotCalledIfSizeIsSameAsTargetSize() throws IOException {
-        FileChannel channelMock = mock(FileChannel.class);
+        FileChannel channelMock = EasyMock.createMock(FileChannel.class);
 
-        when(channelMock.size()).thenReturn(42L);
-        when(channelMock.position(42L)).thenReturn(null);
+        EasyMock.expect(channelMock.size()).andReturn(42L).atLeastOnce();
+        EasyMock.expect(channelMock.position(42L)).andReturn(null);
+        EasyMock.replay(channelMock);
 
         FileRecords fileRecords = new FileRecords(tempFile(), channelMock, 0, Integer.MAX_VALUE, false);
         fileRecords.truncateTo(42);
 
-        verify(channelMock, atLeastOnce()).size();
-        verify(channelMock, times(0)).truncate(anyLong());
+        EasyMock.verify(channelMock);
     }
 
     /**
@@ -282,9 +251,11 @@ public class FileRecordsTest {
      */
     @Test
     public void testTruncateNotCalledIfSizeIsBiggerThanTargetSize() throws IOException {
-        FileChannel channelMock = mock(FileChannel.class);
+        FileChannel channelMock = EasyMock.createMock(FileChannel.class);
 
-        when(channelMock.size()).thenReturn(42L);
+        EasyMock.expect(channelMock.size()).andReturn(42L).atLeastOnce();
+        EasyMock.expect(channelMock.position(42L)).andReturn(null);
+        EasyMock.replay(channelMock);
 
         FileRecords fileRecords = new FileRecords(tempFile(), channelMock, 0, Integer.MAX_VALUE, false);
 
@@ -295,7 +266,7 @@ public class FileRecordsTest {
             // expected
         }
 
-        verify(channelMock, atLeastOnce()).size();
+        EasyMock.verify(channelMock);
     }
 
     /**
@@ -303,16 +274,17 @@ public class FileRecordsTest {
      */
     @Test
     public void testTruncateIfSizeIsDifferentToTargetSize() throws IOException {
-        FileChannel channelMock = mock(FileChannel.class);
+        FileChannel channelMock = EasyMock.createMock(FileChannel.class);
 
-        when(channelMock.size()).thenReturn(42L);
-        when(channelMock.truncate(anyLong())).thenReturn(channelMock);
+        EasyMock.expect(channelMock.size()).andReturn(42L).atLeastOnce();
+        EasyMock.expect(channelMock.position(42L)).andReturn(null).once();
+        EasyMock.expect(channelMock.truncate(23L)).andReturn(null).once();
+        EasyMock.replay(channelMock);
 
         FileRecords fileRecords = new FileRecords(tempFile(), channelMock, 0, Integer.MAX_VALUE, false);
         fileRecords.truncateTo(23);
 
-        verify(channelMock, atLeastOnce()).size();
-        verify(channelMock).truncate(23);
+        EasyMock.verify(channelMock);
     }
 
     /**
@@ -321,12 +293,12 @@ public class FileRecordsTest {
     @Test
     public void testPreallocateTrue() throws IOException {
         File temp = tempFile();
-        FileRecords fileRecords = FileRecords.open(temp, false, 1024 * 1024, true);
+        FileRecords fileRecords = FileRecords.open(temp, false, 512 * 1024 * 1024, true);
         long position = fileRecords.channel().position();
         int size = fileRecords.sizeInBytes();
         assertEquals(0, position);
         assertEquals(0, size);
-        assertEquals(1024 * 1024, temp.length());
+        assertEquals(512 * 1024 * 1024, temp.length());
     }
 
     /**
@@ -335,7 +307,7 @@ public class FileRecordsTest {
     @Test
     public void testPreallocateFalse() throws IOException {
         File temp = tempFile();
-        FileRecords set = FileRecords.open(temp, false, 1024 * 1024, false);
+        FileRecords set = FileRecords.open(temp, false, 512 * 1024 * 1024, false);
         long position = set.channel().position();
         int size = set.sizeInBytes();
         assertEquals(0, position);
@@ -349,7 +321,7 @@ public class FileRecordsTest {
     @Test
     public void testPreallocateClearShutdown() throws IOException {
         File temp = tempFile();
-        FileRecords fileRecords = FileRecords.open(temp, false, 1024 * 1024, true);
+        FileRecords fileRecords = FileRecords.open(temp, false, 512 * 1024 * 1024, true);
         append(fileRecords, values);
 
         int oldPosition = (int) fileRecords.channel().position();
@@ -359,7 +331,7 @@ public class FileRecordsTest {
         fileRecords.close();
 
         File tempReopen = new File(temp.getAbsolutePath());
-        FileRecords setReopen = FileRecords.open(tempReopen, true, 1024 * 1024, true);
+        FileRecords setReopen = FileRecords.open(tempReopen, true, 512 * 1024 * 1024, true);
         int position = (int) setReopen.channel().position();
         int size = setReopen.sizeInBytes();
 
@@ -381,57 +353,41 @@ public class FileRecordsTest {
         // Lazy down-conversion will not return any messages for a partial input batch
         TopicPartition tp = new TopicPartition("topic-1", 0);
         LazyDownConversionRecords lazyRecords = new LazyDownConversionRecords(tp, slice, RecordBatch.MAGIC_VALUE_V0, 0, Time.SYSTEM);
-        Iterator<ConvertedRecords<?>> it = lazyRecords.iterator(16 * 1024L);
+        Iterator<ConvertedRecords> it = lazyRecords.iterator(16 * 1024L);
         assertTrue("No messages should be returned", !it.hasNext());
     }
 
     @Test
-    public void testSearchForTimestamp() throws IOException {
-        for (RecordVersion version : RecordVersion.values()) {
-            testSearchForTimestamp(version);
+    public void testDownconversionAfterMessageFormatDowngrade() throws IOException {
+        // random bytes
+        Random random = new Random();
+        byte[] bytes = new byte[3000];
+        random.nextBytes(bytes);
+
+        // records
+        CompressionType compressionType = CompressionType.GZIP;
+        List<Long> offsets = asList(0L, 1L);
+        List<Byte> magic = asList(RecordBatch.MAGIC_VALUE_V2, RecordBatch.MAGIC_VALUE_V1);  // downgrade message format from v2 to v1
+        List<SimpleRecord> records = asList(
+                new SimpleRecord(1L, "k1".getBytes(), bytes),
+                new SimpleRecord(2L, "k2".getBytes(), bytes));
+        byte toMagic = 1;
+
+        // create MemoryRecords
+        ByteBuffer buffer = ByteBuffer.allocate(8000);
+        for (int i = 0; i < records.size(); i++) {
+            MemoryRecordsBuilder builder = MemoryRecords.builder(buffer, magic.get(i), compressionType, TimestampType.CREATE_TIME, 0L);
+            builder.appendWithOffset(offsets.get(i), records.get(i));
+            builder.close();
         }
-    }
+        buffer.flip();
 
-    private void testSearchForTimestamp(RecordVersion version) throws IOException {
-        File temp = tempFile();
-        FileRecords fileRecords = FileRecords.open(temp, false, 1024 * 1024, true);
-        appendWithOffsetAndTimestamp(fileRecords, version, 10L, 5, 0);
-        appendWithOffsetAndTimestamp(fileRecords, version, 11L, 6, 1);
-
-        assertFoundTimestamp(new FileRecords.TimestampAndOffset(10L, 5, Optional.of(0)),
-                fileRecords.searchForTimestamp(9L, 0, 0L), version);
-        assertFoundTimestamp(new FileRecords.TimestampAndOffset(10L, 5, Optional.of(0)),
-                fileRecords.searchForTimestamp(10L, 0, 0L), version);
-        assertFoundTimestamp(new FileRecords.TimestampAndOffset(11L, 6, Optional.of(1)),
-                fileRecords.searchForTimestamp(11L, 0, 0L), version);
-        assertNull(fileRecords.searchForTimestamp(12L, 0, 0L));
-    }
-
-    private void assertFoundTimestamp(FileRecords.TimestampAndOffset expected,
-                                      FileRecords.TimestampAndOffset actual,
-                                      RecordVersion version) {
-        if (version == RecordVersion.V0) {
-            assertNull("Expected no match for message format v0", actual);
-        } else {
-            assertNotNull("Expected to find timestamp for message format " + version, actual);
-            assertEquals("Expected matching timestamps for message format" + version, expected.timestamp, actual.timestamp);
-            assertEquals("Expected matching offsets for message format " + version, expected.offset, actual.offset);
-            Optional<Integer> expectedLeaderEpoch = version.value >= RecordVersion.V2.value ?
-                    expected.leaderEpoch : Optional.empty();
-            assertEquals("Non-matching leader epoch for version " + version, expectedLeaderEpoch, actual.leaderEpoch);
+        // create FileRecords, down-convert and verify
+        try (FileRecords fileRecords = FileRecords.open(tempFile())) {
+            fileRecords.append(MemoryRecords.readableRecords(buffer));
+            fileRecords.flush();
+            downConvertAndVerifyRecords(records, offsets, fileRecords, compressionType, toMagic, 0L, time);
         }
-    }
-
-    private void appendWithOffsetAndTimestamp(FileRecords fileRecords,
-                                              RecordVersion recordVersion,
-                                              long timestamp,
-                                              long offset,
-                                              int leaderEpoch) throws IOException {
-        ByteBuffer buffer = ByteBuffer.allocate(128);
-        MemoryRecordsBuilder builder = MemoryRecords.builder(buffer, recordVersion.value,
-                CompressionType.NONE, TimestampType.CREATE_TIME, offset, timestamp, leaderEpoch);
-        builder.append(new SimpleRecord(timestamp, new byte[0], new byte[0]));
-        fileRecords.append(builder.build());
     }
 
     @Test
@@ -538,7 +494,7 @@ public class FileRecordsTest {
         for (long readSize : maximumReadSize) {
             TopicPartition tp = new TopicPartition("topic-1", 0);
             LazyDownConversionRecords lazyRecords = new LazyDownConversionRecords(tp, fileRecords, toMagic, firstOffset, Time.SYSTEM);
-            Iterator<ConvertedRecords<?>> it = lazyRecords.iterator(readSize);
+            Iterator<ConvertedRecords> it = lazyRecords.iterator(readSize);
             while (it.hasNext())
                 convertedRecords.add(it.next().records());
             verifyConvertedRecords(initialRecords, initialOffsets, convertedRecords, compressionType, toMagic);

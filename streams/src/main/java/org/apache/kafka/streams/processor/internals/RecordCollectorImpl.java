@@ -55,10 +55,9 @@ public class RecordCollectorImpl implements RecordCollector {
     private final Map<TopicPartition, Long> offsets;
     private final ProductionExceptionHandler productionExceptionHandler;
 
-    private final static String LOG_MESSAGE = "Error sending record to topic {} due to {}; " +
-        "No more records will be sent and no more offsets will be recorded for this task. " +
-        "Enable TRACE logging to view failed record key and value.";
-    private final static String EXCEPTION_MESSAGE = "%sAbort sending since %s with a previous record (timestamp %d) to topic %s due to %s";
+    private final static String LOG_MESSAGE = "Error sending record (key {} value {} timestamp {}) to topic {} due to {}; " +
+        "No more records will be sent and no more offsets will be recorded for this task.";
+    private final static String EXCEPTION_MESSAGE = "%sAbort sending since %s with a previous record (key %s value %s timestamp %d) to topic %s due to %s";
     private final static String PARAMETER_HINT = "\nYou can increase producer parameter `retries` and `retry.backoff.ms` to avoid this error.";
     private volatile KafkaException sendException;
 
@@ -129,16 +128,14 @@ public class RecordCollectorImpl implements RecordCollector {
             errorLogMessage += PARAMETER_HINT;
             errorMessage += PARAMETER_HINT;
         }
-        log.error(errorLogMessage, topic, exception.getMessage(), exception);
-
-        // KAFKA-7510 put message key and value in TRACE level log so we don't leak data by default
-        log.trace("Failed message: key {} value {} timestamp {}", key, value, timestamp);
-
+        log.error(errorLogMessage, key, value, timestamp, topic, exception.toString());
         sendException = new StreamsException(
             String.format(
                 errorMessage,
                 logPrefix,
                 "an error caught",
+                key,
+                value,
                 timestamp,
                 topic,
                 exception.toString()
@@ -156,8 +153,8 @@ public class RecordCollectorImpl implements RecordCollector {
                             final Serializer<K> keySerializer,
                             final Serializer<V> valueSerializer) {
         checkForException();
-        final byte[] keyBytes = keySerializer.serialize(topic, headers, key);
-        final byte[] valBytes = valueSerializer.serialize(topic, headers, value);
+        final byte[] keyBytes = keySerializer.serialize(topic, key);
+        final byte[] valBytes = valueSerializer.serialize(topic, value);
 
         final ProducerRecord<byte[], byte[]> serializedRecord = new ProducerRecord<>(topic, partition, timestamp, keyBytes, valBytes, headers);
 
@@ -175,16 +172,14 @@ public class RecordCollectorImpl implements RecordCollector {
                     } else {
                         if (sendException == null) {
                             if (exception instanceof ProducerFencedException) {
-                                log.warn(LOG_MESSAGE, topic, exception.getMessage(), exception);
-
-                                // KAFKA-7510 put message key and value in TRACE level log so we don't leak data by default
-                                log.trace("Failed message: (key {} value {} timestamp {}) topic=[{}] partition=[{}]", key, value, timestamp, topic, partition);
-
+                                log.warn(LOG_MESSAGE, key, value, timestamp, topic, exception.toString());
                                 sendException = new ProducerFencedException(
                                     String.format(
                                         EXCEPTION_MESSAGE,
                                         logPrefix,
                                         "producer got fenced",
+                                        key,
+                                        value,
                                         timestamp,
                                         topic,
                                         exception.toString()
@@ -197,15 +192,10 @@ public class RecordCollectorImpl implements RecordCollector {
                                     recordSendError(key, value, timestamp, topic, exception);
                                 } else {
                                     log.warn(
-                                        "Error sending records topic=[{}] and partition=[{}]; " +
-                                            "The exception handler chose to CONTINUE processing in spite of this error. " +
-                                            "Enable TRACE logging to view failed messages key and value.",
-                                        topic, partition, exception
+                                        "Error sending records (key=[{}] value=[{}] timestamp=[{}]) to topic=[{}] and partition=[{}]; " +
+                                            "The exception handler chose to CONTINUE processing in spite of this error.",
+                                        key, value, timestamp, topic, partition, exception
                                     );
-
-                                    // KAFKA-7510 put message key and value in TRACE level log so we don't leak data by default
-                                    log.trace("Failed message: (key {} value {} timestamp {}) topic=[{}] partition=[{}]", key, value, timestamp, topic, partition);
-
                                     skippedRecordsSensor.record();
                                 }
                             }
@@ -241,6 +231,8 @@ public class RecordCollectorImpl implements RecordCollector {
                         EXCEPTION_MESSAGE,
                         logPrefix,
                         "an error caught",
+                        key,
+                        value,
                         timestamp,
                         topic,
                         uncaughtException.toString()

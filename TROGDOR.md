@@ -16,7 +16,7 @@ Running Kafka:
 
     > ./bin/kafka-server-start.sh ./config/server.properties &> /tmp/kafka.log &
 
-Then, we want to run a Trogdor Agent, plus a Trogdor Coordinator.
+Then, we want to run a Trogdor Agent, plus a Trogdor broker.
 
 To run the Trogdor Agent:
 
@@ -35,27 +35,57 @@ Let's confirm that all of the daemons are running:
     115420 Kafka
     115694 Agent
 
-Now, we can submit a test job to Trogdor.
+Now, we can submit a test job to Trogdor.  Here's an example of a short bash script which makes it easier.
 
-    > ./bin/trogdor.sh client createTask -t localhost:8889 -i produce0 --spec ./tests/spec/simple_produce_bench.json
-    Sent CreateTaskRequest for task produce0.
+    > ./tests/bin/trogdor-run-produce-bench.sh
+    [2018-04-12 10:32:04,055] DEBUG Sending POST with input {"id":"produce_bench_22137","spec":{"class":"org.apache.kafka.trogdor.workload.ProduceBenchSpec","startMs":0,"durationMs":10000000,"producerNode":"node0","bootstrapServers":"localhost:9092","targetMessagesPerSec":10,"maxMessages":100,"keyGenerator":{"type":"sequential","size":4,"startOffset":0},"valueGenerator":{"type":"constant","size":512,"value":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},"totalTopics":10,"activeTopics":5,"topicPrefix":"foo","replicationFactor":1,"classLoader":{},"numPartitions":1}} to http://localhost:8889/coordinator/task/create (org.apache.kafka.trogdor.coordinator.CoordinatorClient)
+    Created task.
+    $TASK_ID = produce_bench_20462
 
-We can run showTask to see what the task's status is:
+To get the test results, we run --show-tasks:
 
-    > ./bin/trogdor.sh client showTask -t localhost:8889 -i produce0
-    Task bar of type org.apache.kafka.trogdor.workload.ProduceBenchSpec is DONE. FINISHED at 2019-01-09T20:38:22.039-08:00 after 6s
-
-To see the results, we use showTask with --show-status:
-
-    > ./bin/trogdor.sh client showTask -t localhost:8889 -i produce0 --show-status
-    Task bar of type org.apache.kafka.trogdor.workload.ProduceBenchSpec is DONE. FINISHED at 2019-01-09T20:38:22.039-08:00 after 6s
-    Status: {
-      "totalSent" : 50000,
-      "averageLatencyMs" : 17.83388,
-      "p50LatencyMs" : 12,
-      "p95LatencyMs" : 75,
-      "p99LatencyMs" : 96,
-      "transactionsCommitted" : 0
+    ./bin/trogdor.sh client --show-tasks localhost:8889
+    Got coordinator tasks: {
+      "tasks" : {
+        "produce_bench_20462" : {
+          "state" : "DONE",
+          "spec" : {
+            "class" : "org.apache.kafka.trogdor.workload.ProduceBenchSpec",
+            "startMs" : 0,
+            "durationMs" : 10000000,
+            "producerNode" : "node0",
+            "bootstrapServers" : "localhost:9092",
+            "targetMessagesPerSec" : 10,
+            "maxMessages" : 100,
+            "keyGenerator" : {
+              "type" : "sequential",
+              "size" : 4,
+              "startOffset" : 0
+            },
+            "valueGenerator" : {
+              "type" : "constant",
+              "size" : 512,
+              "value" : "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "totalTopics" : 10,
+            "activeTopics" : 5,
+            "topicPrefix" : "foo",
+            "replicationFactor" : 1,
+            "classLoader" : { },
+            "numPartitions" : 1
+          },
+          "startedMs" : 1523552769850,
+          "doneMs" : 1523552780878,
+          "cancelled" : false,
+          "status" : {
+            "totalSent" : 500,
+            "averageLatencyMs" : 4.972,
+            "p50LatencyMs" : 4,
+            "p95LatencyMs" : 6,
+            "p99LatencyMs" : 12
+          }
+        }
+      }
     }
 
 Trogdor Architecture
@@ -106,14 +136,12 @@ Trogdor can run several workloads.  Workloads perform operations on the cluster 
 
 ### ProduceBench
 ProduceBench starts a Kafka producer on a single agent node, producing to several partitions.  The workload measures the average produce latency, as well as the median, 95th percentile, and 99th percentile latency.
-It can be configured to use a transactional producer which can commit transactions based on a set time interval or number of messages.
 
 ### RoundTripWorkload
 RoundTripWorkload tests both production and consumption.  The workload starts a Kafka producer and consumer on a single node.  The consumer will read back the messages that were produced by the producer.
 
 ### ConsumeBench
-ConsumeBench starts one or more Kafka consumers on a single agent node. Depending on the passed in configuration (see ConsumeBenchSpec), the consumers either subscribe to a set of topics (leveraging consumer group functionality and dynamic partition assignment) or manually assign partitions to themselves.
-The workload measures the average produce latency, as well as the median, 95th percentile, and 99th percentile latency.
+ConsumeBench starts a Kafka consumer on a single agent node.  The workload measures the average produce latency, as well as the median, 95th percentile, and 99th percentile latency.
 
 Faults
 ========================================
@@ -124,36 +152,3 @@ ProcessStopFault stops a process by sending it a SIGSTOP signal.  When the fault
 
 ### NetworkPartitionFault
 NetworkPartitionFault sets up an artificial network partition between one or more sets of nodes.  Currently, this is implemented using iptables.  The iptables rules are set up on the outbound traffic from the affected nodes.  Therefore, the affected nodes should still be reachable from outside the cluster.
-
-External Processes
-========================================
-Trogdor supports running arbitrary commands in external processes. This is a generic way to run any configurable command in the Trogdor framework - be it a Python program, bash script, docker image, etc.
-
-### ExternalCommandWorker
-ExternalCommandWorker starts an external command defined by the ExternalCommandSpec. It essentially allows you to run any command on any Trogdor agent node.
-The worker communicates with the external process via its stdin, stdout and stderr in a JSON protocol. It uses stdout for any actionable communication and only logs what it sees in stderr.
-On startup the worker will first send a message describing the workload to the external process in this format:
-```
-{"id":<task ID string>, "workload":<configured workload JSON object>}
-```
-and will then listen for messages from the external process, again in a JSON format.
-Said JSON can contain the following fields:
-- status: If the object contains this field, the status of the worker will be set to the given value.
-- error: If the object contains this field, the error of the worker will be set to the given value. Once an error occurs, the external process will be terminated.
-- log: If the object contains this field, a log message will be issued with this text.
-An example:
-```json
-{"log": "Finished successfully.", "status": {"p99ProduceLatency": "100ms", "messagesSent": 10000}}
-```
-
-Exec Mode
-========================================
-Sometimes, you just want to run a test quickly on a single node.  In this case, you can use "exec mode."  This mode allows you to run a single Trogdor Agent without a Coordinator.
-
-When using exec mode, you must pass in a Task specification to use.  The Agent will try to start this task.
-
-For example:
-
-    > ./bin/trogdor.sh agent -n node0 -c ./config/trogdor.conf --exec ./tests/spec/simple_produce_bench.json
-
-When using exec mode, the Agent will exit once the task is complete.

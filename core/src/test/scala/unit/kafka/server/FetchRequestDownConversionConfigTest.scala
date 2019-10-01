@@ -14,12 +14,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package kafka.server
+package unit.kafka.server
 
 import java.util
-import java.util.{Optional, Properties}
+import java.util.Properties
 
 import kafka.log.LogConfig
+import kafka.server.{BaseRequestTest, KafkaConfig}
 import kafka.utils.TestUtils
 import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
 import org.apache.kafka.common.TopicPartition
@@ -32,7 +33,7 @@ import org.junit.Test
 
 class FetchRequestDownConversionConfigTest extends BaseRequestTest {
   private var producer: KafkaProducer[String, String] = null
-  override def brokerCount: Int = 1
+  override def numBrokers: Int = 1
 
   override def setUp(): Unit = {
     super.setUp()
@@ -45,14 +46,14 @@ class FetchRequestDownConversionConfigTest extends BaseRequestTest {
     super.tearDown()
   }
 
-  override protected def brokerPropertyOverrides(properties: Properties): Unit = {
-    super.brokerPropertyOverrides(properties)
+  override protected def propertyOverrides(properties: Properties): Unit = {
+    super.propertyOverrides(properties)
     properties.put(KafkaConfig.LogMessageDownConversionEnableProp, "false")
   }
 
   private def initProducer(): Unit = {
     producer = TestUtils.createProducer(TestUtils.getBrokerListStrFromServers(servers),
-      keySerializer = new StringSerializer, valueSerializer = new StringSerializer)
+      retries = 5, keySerializer = new StringSerializer, valueSerializer = new StringSerializer)
   }
 
   private def createTopics(numTopics: Int, numPartitions: Int,
@@ -72,8 +73,7 @@ class FetchRequestDownConversionConfigTest extends BaseRequestTest {
                                  offsetMap: Map[TopicPartition, Long] = Map.empty): util.LinkedHashMap[TopicPartition, FetchRequest.PartitionData] = {
     val partitionMap = new util.LinkedHashMap[TopicPartition, FetchRequest.PartitionData]
     topicPartitions.foreach { tp =>
-      partitionMap.put(tp, new FetchRequest.PartitionData(offsetMap.getOrElse(tp, 0), 0L,
-        maxPartitionBytes, Optional.empty()))
+      partitionMap.put(tp, new FetchRequest.PartitionData(offsetMap.getOrElse(tp, 0), 0L, maxPartitionBytes))
     }
     partitionMap
   }

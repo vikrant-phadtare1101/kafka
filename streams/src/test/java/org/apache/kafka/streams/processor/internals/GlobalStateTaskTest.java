@@ -42,7 +42,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
-import static java.util.Arrays.asList;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertEquals;
@@ -84,8 +83,8 @@ public class GlobalStateTaskTest {
         final Map<String, String> storeToTopic = new HashMap<>();
         storeToTopic.put("t1-store", topic1);
         storeToTopic.put("t2-store", topic2);
-        topology = ProcessorTopologyFactories.with(
-            asList(sourceOne, sourceTwo, processorOne, processorTwo),
+        topology = ProcessorTopology.with(
+            Utils.mkList(sourceOne, sourceTwo, processorOne, processorTwo),
             sourceByTopics,
             Collections.<StateStore>emptyList(),
             storeToTopic);
@@ -204,14 +203,15 @@ public class GlobalStateTaskTest {
 
 
     @Test
-    public void shouldFlushStateManagerWithOffsets() throws IOException {
+    public void shouldCloseStateManagerWithOffsets() throws IOException {
         final Map<TopicPartition, Long> expectedOffsets = new HashMap<>();
         expectedOffsets.put(t1, 52L);
         expectedOffsets.put(t2, 100L);
         globalStateTask.initialize();
         globalStateTask.update(new ConsumerRecord<>(topic1, 1, 51, "foo".getBytes(), "foo".getBytes()));
-        globalStateTask.flushState();
+        globalStateTask.close();
         assertEquals(expectedOffsets, stateMgr.checkpointed());
+        assertTrue(stateMgr.closed);
     }
 
     @Test

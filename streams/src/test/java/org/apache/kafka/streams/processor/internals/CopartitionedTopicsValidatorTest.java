@@ -33,31 +33,23 @@ import static org.hamcrest.MatcherAssert.assertThat;
 
 public class CopartitionedTopicsValidatorTest {
 
-    private final StreamsPartitionAssignor.CopartitionedTopicsValidator validator =
-        new StreamsPartitionAssignor.CopartitionedTopicsValidator("thread");
+    private final StreamsPartitionAssignor.CopartitionedTopicsValidator validator
+            = new StreamsPartitionAssignor.CopartitionedTopicsValidator("thread");
     private final Map<TopicPartition, PartitionInfo> partitions = new HashMap<>();
     private final Cluster cluster = Cluster.empty();
 
     @Before
     public void before() {
-        partitions.put(
-            new TopicPartition("first", 0),
-            new PartitionInfo("first", 0, null, null, null));
-        partitions.put(
-            new TopicPartition("first", 1),
-            new PartitionInfo("first", 1, null, null, null));
-        partitions.put(
-            new TopicPartition("second", 0),
-            new PartitionInfo("second", 0, null, null, null));
-        partitions.put(
-            new TopicPartition("second", 1),
-            new PartitionInfo("second", 1, null, null, null));
+        partitions.put(new TopicPartition("first", 0), new PartitionInfo("first", 0, null, null, null));
+        partitions.put(new TopicPartition("first", 1), new PartitionInfo("first", 1, null, null, null));
+        partitions.put(new TopicPartition("second", 0), new PartitionInfo("second", 0, null, null, null));
+        partitions.put(new TopicPartition("second", 1), new PartitionInfo("second", 1, null, null, null));
     }
 
-    @Test(expected = IllegalStateException.class)
+    @Test(expected = TopologyException.class)
     public void shouldThrowTopologyBuilderExceptionIfNoPartitionsFoundForCoPartitionedTopic() {
         validator.validate(Collections.singleton("topic"),
-                           Collections.emptyMap(),
+                           Collections.<String, StreamsPartitionAssignor.InternalTopicMetadata>emptyMap(),
                            cluster);
     }
 
@@ -65,53 +57,77 @@ public class CopartitionedTopicsValidatorTest {
     public void shouldThrowTopologyBuilderExceptionIfPartitionCountsForCoPartitionedTopicsDontMatch() {
         partitions.remove(new TopicPartition("second", 0));
         validator.validate(Utils.mkSet("first", "second"),
-                           Collections.emptyMap(),
+                           Collections.<String, StreamsPartitionAssignor.InternalTopicMetadata>emptyMap(),
                            cluster.withPartitions(partitions));
     }
 
 
     @Test
     public void shouldEnforceCopartitioningOnRepartitionTopics() {
-        final InternalTopicConfig config = createTopicConfig("repartitioned", 10);
+        final StreamsPartitionAssignor.InternalTopicMetadata metadata = createTopicMetadata("repartitioned", 10);
 
-        validator.validate(Utils.mkSet("first", "second", config.name()),
-                           Collections.singletonMap(config.name(), config),
+        validator.validate(Utils.mkSet("first", "second", metadata.config.name()),
+                           Collections.singletonMap(metadata.config.name(),
+                                                    metadata),
                            cluster.withPartitions(partitions));
 
-        assertThat(config.numberOfPartitions(), equalTo(2));
+        assertThat(metadata.numPartitions, equalTo(2));
     }
 
 
     @Test
     public void shouldSetNumPartitionsToMaximumPartitionsWhenAllTopicsAreRepartitionTopics() {
-        final InternalTopicConfig one = createTopicConfig("one", 1);
-        final InternalTopicConfig two = createTopicConfig("two", 15);
-        final InternalTopicConfig three = createTopicConfig("three", 5);
-        final Map<String, InternalTopicConfig> repartitionTopicConfig = new HashMap<>();
+        final StreamsPartitionAssignor.InternalTopicMetadata one = createTopicMetadata("one", 1);
+        final StreamsPartitionAssignor.InternalTopicMetadata two = createTopicMetadata("two", 15);
+        final StreamsPartitionAssignor.InternalTopicMetadata three = createTopicMetadata("three", 5);
+        final Map<String, StreamsPartitionAssignor.InternalTopicMetadata> repartitionTopicConfig = new HashMap<>();
 
-        repartitionTopicConfig.put(one.name(), one);
-        repartitionTopicConfig.put(two.name(), two);
-        repartitionTopicConfig.put(three.name(), three);
+        repartitionTopicConfig.put(one.config.name(), one);
+        repartitionTopicConfig.put(two.config.name(), two);
+        repartitionTopicConfig.put(three.config.name(), three);
 
-        validator.validate(Utils.mkSet(one.name(),
-                                       two.name(),
-                                       three.name()),
+        validator.validate(Utils.mkSet(one.config.name(),
+                                       two.config.name(),
+                                       three.config.name()),
                            repartitionTopicConfig,
                            cluster
         );
 
-        assertThat(one.numberOfPartitions(), equalTo(15));
-        assertThat(two.numberOfPartitions(), equalTo(15));
-        assertThat(three.numberOfPartitions(), equalTo(15));
+        assertThat(one.numPartitions, equalTo(15));
+        assertThat(two.numPartitions, equalTo(15));
+        assertThat(three.numPartitions, equalTo(15));
     }
 
-    private InternalTopicConfig createTopicConfig(final String repartitionTopic,
-                                                                               final int partitions) {
-        final InternalTopicConfig repartitionTopicConfig =
-            new RepartitionTopicConfig(repartitionTopic, Collections.emptyMap());
+    @Test
+    public void shouldSetRepartitionTopicsPartitionCountToNotAvailableIfAnyNotAvaliable() {
+        final StreamsPartitionAssignor.InternalTopicMetadata one = createTopicMetadata("one", 1);
+        final StreamsPartitionAssignor.InternalTopicMetadata two = createTopicMetadata("two", StreamsPartitionAssignor.NOT_AVAILABLE);
+        final Map<String, StreamsPartitionAssignor.InternalTopicMetadata> repartitionTopicConfig = new HashMap<>();
 
-        repartitionTopicConfig.setNumberOfPartitions(partitions);
-        return repartitionTopicConfig;
+        repartitionTopicConfig.put(one.config.name(), one);
+        repartitionTopicConfig.put(two.config.name(), two);
+
+        validator.validate(Utils.mkSet("first",
+                                       "second",
+                                       one.config.name(),
+                                       two.config.name()),
+                           repartitionTopicConfig,
+                           cluster.withPartitions(partitions));
+
+        assertThat(one.numPartitions, equalTo(StreamsPartitionAssignor.NOT_AVAILABLE));
+        assertThat(two.numPartitions, equalTo(StreamsPartitionAssignor.NOT_AVAILABLE));
+
+    }
+
+    private StreamsPartitionAssignor.InternalTopicMetadata createTopicMetadata(final String repartitionTopic,
+                                                                               final int partitions) {
+        final InternalTopicConfig repartitionTopicConfig
+                = new RepartitionTopicConfig(repartitionTopic, Collections.<String, String>emptyMap());
+
+        final StreamsPartitionAssignor.InternalTopicMetadata metadata
+                = new StreamsPartitionAssignor.InternalTopicMetadata(repartitionTopicConfig);
+        metadata.numPartitions = partitions;
+        return metadata;
     }
 
 }
