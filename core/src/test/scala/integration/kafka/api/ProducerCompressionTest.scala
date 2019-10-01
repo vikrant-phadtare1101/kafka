@@ -17,48 +17,40 @@
 
 package kafka.api.test
 
-import java.util.{Properties, Collection, ArrayList}
+import java.util.{Collection, Collections, Properties}
 
-import org.scalatest.junit.JUnit3Suite
+import scala.collection.JavaConverters._
 import org.junit.runners.Parameterized
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized.Parameters
 import org.junit.{After, Before, Test}
-import org.apache.kafka.clients.producer.{ProducerRecord, KafkaProducer, ProducerConfig}
+import org.apache.kafka.clients.producer.{KafkaProducer, ProducerConfig, ProducerRecord}
 import org.junit.Assert._
-
-import kafka.api.FetchRequestBuilder
 import kafka.server.{KafkaConfig, KafkaServer}
-import kafka.consumer.SimpleConsumer
-import kafka.message.Message
 import kafka.zk.ZooKeeperTestHarness
-import kafka.utils.{Utils, TestUtils}
-
-import scala.Array
-
+import kafka.utils.TestUtils
+import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.common.serialization.ByteArraySerializer
 
 @RunWith(value = classOf[Parameterized])
-class ProducerCompressionTest(compression: String) extends JUnit3Suite with ZooKeeperTestHarness {
+class ProducerCompressionTest(compression: String) extends ZooKeeperTestHarness {
+
   private val brokerId = 0
-  private val port = TestUtils.choosePort
-  private var server: KafkaServer = null
-
-  private val props = TestUtils.createBrokerConfig(brokerId, port)
-  private val config = new KafkaConfig(props)
-
   private val topic = "topic"
   private val numRecords = 2000
 
+  private var server: KafkaServer = null
+
   @Before
-  override def setUp() {
+  override def setUp(): Unit = {
     super.setUp()
-    server = TestUtils.createServer(config)
+    val props = TestUtils.createBrokerConfig(brokerId, zkConnect)
+    server = TestUtils.createServer(KafkaConfig.fromProps(props))
   }
 
   @After
-  override def tearDown() {
-    server.shutdown
-    Utils.rm(server.config.logDirs)
+  override def tearDown(): Unit = {
+    TestUtils.shutdownServers(Seq(server))
     super.tearDown()
   }
 
@@ -68,17 +60,16 @@ class ProducerCompressionTest(compression: String) extends JUnit3Suite with ZooK
    * Compressed messages should be able to sent and consumed correctly
    */
   @Test
-  def testCompression() {
+  def testCompression(): Unit = {
 
-    val props = new Properties()
-    props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, TestUtils.getBrokerListStrFromConfigs(Seq(config)))
-    props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, compression)
-    props.put(ProducerConfig.BATCH_SIZE_CONFIG, "66000")
-    props.put(ProducerConfig.LINGER_MS_CONFIG, "200")
-    props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer")
-    props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArraySerializer")
-    var producer = new KafkaProducer[Array[Byte],Array[Byte]](props)
-    val consumer = new SimpleConsumer("localhost", port, 100, 1024*1024, "")
+    val producerProps = new Properties()
+    val bootstrapServers = TestUtils.getBrokerListStrFromServers(Seq(server))
+    producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers)
+    producerProps.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, compression)
+    producerProps.put(ProducerConfig.BATCH_SIZE_CONFIG, "66000")
+    producerProps.put(ProducerConfig.LINGER_MS_CONFIG, "200")
+    val producer = new KafkaProducer(producerProps, new ByteArraySerializer, new ByteArraySerializer)
+    val consumer = TestUtils.createConsumer(bootstrapServers)
 
     try {
       // create topic
@@ -86,49 +77,44 @@ class ProducerCompressionTest(compression: String) extends JUnit3Suite with ZooK
       val partition = 0
 
       // prepare the messages
-      val messages = for (i <-0 until numRecords)
-        yield ("value" + i).getBytes
+      val messageValues = (0 until numRecords).map(i => "value" + i)
 
       // make sure the returned messages are correct
-      val responses = for (message <- messages)
-        yield producer.send(new ProducerRecord[Array[Byte],Array[Byte]](topic, null, null, message))
-      val futures = responses.toList
-      for ((future, offset) <- futures zip (0 until numRecords)) {
+      val now = System.currentTimeMillis()
+      val responses = for (message <- messageValues)
+        yield producer.send(new ProducerRecord(topic, null, now, null, message.getBytes))
+      for ((future, offset) <- responses.zipWithIndex) {
         assertEquals(offset.toLong, future.get.offset)
       }
 
+      val tp = new TopicPartition(topic, partition)
       // make sure the fetched message count match
-      val fetchResponse = consumer.fetch(new FetchRequestBuilder().addFetch(topic, partition, 0, Int.MaxValue).build())
-      val messageSet = fetchResponse.messageSet(topic, partition).iterator.toBuffer
-      assertEquals("Should have fetched " + numRecords + " messages", numRecords, messageSet.size)
+      consumer.assign(Collections.singleton(tp))
+      consumer.seek(tp, 0)
+      val records = TestUtils.consumeRecords(consumer, numRecords)
 
-      var index = 0
-      for (message <- messages) {
-        assertEquals(new Message(bytes = message), messageSet(index).message)
-        assertEquals(index.toLong, messageSet(index).offset)
-        index += 1
+      for (((messageValue, record), index) <- messageValues.zip(records).zipWithIndex) {
+        assertEquals(messageValue, new String(record.value))
+        assertEquals(now, record.timestamp)
+        assertEquals(index.toLong, record.offset)
       }
     } finally {
-      if (producer != null) {
-        producer.close()
-        producer = null
-      }
-      if (consumer != null)
-        consumer.close()
+      producer.close()
+      consumer.close()
     }
   }
 }
 
 object ProducerCompressionTest {
 
-  // NOTE: Must return collection of Array[AnyRef] (NOT Array[Any]).
-  @Parameters
+  @Parameters(name = "{index} compressionType = {0}")
   def parameters: Collection[Array[String]] = {
-    val list = new ArrayList[Array[String]]()
-    list.add(Array("none"))
-    list.add(Array("gzip"))
-    list.add(Array("snappy"))
-    list.add(Array("lz4"))
-    list
+    Seq(
+      Array("none"),
+      Array("gzip"),
+      Array("snappy"),
+      Array("lz4"),
+      Array("zstd")
+    ).asJava
   }
 }
