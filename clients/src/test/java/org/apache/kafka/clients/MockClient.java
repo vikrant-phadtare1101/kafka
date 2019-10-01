@@ -16,15 +16,19 @@
  */
 package org.apache.kafka.clients;
 
+import org.apache.kafka.clients.consumer.internals.AbstractCoordinator;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
+import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.requests.AbstractRequest;
 import org.apache.kafka.common.requests.AbstractResponse;
 import org.apache.kafka.common.requests.MetadataRequest;
 import org.apache.kafka.common.requests.MetadataResponse;
+import org.apache.kafka.common.requests.OffsetCommitResponse;
+import org.apache.kafka.common.requests.OffsetFetchResponse;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.test.TestCondition;
 import org.apache.kafka.test.TestUtils;
@@ -221,7 +225,7 @@ public class MockClient implements KafkaClient {
                     builder.latestAllowedVersion());
             AbstractRequest abstractRequest = request.requestBuilder().build(version);
             if (!futureResp.requestMatcher.matches(abstractRequest))
-                throw new IllegalStateException("Request matcher did not match next-in-line request " + abstractRequest);
+                throw new IllegalStateException("Request matcher did not match next-in-line request " + abstractRequest + " with prepared response " + futureResp.responseBody);
 
             UnsupportedVersionException unsupportedVersionException = null;
             if (futureResp.isUnsupportedRequest)
@@ -345,6 +349,14 @@ public class MockClient implements KafkaClient {
         short version = request.requestBuilder().latestAllowedVersion();
         responses.add(new ClientResponse(request.makeHeader(version), request.callback(), request.destination(),
                 request.createdTimeMs(), time.milliseconds(), disconnected, null, null, response));
+    }
+
+    public void respondFrom(AbstractResponse response, AbstractCoordinator.CoordinatorNodes nodes) {
+        if (response instanceof OffsetCommitResponse ||
+            response instanceof OffsetFetchResponse)
+            respondFrom(response, nodes.getCoordinatorForApiKey(ApiKeys.OFFSET_COMMIT));
+        else
+            respondFrom(response, nodes.getCoordinatorForApiKey(ApiKeys.JOIN_GROUP));
     }
 
     public void respondFrom(AbstractResponse response, Node node) {
