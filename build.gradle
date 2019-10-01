@@ -132,6 +132,7 @@ if (file('.git').exists()) {
         'gradlew.bat',
         'TROGDOR.md',
         '**/README.md',
+        'DO_NOT_MERGE',
         '**/id_rsa',
         '**/id_rsa.pub',
         'checkstyle/suppressions.xml',
@@ -401,7 +402,6 @@ subprojects {
       "-language:postfixOps",
       "-language:implicitConversions",
       "-language:existentials",
-      "-Xlint:by-name-right-associative",
       "-Xlint:delayedinit-select",
       "-Xlint:doc-detached",
       "-Xlint:missing-interpolator",
@@ -412,14 +412,22 @@ subprojects {
       "-Xlint:poly-implicit-overload",
       "-Xlint:private-shadow",
       "-Xlint:stars-align",
-      "-Xlint:type-parameter-shadow",
-      "-Xlint:unsound-match"
+      "-Xlint:type-parameter-shadow"
     ]
 
     if (versions.baseScala != '2.11') {
       scalaCompileOptions.additionalParameters += [
         "-Xlint:constant",
         "-Xlint:unused"
+      ]
+    }
+    
+  // these options are valid for Scala versions < 2.13 only
+  // Scala 2.13 removes them, see https://github.com/scala/scala/pull/6502 and https://github.com/scala/scala/pull/5969
+    if (versions.baseScala in ['2.11','2.12']) {
+      scalaCompileOptions.additionalParameters += [
+        "-Xlint:by-name-right-associative",
+        "-Xlint:unsound-match"
       ]
     }
 
@@ -660,20 +668,20 @@ project(':core') {
     compile libs.jacksonJDK8Datatypes
     compile libs.joptSimple
     compile libs.metrics
+    compile libs.scalaCollectionCompat
     compile libs.scalaJava8Compat
     compile libs.scalaLibrary
     // only needed transitively, but set it explicitly to ensure it has the same version as scala-library
     compile libs.scalaReflect
     compile libs.scalaLogging
     compile libs.slf4jApi
-    compile(libs.zkclient) {
-      exclude module: 'zookeeper'
-    }
     compile(libs.zookeeper) {
       exclude module: 'slf4j-log4j12'
       exclude module: 'log4j'
       exclude module: 'netty'
     }
+    // ZooKeeperMain depends on commons-cli but declares the dependency as `provided`
+    compile libs.commonsCli
 
     compileOnly libs.log4j
 
@@ -1370,6 +1378,18 @@ project(':streams:upgrade-system-tests-22') {
 
   dependencies {
     testCompile libs.kafkaStreams_22
+  }
+
+  systemTestLibs {
+    dependsOn testJar
+  }
+}
+
+project(':streams:upgrade-system-tests-23') {
+  archivesBaseName = "kafka-streams-upgrade-system-tests-23"
+
+  dependencies {
+    testCompile libs.kafkaStreams_23
   }
 
   systemTestLibs {
