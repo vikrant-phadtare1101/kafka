@@ -26,8 +26,10 @@ import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.Node;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
@@ -83,6 +85,7 @@ public class KafkaBasedLog<K, V> {
     private boolean stopRequested;
     private Queue<Callback<Void>> readLogEndOffsetCallbacks;
     private Runnable initializer;
+    private long topicMetadataTimeoutMs = CREATE_TOPIC_TIMEOUT_MS;
 
     /**
      * Create a new KafkaBasedLog object. This does not start reading the log and writing is not permitted until
@@ -114,11 +117,7 @@ public class KafkaBasedLog<K, V> {
         this.stopRequested = false;
         this.readLogEndOffsetCallbacks = new ArrayDeque<>();
         this.time = time;
-        this.initializer = initializer != null ? initializer : new Runnable() {
-            @Override
-            public void run() {
-            }
-        };
+        this.initializer = initializer != null ? initializer : () -> { };
     }
 
     public void start() {
@@ -133,11 +132,11 @@ public class KafkaBasedLog<K, V> {
         // We expect that the topics will have been created either manually by the user or automatically by the herder
         List<PartitionInfo> partitionInfos = null;
         long started = time.milliseconds();
-        while (partitionInfos == null && time.milliseconds() - started < CREATE_TOPIC_TIMEOUT_MS) {
+        while (!partitionInfosReady(partitionInfos) && time.milliseconds() - started < topicMetadataTimeoutMs) {
             partitionInfos = consumer.partitionsFor(topic);
             Utils.sleep(Math.min(time.milliseconds() - started, 1000));
         }
-        if (partitionInfos == null)
+        if (!partitionInfosReady(partitionInfos))
             throw new ConnectException("Could not look up partition metadata for offset backing store topic in" +
                     " allotted period. This could indicate a connectivity issue, unavailable topic partitions, or if" +
                     " this is your first use of the topic it may have taken too long to create.");
@@ -237,7 +236,11 @@ public class KafkaBasedLog<K, V> {
         producer.send(new ProducerRecord<>(topic, key, value), callback);
     }
 
-
+    // package level visibility for testing only
+    void setTopicMetadataTimeoutMs(long timeoutMs) {
+        this.topicMetadataTimeoutMs = timeoutMs;
+    }
+    
     private Producer<K, V> createProducer() {
         // Always require producer acks to all to ensure durable writes
         producerConfigs.put(ProducerConfig.ACKS_CONFIG, "all");
@@ -290,6 +293,11 @@ public class KafkaBasedLog<K, V> {
         }
     }
 
+    private boolean partitionInfosReady(List<PartitionInfo> partitionInfos) {
+        return partitionInfos != null &&
+                !partitionInfos.isEmpty() &&
+                partitionInfos.stream().noneMatch(info -> info.leader() == null || info.leader().id() == Node.noNode().id());
+    }
 
     private class WorkThread extends Thread {
         public WorkThread() {
@@ -312,6 +320,10 @@ public class KafkaBasedLog<K, V> {
                         try {
                             readToLogEnd();
                             log.trace("Finished read to end log for topic {}", topic);
+                        } catch (TimeoutException e) {
+                            log.warn("Timeout while reading log to end for topic '{}'. Retrying automatically. " +
+                                "This may occur when brokers are unavailable or unreachable. Reason: {}", topic, e.getMessage());
+                            continue;
                         } catch (WakeupException e) {
                             // Either received another get() call and need to retry reading to end of log or stop() was
                             // called. Both are handled by restarting this loop.
