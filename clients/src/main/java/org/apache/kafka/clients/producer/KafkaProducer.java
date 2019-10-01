@@ -907,15 +907,36 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     compressionType, serializedKey, serializedValue, headers);
             ensureValidRecordSize(serializedSize);
             long timestamp = record.timestamp() == null ? time.milliseconds() : record.timestamp();
-            log.trace("Sending record {} with callback {} to topic {} partition {}", record, callback, record.topic(), partition);
+            if (log.isTraceEnabled()) {
+                log.trace("Attempting to append record {} with callback {} to topic {} partition {}", record, callback, record.topic(), partition);
+            }
             // producer callback will make sure to call both 'callback' and interceptor callback
             Callback interceptCallback = new InterceptorCallback<>(callback, this.interceptors, tp);
 
+            if (transactionManager != null && transactionManager.isTransactional()) {
+                transactionManager.failIfNotReadyForSend();
+            }
+            RecordAccumulator.RecordAppendResult result = accumulator.append(tp, timestamp, serializedKey,
+                    serializedValue, headers, interceptCallback, remainingWaitMs, true);
+            
+            if (result.abortForNewBatch) {
+                int prevPartition = partition;
+                partitioner.onNewBatch(record.topic(), cluster, prevPartition);
+                partition = partition(record, serializedKey, serializedValue, cluster);
+                tp = new TopicPartition(record.topic(), partition);
+                if (log.isTraceEnabled()) {
+                    log.trace("Retrying append due to new batch creation for topic {} partition {}. The old partition was {}", record.topic(), partition, prevPartition);
+                }
+                // producer callback will make sure to call both 'callback' and interceptor callback
+                interceptCallback = new InterceptorCallback<>(callback, this.interceptors, tp);
+
+                result = accumulator.append(tp, timestamp, serializedKey,
+                    serializedValue, headers, interceptCallback, remainingWaitMs, false);
+            }
+            
             if (transactionManager != null && transactionManager.isTransactional())
                 transactionManager.maybeAddPartitionToTransaction(tp);
 
-            RecordAccumulator.RecordAppendResult result = accumulator.append(tp, timestamp, serializedKey,
-                    serializedValue, headers, interceptCallback, remainingWaitMs);
             if (result.batchIsFull || result.newBatchCreated) {
                 log.trace("Waking up the sender since topic {} partition {} is either full or getting a new batch", record.topic(), partition);
                 this.sender.wakeup();
@@ -999,25 +1020,28 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 metadata.awaitUpdate(version, remainingWaitMs);
             } catch (TimeoutException ex) {
                 // Rethrow with original maxWaitMs to prevent logging exception with remainingWaitMs
-                throw new TimeoutException(
-                        String.format("Topic %s not present in metadata after %d ms.",
-                                topic, maxWaitMs));
+                throw timeoutForAbsentMetadata(topic, partition, maxWaitMs, partitionsCount);
+
             }
             cluster = metadata.fetch();
             elapsed = time.milliseconds() - begin;
             if (elapsed >= maxWaitMs) {
-                throw new TimeoutException(partitionsCount == null ?
-                        String.format("Topic %s not present in metadata after %d ms.",
-                                topic, maxWaitMs) :
-                        String.format("Partition %d of topic %s with partition count %d is not present in metadata after %d ms.",
-                                partition, topic, partitionsCount, maxWaitMs));
+                throw timeoutForAbsentMetadata(topic, partition, maxWaitMs, partitionsCount);
             }
-            metadata.maybeThrowException();
+            metadata.maybeThrowExceptionForTopic(topic);
             remainingWaitMs = maxWaitMs - elapsed;
             partitionsCount = cluster.partitionCountForTopic(topic);
         } while (partitionsCount == null || (partition != null && partition >= partitionsCount));
 
         return new ClusterAndWaitTime(cluster, elapsed);
+    }
+
+    private TimeoutException timeoutForAbsentMetadata(String topic, Integer partition, long maxWaitMs, Integer partitionsCount) {
+        return new TimeoutException(partitionsCount == null ?
+                String.format("Topic %s not present in metadata after %d ms.",
+                        topic, maxWaitMs) :
+                String.format("Partition %d of topic %s with partition count %d is not present in metadata after %d ms.",
+                        partition, topic, partitionsCount, maxWaitMs));
     }
 
     /**
