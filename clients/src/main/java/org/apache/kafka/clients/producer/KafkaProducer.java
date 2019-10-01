@@ -438,7 +438,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     Sender newSender(LogContext logContext, KafkaClient kafkaClient, ProducerMetadata metadata) {
         int maxInflightRequests = configureInflightRequests(producerConfig, transactionManager != null);
         int requestTimeoutMs = producerConfig.getInt(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);
-        ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(producerConfig, time);
+        ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(
+            producerConfig, time, metrics, PRODUCER_METRIC_GROUP_NAME);
         ProducerMetrics metricsRegistry = new ProducerMetrics(this.metrics);
         Sensor throttleTimeSensor = Sender.throttleTimeSensor(metricsRegistry.senderMetrics);
         KafkaClient client = kafkaClient != null ? kafkaClient : new NetworkClient(
@@ -907,15 +908,36 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     compressionType, serializedKey, serializedValue, headers);
             ensureValidRecordSize(serializedSize);
             long timestamp = record.timestamp() == null ? time.milliseconds() : record.timestamp();
-            log.trace("Sending record {} with callback {} to topic {} partition {}", record, callback, record.topic(), partition);
+            if (log.isTraceEnabled()) {
+                log.trace("Attempting to append record {} with callback {} to topic {} partition {}", record, callback, record.topic(), partition);
+            }
             // producer callback will make sure to call both 'callback' and interceptor callback
             Callback interceptCallback = new InterceptorCallback<>(callback, this.interceptors, tp);
 
+            if (transactionManager != null && transactionManager.isTransactional()) {
+                transactionManager.failIfNotReadyForSend();
+            }
+            RecordAccumulator.RecordAppendResult result = accumulator.append(tp, timestamp, serializedKey,
+                    serializedValue, headers, interceptCallback, remainingWaitMs, true);
+            
+            if (result.abortForNewBatch) {
+                int prevPartition = partition;
+                partitioner.onNewBatch(record.topic(), cluster, prevPartition);
+                partition = partition(record, serializedKey, serializedValue, cluster);
+                tp = new TopicPartition(record.topic(), partition);
+                if (log.isTraceEnabled()) {
+                    log.trace("Retrying append due to new batch creation for topic {} partition {}. The old partition was {}", record.topic(), partition, prevPartition);
+                }
+                // producer callback will make sure to call both 'callback' and interceptor callback
+                interceptCallback = new InterceptorCallback<>(callback, this.interceptors, tp);
+
+                result = accumulator.append(tp, timestamp, serializedKey,
+                    serializedValue, headers, interceptCallback, remainingWaitMs, false);
+            }
+            
             if (transactionManager != null && transactionManager.isTransactional())
                 transactionManager.maybeAddPartitionToTransaction(tp);
 
-            RecordAccumulator.RecordAppendResult result = accumulator.append(tp, timestamp, serializedKey,
-                    serializedValue, headers, interceptCallback, remainingWaitMs);
             if (result.batchIsFull || result.newBatchCreated) {
                 log.trace("Waking up the sender since topic {} partition {} is either full or getting a new batch", record.topic(), partition);
                 this.sender.wakeup();
@@ -1012,7 +1034,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                         String.format("Partition %d of topic %s with partition count %d is not present in metadata after %d ms.",
                                 partition, topic, partitionsCount, maxWaitMs));
             }
-            metadata.maybeThrowException();
+            metadata.maybeThrowExceptionForTopic(topic);
             remainingWaitMs = maxWaitMs - elapsed;
             partitionsCount = cluster.partitionCountForTopic(topic);
         } while (partitionsCount == null || (partition != null && partition >= partitionsCount));

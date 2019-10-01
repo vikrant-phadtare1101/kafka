@@ -45,6 +45,7 @@ object TransactionMarkerChannelManager {
             txnMarkerPurgatory: DelayedOperationPurgatory[DelayedTxnMarker],
             time: Time,
             logContext: LogContext): TransactionMarkerChannelManager = {
+    val metricsGroupPrefix = "txn-marker-channel"
     val channelBuilder = ChannelBuilders.clientChannelBuilder(
       config.interBrokerSecurityProtocol,
       JaasContext.Type.SERVER,
@@ -52,7 +53,9 @@ object TransactionMarkerChannelManager {
       config.interBrokerListenerName,
       config.saslMechanismInterBrokerProtocol,
       time,
-      config.saslInterBrokerHandshakeRequestEnable
+      config.saslInterBrokerHandshakeRequestEnable,
+      metrics,
+      metricsGroupPrefix
     )
     channelBuilder match {
       case reconfigurable: Reconfigurable => config.addReconfigurable(reconfigurable)
@@ -63,7 +66,7 @@ object TransactionMarkerChannelManager {
       config.connectionsMaxIdleMs,
       metrics,
       time,
-      "txn-marker-channel",
+      metricsGroupPrefix,
       Map.empty[String, String].asJava,
       false,
       channelBuilder,
@@ -173,7 +176,7 @@ class TransactionMarkerChannelManager(config: KafkaConfig,
   // visible for testing
   private[transaction] def queueForUnknownBroker = markersQueueForUnknownBroker
 
-  private[transaction] def addMarkersForBroker(broker: Node, txnTopicPartition: Int, txnIdAndMarker: TxnIdAndMarkerEntry) {
+  private[transaction] def addMarkersForBroker(broker: Node, txnTopicPartition: Int, txnIdAndMarker: TxnIdAndMarkerEntry): Unit = {
     val brokerId = broker.id
 
     // we do not synchronize on the update of the broker node with the enqueuing,

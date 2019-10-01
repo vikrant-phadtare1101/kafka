@@ -29,6 +29,7 @@ import org.apache.kafka.clients.CommonClientConfigs
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.config.SaslConfigs
 import org.apache.kafka.common.errors.SaslAuthenticationException
+import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.network._
 import org.apache.kafka.common.security.{JaasContext, TestSecurityConfig}
 import org.apache.kafka.common.security.auth.SecurityProtocol
@@ -56,7 +57,7 @@ class GssapiAuthenticationTest extends IntegrationTestHarness with SaslSetup {
   private val failedAuthenticationDelayMs = 2000
 
   @Before
-  override def setUp() {
+  override def setUp(): Unit = {
     startSasl(jaasSections(kafkaServerSaslMechanisms, Option(kafkaClientSaslMechanism), Both))
     serverConfig.put(KafkaConfig.SslClientAuthProp, "required")
     serverConfig.put(KafkaConfig.FailedAuthenticationDelayMsProp, failedAuthenticationDelayMs.toString)
@@ -187,8 +188,17 @@ class GssapiAuthenticationTest extends IntegrationTestHarness with SaslSetup {
   }
 
   private def createSelector(): Selector = {
+    val metrics = new Metrics()
+    val metricsGroup = "MetricsGroup"
     val channelBuilder = ChannelBuilders.clientChannelBuilder(securityProtocol,
-      JaasContext.Type.CLIENT, new TestSecurityConfig(clientConfig), null, kafkaClientSaslMechanism, time, true)
+      JaasContext.Type.CLIENT,
+      new TestSecurityConfig(clientConfig),
+      null,
+      kafkaClientSaslMechanism,
+      time,
+      true,
+      metrics,
+      metricsGroup)
     NetworkTestUtils.createSelector(channelBuilder, time)
   }
 }
