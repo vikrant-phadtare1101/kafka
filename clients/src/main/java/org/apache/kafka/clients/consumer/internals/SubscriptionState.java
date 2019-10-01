@@ -29,6 +29,7 @@ import org.apache.kafka.common.requests.IsolationLevel;
 import org.apache.kafka.common.utils.LogContext;
 import org.slf4j.Logger;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -39,6 +40,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -182,8 +184,12 @@ public class SubscriptionState {
             return false;
 
         subscription = topicsToSubscribe;
-        groupSubscription = new HashSet<>(groupSubscription);
-        groupSubscription.addAll(topicsToSubscribe);
+        if (subscriptionType != SubscriptionType.USER_ASSIGNED) {
+            groupSubscription = new HashSet<>(groupSubscription);
+            groupSubscription.addAll(topicsToSubscribe);
+        } else {
+            groupSubscription = new HashSet<>(topicsToSubscribe);
+        }
         return true;
     }
 
@@ -233,42 +239,42 @@ public class SubscriptionState {
     }
 
     /**
-     * Change the assignment to the specified partitions returned from the coordinator, note this is
-     * different from {@link #assignFromUser(Set)} which directly set the assignment from user inputs.
-     *
      * @return true if assignments matches subscription, otherwise false
      */
-    public synchronized boolean assignFromSubscribed(Collection<TopicPartition> assignments) {
-        if (!this.partitionsAutoAssigned())
-            throw new IllegalArgumentException("Attempt to dynamically assign partitions while manual assignment in use");
-
-        boolean assignmentMatchedSubscription = true;
+    public synchronized boolean checkAssignmentMatchedSubscription(Collection<TopicPartition> assignments) {
         for (TopicPartition topicPartition : assignments) {
             if (this.subscribedPattern != null) {
-                assignmentMatchedSubscription = this.subscribedPattern.matcher(topicPartition.topic()).matches();
-                if (!assignmentMatchedSubscription) {
+                if (!this.subscribedPattern.matcher(topicPartition.topic()).matches()) {
                     log.info("Assigned partition {} for non-subscribed topic regex pattern; subscription pattern is {}",
-                            topicPartition,
-                            this.subscribedPattern);
-                    break;
+                        topicPartition,
+                        this.subscribedPattern);
+
+                    return false;
                 }
             } else {
-                assignmentMatchedSubscription = this.subscription.contains(topicPartition.topic());
-                if (!assignmentMatchedSubscription) {
+                if (!this.subscription.contains(topicPartition.topic())) {
                     log.info("Assigned partition {} for non-subscribed topic; subscription is {}", topicPartition, this.subscription);
-                    break;
+
+                    return false;
                 }
             }
         }
 
-        if (assignmentMatchedSubscription) {
-            Map<TopicPartition, TopicPartitionState> assignedPartitionStates = partitionToStateMap(
-                    assignments);
-            assignmentId++;
-            this.assignment.set(assignedPartitionStates);
-        }
+        return true;
+    }
 
-        return assignmentMatchedSubscription;
+    /**
+     * Change the assignment to the specified partitions returned from the coordinator, note this is
+     * different from {@link #assignFromUser(Set)} which directly set the assignment from user inputs.
+     */
+    public synchronized void assignFromSubscribed(Collection<TopicPartition> assignments) {
+        if (!this.partitionsAutoAssigned())
+            throw new IllegalArgumentException("Attempt to dynamically assign partitions while manual assignment in use");
+
+
+        Map<TopicPartition, TopicPartitionState> assignedPartitionStates = partitionToStateMap(assignments);
+        assignmentId++;
+        this.assignment.set(assignedPartitionStates);
     }
 
     private void registerRebalanceListener(ConsumerRebalanceListener listener) {
@@ -362,7 +368,7 @@ public class SubscriptionState {
         assignedState(tp).seekUnvalidated(position);
     }
 
-    synchronized void maybeSeekUnvalidated(TopicPartition tp, long offset, OffsetResetStrategy requestedResetStrategy) {
+    synchronized void maybeSeekUnvalidated(TopicPartition tp, FetchPosition position, OffsetResetStrategy requestedResetStrategy) {
         TopicPartitionState state = assignedStateOrNull(tp);
         if (state == null) {
             log.debug("Skipping reset of partition {} since it is no longer assigned", tp);
@@ -371,8 +377,8 @@ public class SubscriptionState {
         } else if (requestedResetStrategy != state.resetStrategy) {
             log.debug("Skipping reset of partition {} since an alternative reset has been requested", tp);
         } else {
-            log.info("Resetting offset for partition {} to offset {}.", tp, offset);
-            state.seekUnvalidated(new FetchPosition(offset));
+            log.info("Resetting offset for partition {} to position {}.", tp, position);
+            state.seekUnvalidated(position);
         }
     }
 
@@ -381,6 +387,17 @@ public class SubscriptionState {
      */
     public synchronized Set<TopicPartition> assignedPartitions() {
         return new HashSet<>(this.assignment.partitionSet());
+    }
+
+    public synchronized void forEachAssignedPartition(Consumer<TopicPartition> consumer) {
+        this.assignment.partitionSet().forEach(consumer);
+    }
+
+    /**
+     * @return a modifiable copy of the currently assigned partitions as a list
+     */
+    public synchronized List<TopicPartition> assignedPartitionsList() {
+        return new ArrayList<>(this.assignment.partitionSet());
     }
 
     /**
@@ -640,8 +657,13 @@ public class SubscriptionState {
     }
 
     synchronized void requestFailed(Set<TopicPartition> partitions, long nextRetryTimeMs) {
-        for (TopicPartition partition : partitions)
-            assignedState(partition).requestFailed(nextRetryTimeMs);
+        for (TopicPartition partition : partitions) {
+            // by the time the request failed, the assignment may no longer
+            // contain this partition any more, in which case we would just ignore.
+            final TopicPartitionState state = assignedStateOrNull(partition);
+            if (state != null)
+                state.requestFailed(nextRetryTimeMs);
+        }
     }
 
     synchronized void movePartitionToEnd(TopicPartition tp) {
