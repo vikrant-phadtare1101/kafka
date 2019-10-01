@@ -74,7 +74,7 @@ class DelayedDeleteRecords(delayMs: Long,
       if (status.acksPending) {
         val (lowWatermarkReached, error, lw) = replicaManager.getPartition(topicPartition) match {
           case HostedPartition.Online(partition) =>
-            partition.leaderReplicaIfLocal match {
+            partition.leaderLogIfLocal match {
               case Some(_) =>
                 val leaderLW = partition.lowWatermarkIfLeader
                 (leaderLW >= status.requiredOffset, Errors.NONE, leaderLW)
@@ -115,7 +115,7 @@ class DelayedDeleteRecords(delayMs: Long,
    * Upon completion, return the current response status along with the error code per partition
    */
   override def onComplete() {
-    val responseStatus = deleteRecordsStatus.mapValues(status => status.responseStatus)
+    val responseStatus = deleteRecordsStatus.map { case (k, status) => k -> status.responseStatus }
     responseCallback(responseStatus)
   }
 }

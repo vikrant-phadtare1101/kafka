@@ -119,7 +119,7 @@ class LogManagerTest {
       offset = info.lastOffset
     }
     assertTrue("There should be more than one segment now.", log.numberOfSegments > 1)
-    log.onHighWatermarkIncremented(log.logEndOffset)
+    log.updateHighWatermark(log.logEndOffset)
 
     log.logSegments.foreach(_.log.file.setLastModified(time.milliseconds))
 
@@ -173,7 +173,7 @@ class LogManagerTest {
       offset = info.firstOffset.get
     }
 
-    log.onHighWatermarkIncremented(log.logEndOffset)
+    log.updateHighWatermark(log.logEndOffset)
     assertEquals("Check we have the expected number of segments.", numMessages * setSize / config.segmentSize, log.numberOfSegments)
 
     // this cleanup shouldn't find any expired segments but should delete some to reduce size

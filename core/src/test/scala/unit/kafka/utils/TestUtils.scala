@@ -62,8 +62,10 @@ import org.junit.Assert._
 import org.scalatest.Assertions.fail
 
 import scala.collection.JavaConverters._
-import scala.collection.{Map, mutable}
+import scala.collection.{Map, Seq, mutable}
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
+import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.{Await, ExecutionContext, Future}
 
 /**
  * Utility functions to help with testing
@@ -204,10 +206,14 @@ object TestUtils extends Logging {
     * Shutdown `servers` and delete their log directories.
     */
   def shutdownServers(servers: Seq[KafkaServer]) {
-    servers.par.foreach { s =>
-      s.shutdown()
-      CoreUtils.delete(s.config.logDirs)
+    import ExecutionContext.Implicits._
+    val future = Future.traverse(servers) { s =>
+      Future {
+        s.shutdown()
+        CoreUtils.delete(s.config.logDirs)
+      }
     }
+    Await.result(future, FiniteDuration(5, TimeUnit.MINUTES))
   }
 
   /**
@@ -848,7 +854,7 @@ object TestUtils extends Logging {
   }
 
   def isLeaderLocalOnBroker(topic: String, partitionId: Int, server: KafkaServer): Boolean = {
-    server.replicaManager.nonOfflinePartition(new TopicPartition(topic, partitionId)).exists(_.leaderReplicaIfLocal.isDefined)
+    server.replicaManager.nonOfflinePartition(new TopicPartition(topic, partitionId)).exists(_.leaderLogIfLocal.isDefined)
   }
 
   def findLeaderEpoch(brokerId: Int,
@@ -929,7 +935,7 @@ object TestUtils extends Logging {
     def newLeaderExists: Option[Int] = {
       servers.find { server =>
         server.config.brokerId != oldLeader &&
-          server.replicaManager.nonOfflinePartition(tp).exists(_.leaderReplicaIfLocal.isDefined)
+          server.replicaManager.nonOfflinePartition(tp).exists(_.leaderLogIfLocal.isDefined)
       }.map(_.config.brokerId)
     }
 
@@ -944,7 +950,7 @@ object TestUtils extends Logging {
                              timeout: Long = JTestUtils.DEFAULT_MAX_WAIT_MS): Int = {
     def leaderIfExists: Option[Int] = {
       servers.find { server =>
-        server.replicaManager.nonOfflinePartition(tp).exists(_.leaderReplicaIfLocal.isDefined)
+        server.replicaManager.nonOfflinePartition(tp).exists(_.leaderLogIfLocal.isDefined)
       }.map(_.config.brokerId)
     }
 
