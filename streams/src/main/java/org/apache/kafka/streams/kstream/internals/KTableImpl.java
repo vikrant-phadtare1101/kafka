@@ -38,7 +38,7 @@ import org.apache.kafka.streams.kstream.internals.graph.StatefulProcessorNode;
 import org.apache.kafka.streams.kstream.internals.graph.StreamsGraphNode;
 import org.apache.kafka.streams.kstream.internals.graph.TableProcessorNode;
 import org.apache.kafka.streams.kstream.internals.suppress.FinalResultsSuppressionBuilder;
-import org.apache.kafka.streams.kstream.internals.suppress.KTableSuppressProcessorSupplier;
+import org.apache.kafka.streams.kstream.internals.suppress.KTableSuppressProcessor;
 import org.apache.kafka.streams.kstream.internals.suppress.NamedSuppressed;
 import org.apache.kafka.streams.kstream.internals.suppress.SuppressedInternal;
 import org.apache.kafka.streams.processor.ProcessorSupplier;
@@ -391,7 +391,7 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
     public KTable<K, V> suppress(final Suppressed<? super K> suppressed) {
         final String name;
         if (suppressed instanceof NamedSuppressed) {
-            final String givenName = ((NamedSuppressed<?>) suppressed).name();
+            final String givenName = ((NamedSuppressed) suppressed).name();
             name = givenName != null ? givenName : builder.newProcessorName(SUPPRESS_NAME);
         } else {
             throw new IllegalArgumentException("Custom subclasses of Suppressed are not supported.");
@@ -402,17 +402,14 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
         final String storeName =
             suppressedInternal.name() != null ? suppressedInternal.name() + "-store" : builder.newStoreName(SUPPRESS_NAME);
 
-        final ProcessorSupplier<K, Change<V>> suppressionSupplier = new KTableSuppressProcessorSupplier<>(
-            suppressedInternal,
-            storeName,
-            this
-        );
+        final ProcessorSupplier<K, Change<V>> suppressionSupplier =
+            () -> new KTableSuppressProcessor<>(suppressedInternal, storeName);
 
 
         final ProcessorGraphNode<K, Change<V>> node = new StatefulProcessorNode<>(
             name,
             new ProcessorParameters<>(suppressionSupplier, name),
-            new InMemoryTimeOrderedKeyValueBuffer.Builder<>(storeName, keySerde, valSerde)
+            new InMemoryTimeOrderedKeyValueBuffer.Builder<>(storeName, keySerde, FullChangeSerde.castOrWrap(valSerde))
         );
 
         builder.addGraphNode(streamsGraphNode, node);
@@ -627,7 +624,7 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
     }
 
     @SuppressWarnings("unchecked")
-    public KTableValueGetterSupplier<K, V> valueGetterSupplier() {
+    KTableValueGetterSupplier<K, V> valueGetterSupplier() {
         if (processorSupplier instanceof KTableSource) {
             final KTableSource<K, V> source = (KTableSource<K, V>) processorSupplier;
             // whenever a source ktable is required for getter, it should be materialized
@@ -641,7 +638,7 @@ public class KTableImpl<K, S, V> extends AbstractStream<K, V> implements KTable<
     }
 
     @SuppressWarnings("unchecked")
-    public void enableSendingOldValues() {
+    void enableSendingOldValues() {
         if (!sendOldValues) {
             if (processorSupplier instanceof KTableSource) {
                 final KTableSource<K, ?> source = (KTableSource<K, V>) processorSupplier;

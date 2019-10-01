@@ -278,11 +278,7 @@ class VerifiableProducer(KafkaPathResolverMixin, VerifiableClientMixin, Backgrou
             return True
 
     def stop_node(self, node):
-        # There is a race condition on shutdown if using `max_messages` since the
-        # VerifiableProducer will shutdown automatically when all messages have been
-        # written. In this case, the process will be gone and the signal will fail.
-        allow_fail = self.max_messages > 0
-        self.kill_node(node, clean_shutdown=True, allow_fail=allow_fail)
+        self.kill_node(node, clean_shutdown=True, allow_fail=False)
 
         stopped = self.wait_node(node, timeout_sec=self.stop_timeout_sec)
         assert stopped, "Node %s: did not stop within the specified timeout of %s seconds" % \

@@ -744,7 +744,6 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             Sensor throttleTimeSensor = Fetcher.throttleTimeSensor(metrics, metricsRegistry);
             int heartbeatIntervalMs = config.getInt(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG);
 
-            ApiVersions apiVersions = new ApiVersions();
             NetworkClient netClient = new NetworkClient(
                     new Selector(config.getLong(ConsumerConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG), metrics, time, metricGrpPrefix, channelBuilder, logContext),
                     this.metadata,
@@ -758,7 +757,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     ClientDnsLookup.forConfig(config.getString(ConsumerConfig.CLIENT_DNS_LOOKUP_CONFIG)),
                     time,
                     true,
-                    apiVersions,
+                    new ApiVersions(),
                     throttleTimeSensor,
                     logContext);
             this.client = new ConsumerNetworkClient(
@@ -814,8 +813,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     this.time,
                     this.retryBackoffMs,
                     this.requestTimeoutMs,
-                    isolationLevel,
-                    apiVersions);
+                    isolationLevel);
 
             config.logUnused();
             AppInfoParser.registerAppInfo(JMX_PREFIX, clientId, metrics, time.milliseconds());
@@ -888,7 +886,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     public Set<TopicPartition> assignment() {
         acquireAndEnsureOpen();
         try {
-            return Collections.unmodifiableSet(this.subscriptions.assignedPartitions());
+            return Collections.unmodifiableSet(new HashSet<>(this.subscriptions.assignedPartitions()));
         } finally {
             release();
         }
@@ -1547,7 +1545,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     offset,
                     Optional.empty(), // This will ensure we skip validation
                     this.metadata.leaderAndEpoch(partition));
-            this.subscriptions.seekUnvalidated(partition, newPosition);
+            this.subscriptions.seek(partition, newPosition);
         } finally {
             release();
         }
@@ -1583,7 +1581,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     offsetAndMetadata.leaderEpoch(),
                     currentLeaderAndEpoch);
             this.updateLastSeenEpochIfNewer(partition, offsetAndMetadata);
-            this.subscriptions.seekUnvalidated(partition, newPosition);
+            this.subscriptions.seekAndValidate(partition, newPosition);
         } finally {
             release();
         }
@@ -1605,7 +1603,10 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         acquireAndEnsureOpen();
         try {
             Collection<TopicPartition> parts = partitions.size() == 0 ? this.subscriptions.assignedPartitions() : partitions;
-            subscriptions.requestOffsetReset(parts, OffsetResetStrategy.EARLIEST);
+            for (TopicPartition tp : parts) {
+                log.info("Seeking to beginning of partition {}", tp);
+                subscriptions.requestOffsetReset(tp, OffsetResetStrategy.EARLIEST);
+            }
         } finally {
             release();
         }
@@ -1630,7 +1631,10 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         acquireAndEnsureOpen();
         try {
             Collection<TopicPartition> parts = partitions.size() == 0 ? this.subscriptions.assignedPartitions() : partitions;
-            subscriptions.requestOffsetReset(parts, OffsetResetStrategy.LATEST);
+            for (TopicPartition tp : parts) {
+                log.info("Seeking to end of partition {}", tp);
+                subscriptions.requestOffsetReset(tp, OffsetResetStrategy.LATEST);
+            }
         } finally {
             release();
         }
@@ -1770,8 +1774,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     Collections.singleton(partition), time.timer(timeout));
             if (offsets == null) {
                 throw new TimeoutException("Timeout of " + timeout.toMillis() + "ms expired before the last " +
-                        "committed offset for partition " + partition + " could be determined. Try tuning default.api.timeout.ms " +
-                        "larger to relax the threshold.");
+                        "committed offset for partition " + partition + " could be determined");
             } else {
                 offsets.forEach(this::updateLastSeenEpochIfNewer);
                 return offsets.get(partition);

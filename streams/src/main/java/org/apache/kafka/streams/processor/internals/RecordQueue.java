@@ -18,16 +18,16 @@ package org.apache.kafka.streams.processor.internals;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.streams.errors.DeserializationExceptionHandler;
 import org.apache.kafka.streams.errors.StreamsException;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.TimestampExtractor;
-import org.apache.kafka.streams.processor.internals.metrics.ThreadMetrics;
+import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
 import org.slf4j.Logger;
 
 import java.util.ArrayDeque;
+
 
 /**
  * RecordQueue is a FIFO queue of {@link StampedRecord} (ConsumerRecord + timestamp). It also keeps track of the
@@ -48,8 +48,6 @@ public class RecordQueue {
 
     private StampedRecord headRecord = null;
 
-    private Sensor skipRecordsSensor;
-
     RecordQueue(final TopicPartition partition,
                 final SourceNode source,
                 final TimestampExtractor timestampExtractor,
@@ -60,14 +58,13 @@ public class RecordQueue {
         this.partition = partition;
         this.fifoQueue = new ArrayDeque<>();
         this.timestampExtractor = timestampExtractor;
-        this.processorContext = processorContext;
-        skipRecordsSensor = ThreadMetrics.skipRecordSensor(processorContext.metrics());
-        recordDeserializer = new RecordDeserializer(
+        this.recordDeserializer = new RecordDeserializer(
             source,
             deserializationExceptionHandler,
             logContext,
-            skipRecordsSensor
+            processorContext.metrics().skippedRecordsSensor()
         );
+        this.processorContext = processorContext;
         this.log = logContext.logger(RecordQueue.class);
     }
 
@@ -183,8 +180,7 @@ public class RecordQueue {
                         "Skipping record due to negative extracted timestamp. topic=[{}] partition=[{}] offset=[{}] extractedTimestamp=[{}] extractor=[{}]",
                         deserialized.topic(), deserialized.partition(), deserialized.offset(), timestamp, timestampExtractor.getClass().getCanonicalName()
                 );
-
-                skipRecordsSensor.record();
+                ((StreamsMetricsImpl) processorContext.metrics()).skippedRecordsSensor().record();
                 continue;
             }
 

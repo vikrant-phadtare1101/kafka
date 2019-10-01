@@ -81,7 +81,6 @@ public class RocksDBTimestampedStore extends RocksDBStore implements Timestamped
             } else {
                 log.info("Opening store {} in regular mode", name);
                 dbAccessor = new SingleColumnFamilyAccessor(columnFamilies.get(1));
-                noTimestampColumnFamily.close();
             }
             noTimestampsIter.close();
         } catch (final RocksDBException e) {

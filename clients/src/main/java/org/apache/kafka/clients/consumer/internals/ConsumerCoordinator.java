@@ -256,7 +256,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             return;
         }
 
-        Set<TopicPartition> assignedPartitions = subscriptions.assignedPartitions();
+        Set<TopicPartition> assignedPartitions = new HashSet<>(subscriptions.assignedPartitions());
 
         // The leader may have assigned partitions which match our subscription pattern, but which
         // were not explicitly requested, so we update the joined subscription here.
@@ -463,7 +463,8 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
         // execute the user's callback before rebalance
         ConsumerRebalanceListener listener = subscriptions.rebalanceListener();
-        Set<TopicPartition> revoked = subscriptions.assignedPartitions();
+        // copy since about to be handed to user code
+        Set<TopicPartition> revoked = new HashSet<>(subscriptions.assignedPartitions());
         log.info("Revoking previously assigned partitions {}", revoked);
         try {
             listener.onPartitionsRevoked(revoked);
@@ -511,11 +512,11 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             final ConsumerMetadata.LeaderAndEpoch leaderAndEpoch = metadata.leaderAndEpoch(tp);
             final SubscriptionState.FetchPosition position = new SubscriptionState.FetchPosition(
                     offsetAndMetadata.offset(), offsetAndMetadata.leaderEpoch(),
-                    leaderAndEpoch);
+                    new ConsumerMetadata.LeaderAndEpoch(leaderAndEpoch.leader, Optional.empty()));
 
             log.info("Setting offset for partition {} to the committed offset {}", tp, position);
             entry.getValue().leaderEpoch().ifPresent(epoch -> this.metadata.updateLastSeenEpochIfNewer(entry.getKey(), epoch));
-            this.subscriptions.seekUnvalidated(tp, position);
+            this.subscriptions.seekAndValidate(tp, position);
         }
         return true;
     }
@@ -585,8 +586,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     // visible for testing
     void invokeCompletedOffsetCommitCallbacks() {
         if (asyncCommitFenced.get()) {
-            throw new FencedInstanceIdException("Get fenced exception for group.instance.id: " +
-                    groupInstanceId.orElse("unset_instance_id") + ", current member.id is " + memberId());
+            throw new FencedInstanceIdException("Get fenced exception for group.instance.id " + groupInstanceId.orElse("unset_instance_id"));
         }
         while (true) {
             OffsetCommitCompletion completion = completedOffsetCommits.poll();
@@ -881,20 +881,10 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                             log.error("Received fatal exception: group.instance.id gets fenced");
                             future.raise(error);
                             return;
-                        } else if (error == Errors.REBALANCE_IN_PROGRESS) {
-                            /* Consumer never tries to commit offset in between join-group and sync-group,
-                             * and hence on broker-side it is not expected to see a commit offset request
-                             * during CompletingRebalance phase; if it ever happens then broker would return
-                             * this error. In this case we should just treat as a fatal CommitFailed exception.
-                             * However, we do not need to reset generations and just request re-join, such that
-                             * if the caller decides to proceed and poll, it would still try to proceed and re-join normally.
-                             */
-                            requestRejoin();
-                            future.raise(new CommitFailedException());
-                            return;
                         } else if (error == Errors.UNKNOWN_MEMBER_ID
-                                || error == Errors.ILLEGAL_GENERATION) {
-                            // need to reset generation and re-join group
+                                || error == Errors.ILLEGAL_GENERATION
+                                || error == Errors.REBALANCE_IN_PROGRESS) {
+                            // need to re-join group
                             resetGeneration();
                             future.raise(new CommitFailedException());
                             return;
@@ -959,7 +949,6 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                 return;
             }
 
-            Set<String> unauthorizedTopics = null;
             Map<TopicPartition, OffsetAndMetadata> offsets = new HashMap<>(response.responseData().size());
             for (Map.Entry<TopicPartition, OffsetFetchResponse.PartitionData> entry : response.responseData().entrySet()) {
                 TopicPartition tp = entry.getKey();
@@ -970,17 +959,11 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
                     if (error == Errors.UNKNOWN_TOPIC_OR_PARTITION) {
                         future.raise(new KafkaException("Topic or Partition " + tp + " does not exist"));
-                        return;
-                    } else if (error == Errors.TOPIC_AUTHORIZATION_FAILED) {
-                        if (unauthorizedTopics == null) {
-                            unauthorizedTopics = new HashSet<>();
-                        }
-                        unauthorizedTopics.add(tp.topic());
                     } else {
                         future.raise(new KafkaException("Unexpected error in fetch offset response for partition " +
                             tp + ": " + error.message()));
-                        return;
                     }
+                    return;
                 } else if (data.offset >= 0) {
                     // record the position with the offset (-1 indicates no committed offset to fetch)
                     offsets.put(tp, new OffsetAndMetadata(data.offset, data.leaderEpoch, data.metadata));
@@ -989,11 +972,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                 }
             }
 
-            if (unauthorizedTopics != null) {
-                future.raise(new TopicAuthorizationException(unauthorizedTopics));
-            } else {
-                future.complete(offsets);
-            }
+            future.complete(offsets);
         }
     }
 

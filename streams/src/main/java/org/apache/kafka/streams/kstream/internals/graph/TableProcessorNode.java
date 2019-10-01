@@ -49,7 +49,7 @@ public class TableProcessorNode<K, V> extends StreamsGraphNode {
     public String toString() {
         return "TableProcessorNode{" +
             ", processorParameters=" + processorParameters +
-            ", storeBuilder=" + (storeBuilder == null ? "null" : storeBuilder.name()) +
+            ", storeBuilder=" + storeBuilder.name() +
             ", storeNames=" + Arrays.toString(storeNames) +
             "} " + super.toString();
     }

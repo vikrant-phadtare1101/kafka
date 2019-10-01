@@ -37,7 +37,7 @@ public class KTableSourceValueGetterSupplier<K, V> implements KTableValueGetterS
     }
 
     private class KTableSourceValueGetter implements KTableValueGetter<K, V> {
-        private TimestampedKeyValueStore<K, V> store = null;
+        TimestampedKeyValueStore<K, V> store = null;
 
         @SuppressWarnings("unchecked")
         public void init(final ProcessorContext context) {

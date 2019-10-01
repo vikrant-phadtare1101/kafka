@@ -17,7 +17,6 @@
 package org.apache.kafka.streams.integration;
 
 import org.apache.kafka.streams.KafkaStreamsWrapper;
-import org.apache.kafka.streams.KeyValueTimestamp;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.integration.utils.IntegrationTestUtils;
@@ -35,7 +34,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertEquals;
+
 
 /**
  * Tests all available joins of Kafka Streams DSL.
@@ -82,30 +82,30 @@ public class StreamTableJoinIntegrationTest extends AbstractJoinIntegrationTest 
         TestUtils.waitForCondition(listener::revokedToPendingShutdownSeen, "Did not seen thread state transited to PENDING_SHUTDOWN");
 
         streams.close();
-        assertTrue(listener.createdToRevokedSeen());
-        assertTrue(listener.revokedToPendingShutdownSeen());
+        assertEquals(listener.createdToRevokedSeen(), true);
+        assertEquals(listener.revokedToPendingShutdownSeen(), true);
     }
 
     @Test
     public void testInner() throws Exception {
         STREAMS_CONFIG.put(StreamsConfig.APPLICATION_ID_CONFIG, appID + "-inner");
 
-        final List<List<KeyValueTimestamp<Long, String>>> expectedResult = Arrays.asList(
-            null,
-            null,
-            null,
-            null,
-            Collections.singletonList(new KeyValueTimestamp<>(ANY_UNIQUE_KEY, "B-a", 5L)),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            Collections.singletonList(new KeyValueTimestamp<>(ANY_UNIQUE_KEY, "D-d", 15L))
+        final List<List<String>> expectedResult = Arrays.asList(
+                null,
+                null,
+                null,
+                null,
+                Collections.singletonList("B-a"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                Collections.singletonList("D-d")
         );
 
         leftStream.join(rightTable, valueJoiner).to(OUTPUT_TOPIC);
@@ -117,22 +117,22 @@ public class StreamTableJoinIntegrationTest extends AbstractJoinIntegrationTest 
     public void testLeft() throws Exception {
         STREAMS_CONFIG.put(StreamsConfig.APPLICATION_ID_CONFIG, appID + "-left");
 
-        final List<List<KeyValueTimestamp<Long, String>>> expectedResult = Arrays.asList(
-            null,
-            null,
-            Collections.singletonList(new KeyValueTimestamp<>(ANY_UNIQUE_KEY, "A-null", 3L)),
-            null,
-            Collections.singletonList(new KeyValueTimestamp<>(ANY_UNIQUE_KEY, "B-a", 5L)),
-            null,
-            null,
-            null,
-            Collections.singletonList(new KeyValueTimestamp<>(ANY_UNIQUE_KEY, "C-null", 9L)),
-            null,
-            null,
-            null,
-            null,
-            null,
-            Collections.singletonList(new KeyValueTimestamp<>(ANY_UNIQUE_KEY, "D-d", 15L))
+        final List<List<String>> expectedResult = Arrays.asList(
+                null,
+                null,
+                Collections.singletonList("A-null"),
+                null,
+                Collections.singletonList("B-a"),
+                null,
+                null,
+                null,
+                Collections.singletonList("C-null"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                Collections.singletonList("D-d")
         );
 
         leftStream.leftJoin(rightTable, valueJoiner).to(OUTPUT_TOPIC);

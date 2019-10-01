@@ -21,20 +21,11 @@ import org.apache.kafka.streams.kstream.Named;
 public class NamedInternal extends Named {
 
     public static NamedInternal empty() {
-        return new NamedInternal((String) null);
+        return new NamedInternal(null);
     }
 
     public static NamedInternal with(final String name) {
         return new NamedInternal(name);
-    }
-
-    /**
-     * Creates a new {@link NamedInternal} instance.
-     *
-     * @param internal  the internal name.
-     */
-    NamedInternal(final Named internal) {
-        super(internal);
     }
 
     /**
@@ -56,14 +47,6 @@ public class NamedInternal extends Named {
     @Override
     public NamedInternal withName(final String name) {
         return new NamedInternal(name);
-    }
-    
-    String suffixWithOrElseGet(final String suffix, final String other) {
-        if (name != null) {
-            return name + suffix;
-        } else {
-            return other;
-        }
     }
 
     String suffixWithOrElseGet(final String suffix, final InternalNameProvider provider, final String prefix) {

@@ -555,7 +555,7 @@ public abstract class AbstractCoordinator implements Closeable {
                 // reset the member id and retry immediately
                 resetGeneration();
                 log.debug("Attempt to join group failed due to unknown member id.");
-                future.raise(error);
+                future.raise(Errors.UNKNOWN_MEMBER_ID);
             } else if (error == Errors.COORDINATOR_NOT_AVAILABLE
                     || error == Errors.NOT_COORDINATOR) {
                 // re-discover the coordinator and retry with backoff
@@ -592,7 +592,7 @@ public abstract class AbstractCoordinator implements Closeable {
                     AbstractCoordinator.this.rejoinNeeded = true;
                     AbstractCoordinator.this.state = MemberState.UNJOINED;
                 }
-                future.raise(error);
+                future.raise(Errors.MEMBER_ID_REQUIRED);
             } else {
                 // unexpected error, throw the exception
                 log.error("Attempt to join group failed due to unexpected error: {}", error.message());
@@ -802,11 +802,6 @@ public abstract class AbstractCoordinator implements Closeable {
         return generation;
     }
 
-    protected synchronized String memberId() {
-        return generation == null ? JoinGroupRequest.UNKNOWN_MEMBER_ID :
-                generation.memberId;
-    }
-
     /**
      * Check whether given generation id is matching the record within current generation.
      * Only using in unit tests.
@@ -940,18 +935,18 @@ public abstract class AbstractCoordinator implements Closeable {
             } else if (error == Errors.REBALANCE_IN_PROGRESS) {
                 log.info("Attempt to heartbeat failed since group is rebalancing");
                 requestRejoin();
-                future.raise(error);
+                future.raise(Errors.REBALANCE_IN_PROGRESS);
             } else if (error == Errors.ILLEGAL_GENERATION) {
                 log.info("Attempt to heartbeat failed since generation {} is not current", generation.generationId);
                 resetGeneration();
-                future.raise(error);
+                future.raise(Errors.ILLEGAL_GENERATION);
             } else if (error == Errors.FENCED_INSTANCE_ID) {
                 log.error("Received fatal exception: group.instance.id gets fenced");
                 future.raise(error);
             } else if (error == Errors.UNKNOWN_MEMBER_ID) {
                 log.info("Attempt to heartbeat failed for since member id {} is not valid.", generation.memberId);
                 resetGeneration();
-                future.raise(error);
+                future.raise(Errors.UNKNOWN_MEMBER_ID);
             } else if (error == Errors.GROUP_AUTHORIZATION_FAILED) {
                 future.raise(new GroupAuthorizationException(groupId));
             } else {

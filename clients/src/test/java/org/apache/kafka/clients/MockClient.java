@@ -97,10 +97,6 @@ public class MockClient implements KafkaClient {
         this.metadataUpdater = metadataUpdater;
     }
 
-    public boolean isConnected(String idString) {
-        return connectionState(idString).state == ConnectionState.State.CONNECTED;
-    }
-
     private ConnectionState connectionState(String idString) {
         ConnectionState connectionState = connections.get(idString);
         if (connectionState == null) {

@@ -128,7 +128,7 @@ public class ConsumerGroupDescription {
     }
 
     /**
-     * authorizedOperations for this group, or null if that information is not known.
+     * authorizedOperations for this group
      */
     public  Set<AclOperation> authorizedOperations() {
         return authorizedOperations;

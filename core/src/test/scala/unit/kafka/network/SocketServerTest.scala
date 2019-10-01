@@ -68,7 +68,8 @@ class SocketServerTest {
   val localAddress = InetAddress.getLoopbackAddress
 
   // Clean-up any metrics left around by previous tests
-  TestUtils.clearYammerMetrics()
+  for (metricName <- YammerMetrics.defaultRegistry.allMetrics.keySet.asScala)
+    YammerMetrics.defaultRegistry.removeMetric(metricName)
 
   val server = new SocketServer(config, metrics, Time.SYSTEM, credentialProvider)
   server.startup()

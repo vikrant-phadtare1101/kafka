@@ -17,6 +17,7 @@
 
 package org.apache.kafka.trogdor.workload;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.IntNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -108,7 +109,7 @@ public class ExternalCommandWorkerTest {
     }
 
     /**
-     * Test attempting to run an executable which doesn't exist.
+     * Test attempting to run an exeutable which doesn't exist.
      * We use a path which starts with /dev/null, since that should never be a
      * directory in UNIX.
      */
@@ -171,7 +172,12 @@ public class ExternalCommandWorkerTest {
                 }
             }
             CompletableFuture<String> statusFuture = new CompletableFuture<>();
-            final WorkerStatusTracker statusTracker = status -> statusFuture .complete(status.textValue());
+            final WorkerStatusTracker statusTracker = new WorkerStatusTracker() {
+                @Override
+                public void update(JsonNode status) {
+                    statusFuture .complete(status.textValue().toString());
+                }
+            };
             ExternalCommandWorker worker = new ExternalCommandWorkerBuilder("testForceKillTask").
                 shutdownGracePeriodMs(1).
                 command("bash", tempFile.getAbsolutePath()).

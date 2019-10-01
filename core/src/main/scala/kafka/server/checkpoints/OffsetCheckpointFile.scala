@@ -66,26 +66,13 @@ trait OffsetCheckpoints {
   def fetch(logDir: String, topicPartition: TopicPartition): Option[Long]
 }
 
-/**
- * Loads checkpoint files on demand and caches the offsets for reuse.
- */
-class LazyOffsetCheckpoints(checkpointsByLogDir: Map[String, OffsetCheckpointFile]) extends OffsetCheckpoints {
-  private val lazyCheckpointsByLogDir = checkpointsByLogDir.map { case (logDir, checkpointFile) =>
-    logDir -> new LazyOffsetCheckpointMap(checkpointFile)
-  }.toMap
+class SimpleOffsetCheckpoints(checkpointFilesByLogDir: Map[String, OffsetCheckpointFile])
+  extends OffsetCheckpoints {
 
   override def fetch(logDir: String, topicPartition: TopicPartition): Option[Long] = {
-    val offsetCheckpointFile = lazyCheckpointsByLogDir.getOrElse(logDir,
-      throw new IllegalArgumentException(s"No checkpoint file for log dir $logDir"))
-    offsetCheckpointFile.fetch(topicPartition)
-  }
-}
-
-class LazyOffsetCheckpointMap(checkpoint: OffsetCheckpointFile) {
-  private lazy val offsets: Map[TopicPartition, Long] = checkpoint.read()
-
-  def fetch(topicPartition: TopicPartition): Option[Long] = {
-    offsets.get(topicPartition)
+    val checkpoint = checkpointFilesByLogDir(logDir)
+    val offsetMap = checkpoint.read()
+    offsetMap.get(topicPartition)
   }
 
 }

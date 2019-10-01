@@ -52,7 +52,8 @@ class AbstractFetcherThreadTest {
 
   @Before
   def cleanMetricRegistry(): Unit = {
-    TestUtils.clearYammerMetrics()
+    for (metricName <- Metrics.defaultRegistry().allMetrics().keySet().asScala)
+      Metrics.defaultRegistry().removeMetric(metricName)
   }
 
   private def allMetricsNames: Set[String] = Metrics.defaultRegistry().allMetrics().asScala.keySet.map(_.getName)

@@ -26,7 +26,6 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.KeyValue;
-import org.apache.kafka.streams.KeyValueTimestamp;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.integration.utils.EmbeddedKafkaCluster;
@@ -67,7 +66,8 @@ public class KStreamAggregationDedupIntegrationTest {
     private static final long COMMIT_INTERVAL_MS = 300L;
 
     @ClassRule
-    public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(NUM_BROKERS);
+    public static final EmbeddedKafkaCluster CLUSTER =
+        new EmbeddedKafkaCluster(NUM_BROKERS);
 
     private final MockTime mockTime = CLUSTER.time;
     private static volatile AtomicInteger testNo = new AtomicInteger(0);
@@ -119,18 +119,17 @@ public class KStreamAggregationDedupIntegrationTest {
 
         startStreams();
 
-        final long timestamp = System.currentTimeMillis();
-        produceMessages(timestamp);
+        produceMessages(System.currentTimeMillis());
 
         validateReceivedMessages(
                 new StringDeserializer(),
                 new StringDeserializer(),
                 Arrays.asList(
-                    new KeyValueTimestamp<>("A", "A:A", timestamp),
-                    new KeyValueTimestamp<>("B", "B:B", timestamp),
-                    new KeyValueTimestamp<>("C", "C:C", timestamp),
-                    new KeyValueTimestamp<>("D", "D:D", timestamp),
-                    new KeyValueTimestamp<>("E", "E:E", timestamp)));
+                        KeyValue.pair("A", "A:A"),
+                        KeyValue.pair("B", "B:B"),
+                        KeyValue.pair("C", "C:C"),
+                        KeyValue.pair("D", "D:D"),
+                        KeyValue.pair("E", "E:E")));
     }
 
     @Test
@@ -156,16 +155,16 @@ public class KStreamAggregationDedupIntegrationTest {
                 new StringDeserializer(),
                 new StringDeserializer(),
                 Arrays.asList(
-                    new KeyValueTimestamp<>("A@" + firstBatchWindow, "A", firstBatchTimestamp),
-                    new KeyValueTimestamp<>("A@" + secondBatchWindow, "A:A", secondBatchTimestamp),
-                    new KeyValueTimestamp<>("B@" + firstBatchWindow, "B", firstBatchTimestamp),
-                    new KeyValueTimestamp<>("B@" + secondBatchWindow, "B:B", secondBatchTimestamp),
-                    new KeyValueTimestamp<>("C@" + firstBatchWindow, "C", firstBatchTimestamp),
-                    new KeyValueTimestamp<>("C@" + secondBatchWindow, "C:C", secondBatchTimestamp),
-                    new KeyValueTimestamp<>("D@" + firstBatchWindow, "D", firstBatchTimestamp),
-                    new KeyValueTimestamp<>("D@" + secondBatchWindow, "D:D", secondBatchTimestamp),
-                    new KeyValueTimestamp<>("E@" + firstBatchWindow, "E", firstBatchTimestamp),
-                    new KeyValueTimestamp<>("E@" + secondBatchWindow, "E:E", secondBatchTimestamp)
+                        new KeyValue<>("A@" + firstBatchWindow, "A"),
+                        new KeyValue<>("A@" + secondBatchWindow, "A:A"),
+                        new KeyValue<>("B@" + firstBatchWindow, "B"),
+                        new KeyValue<>("B@" + secondBatchWindow, "B:B"),
+                        new KeyValue<>("C@" + firstBatchWindow, "C"),
+                        new KeyValue<>("C@" + secondBatchWindow, "C:C"),
+                        new KeyValue<>("D@" + firstBatchWindow, "D"),
+                        new KeyValue<>("D@" + secondBatchWindow, "D:D"),
+                        new KeyValue<>("E@" + firstBatchWindow, "E"),
+                        new KeyValue<>("E@" + secondBatchWindow, "E:E")
                 )
         );
     }
@@ -190,11 +189,11 @@ public class KStreamAggregationDedupIntegrationTest {
                 new StringDeserializer(),
                 new LongDeserializer(),
                 Arrays.asList(
-                    new KeyValueTimestamp<>("1@" + window, 2L, timestamp),
-                    new KeyValueTimestamp<>("2@" + window, 2L, timestamp),
-                    new KeyValueTimestamp<>("3@" + window, 2L, timestamp),
-                    new KeyValueTimestamp<>("4@" + window, 2L, timestamp),
-                    new KeyValueTimestamp<>("5@" + window, 2L, timestamp)
+                        KeyValue.pair("1@" + window, 2L),
+                        KeyValue.pair("2@" + window, 2L),
+                        KeyValue.pair("3@" + window, 2L),
+                        KeyValue.pair("4@" + window, 2L),
+                        KeyValue.pair("5@" + window, 2L)
                 )
         );
     }
@@ -233,16 +232,20 @@ public class KStreamAggregationDedupIntegrationTest {
 
     private <K, V> void validateReceivedMessages(final Deserializer<K> keyDeserializer,
                                                  final Deserializer<V> valueDeserializer,
-                                                 final List<KeyValueTimestamp<K, V>> expectedRecords)
+                                                 final List<KeyValue<K, V>> expectedRecords)
         throws InterruptedException {
         final Properties consumerProperties = new Properties();
-        consumerProperties.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, CLUSTER.bootstrapServers());
-        consumerProperties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, "kgroupedstream-test-" + testNo);
+        consumerProperties
+            .setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, CLUSTER.bootstrapServers());
+        consumerProperties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, "kgroupedstream-test-" +
+            testNo);
         consumerProperties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        consumerProperties.setProperty(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, keyDeserializer.getClass().getName());
-        consumerProperties.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, valueDeserializer.getClass().getName());
+        consumerProperties.setProperty(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
+            keyDeserializer.getClass().getName());
+        consumerProperties.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
+            valueDeserializer.getClass().getName());
 
-        IntegrationTestUtils.waitUntilFinalKeyValueTimestampRecordsReceived(
+        IntegrationTestUtils.waitUntilFinalKeyValueRecordsReceived(
             consumerProperties,
             outputTopic,
             expectedRecords);
