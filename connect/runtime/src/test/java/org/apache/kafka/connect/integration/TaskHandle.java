@@ -16,14 +16,11 @@
  */
 package org.apache.kafka.connect.integration;
 
-import org.apache.kafka.connect.errors.DataException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.IntStream;
 
 /**
  * A handle to an executing task in a worker. Use this class to record progress, for example: number of records seen
@@ -36,25 +33,21 @@ public class TaskHandle {
     private final String taskId;
     private final ConnectorHandle connectorHandle;
     private final AtomicInteger partitionsAssigned = new AtomicInteger(0);
-
-    private CountDownLatch recordsRemainingLatch;
-    private CountDownLatch recordsToCommitLatch;
-    private int expectedRecords = -1;
-    private int expectedCommits = -1;
+    private final StartAndStopCounter startAndStopCounter = new StartAndStopCounter();
+    private final RecordLatches recordLatches;
 
     public TaskHandle(ConnectorHandle connectorHandle, String taskId) {
         log.info("Created task {} for connector {}", taskId, connectorHandle);
         this.taskId = taskId;
         this.connectorHandle = connectorHandle;
+        this.recordLatches = new RecordLatches("Task " + taskId);
     }
 
     /**
      * Record a message arrival at the task and the connector overall.
      */
     public void record() {
-        if (recordsRemainingLatch != null) {
-            recordsRemainingLatch.countDown();
-        }
+        recordLatches.record();
         connectorHandle.record();
     }
 
@@ -64,19 +57,36 @@ public class TaskHandle {
      * @param batchSize the number of messages
      */
     public void record(int batchSize) {
-        if (recordsRemainingLatch != null) {
-            IntStream.range(0, batchSize).forEach(i -> recordsRemainingLatch.countDown());
-        }
+        recordLatches.record(batchSize);
         connectorHandle.record(batchSize);
+    }
+
+    /**
+     * Record a message arrival at the task and the connector overall.
+     *
+     * @param topic the name of the topic
+     */
+    public void record(String topic) {
+        recordLatches.record(topic);
+        connectorHandle.record(topic);
+    }
+
+    /**
+     * Record arrival of a batch of messages at the task and the connector overall.
+     *
+     * @param topic     the name of the topic
+     * @param batchSize the number of messages
+     */
+    public void record(String topic, int batchSize) {
+        recordLatches.record(topic, batchSize);
+        connectorHandle.record(topic, batchSize);
     }
 
     /**
      * Record a message commit from the task and the connector overall.
      */
     public void commit() {
-        if (recordsToCommitLatch != null) {
-            recordsToCommitLatch.countDown();
-        }
+        recordLatches.commit();
         connectorHandle.commit();
     }
 
@@ -86,9 +96,7 @@ public class TaskHandle {
      * @param batchSize the number of messages
      */
     public void commit(int batchSize) {
-        if (recordsToCommitLatch != null) {
-            IntStream.range(0, batchSize).forEach(i -> recordsToCommitLatch.countDown());
-        }
+        recordLatches.commit(batchSize);
         connectorHandle.commit(batchSize);
     }
 
@@ -98,8 +106,17 @@ public class TaskHandle {
      * @param expected number of records
      */
     public void expectedRecords(int expected) {
-        expectedRecords = expected;
-        recordsRemainingLatch = new CountDownLatch(expected);
+        recordLatches.expectedRecords(expected);
+    }
+
+    /**
+     * Set the number of expected records for this task.
+     *
+     * @param topic    the name of the topic onto which the records are expected
+     * @param expected number of records
+     */
+    public void expectedRecords(String topic, int expected) {
+        recordLatches.expectedRecords(topic, expected);
     }
 
     /**
@@ -108,8 +125,7 @@ public class TaskHandle {
      * @param expected number of commits
      */
     public void expectedCommits(int expected) {
-        expectedRecords = expected;
-        recordsToCommitLatch = new CountDownLatch(expected);
+        recordLatches.expectedCommits(expected);
     }
 
     /**
@@ -129,51 +145,97 @@ public class TaskHandle {
     }
 
     /**
-     * Wait for this task to meet the expected number of records as defined by {@code
-     * expectedRecords}.
+     * Wait up to the specified number of milliseconds for this task to meet the expected number of
+     * records as defined by {@code expectedRecords}.
      *
-     * @param  timeout duration to wait for records
+     * @param timeoutMillis number of milliseconds to wait for records
      * @throws InterruptedException if another threads interrupts this one while waiting for records
      */
-    public void awaitRecords(int timeout) throws InterruptedException {
-        if (recordsRemainingLatch == null) {
-            throw new IllegalStateException("Illegal state encountered. expectedRecords() was not set for this task?");
-        }
-        if (!recordsRemainingLatch.await(timeout, TimeUnit.MILLISECONDS)) {
-            String msg = String.format(
-                    "Insufficient records seen by task %s in %d millis. Records expected=%d, actual=%d",
-                    taskId,
-                    timeout,
-                    expectedRecords,
-                    expectedRecords - recordsRemainingLatch.getCount());
-            throw new DataException(msg);
-        }
-        log.debug("Task {} saw {} records, expected {} records",
-                  taskId, expectedRecords - recordsRemainingLatch.getCount(), expectedRecords);
+    public void awaitRecords(long timeoutMillis) throws InterruptedException {
+        recordLatches.awaitRecords(timeoutMillis);
     }
 
     /**
-     * Wait for this task to meet the expected number of commits as defined by {@code
-     * expectedCommits}.
+     * Wait up to the specified timeout for this task to meet the expected number of records as
+     * defined by {@code expectedRecords}.
      *
-     * @param  timeout duration to wait for commits
+     * @param timeout duration to wait for records
+     * @param unit    the unit of duration; may not be null
+     * @throws InterruptedException if another threads interrupts this one while waiting for records
+     */
+    public void awaitRecords(long timeout, TimeUnit unit) throws InterruptedException {
+        recordLatches.awaitRecords(timeout, unit);
+    }
+
+    /**
+     * Wait for this connector to meet the expected number of records as defined by {@code
+     * expectedRecords}.
+     *
+     * @param topic   the name of the topic
+     * @param timeout max duration to wait for records
+     * @throws InterruptedException if another threads interrupts this one while waiting for records
+     */
+    public void awaitRecords(String topic, long timeout) throws InterruptedException {
+        recordLatches.awaitRecords(topic, timeout, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Wait up to the specified timeout in milliseconds for this task to meet the expected number
+     * of commits as defined by {@code expectedCommits}.
+     *
+     * @param timeoutMillis number of milliseconds to wait for commits
      * @throws InterruptedException if another threads interrupts this one while waiting for commits
      */
-    public void awaitCommits(int timeout) throws InterruptedException {
-        if (recordsToCommitLatch == null) {
-            throw new IllegalStateException("Illegal state encountered. expectedRecords() was not set for this task?");
-        }
-        if (!recordsToCommitLatch.await(timeout, TimeUnit.MILLISECONDS)) {
-            String msg = String.format(
-                    "Insufficient records seen by task %s in %d millis. Records expected=%d, actual=%d",
-                    taskId,
-                    timeout,
-                    expectedCommits,
-                    expectedCommits - recordsToCommitLatch.getCount());
-            throw new DataException(msg);
-        }
-        log.debug("Task {} saw {} records, expected {} records",
-                  taskId, expectedCommits - recordsToCommitLatch.getCount(), expectedCommits);
+    public void awaitCommits(long timeoutMillis) throws InterruptedException {
+        recordLatches.awaitCommits(timeoutMillis);
+    }
+
+    /**
+     * Wait up to the specified timeout for this task to meet the expected number of commits as
+     * defined by {@code expectedCommits}.
+     *
+     * @param timeout duration to wait for commits
+     * @param unit    the unit of duration; may not be null
+     * @throws InterruptedException if another threads interrupts this one while waiting for commits
+     */
+    public void awaitCommits(long timeout, TimeUnit unit) throws InterruptedException {
+        recordLatches.awaitCommits(timeout, unit);
+    }
+
+    /**
+     * Record that this task has been stopped. This should be called by the task.
+     */
+    public void recordTaskStart() {
+        startAndStopCounter.recordStart();
+    }
+
+    /**
+     * Record that this task has been stopped. This should be called by the task.
+     */
+    public void recordTaskStop() {
+        startAndStopCounter.recordStop();
+    }
+
+    /**
+     * Obtain a {@link StartAndStopLatch} that can be used to wait until this task has completed the
+     * expected number of starts.
+     *
+     * @param expectedStarts    the expected number of starts
+     * @return the latch; never null
+     */
+    public StartAndStopLatch expectedStarts(int expectedStarts) {
+        return startAndStopCounter.expectedStarts(expectedStarts);
+    }
+
+    /**
+     * Obtain a {@link StartAndStopLatch} that can be used to wait until this task has completed the
+     * expected number of starts.
+     *
+     * @param expectedStops    the expected number of stops
+     * @return the latch; never null
+     */
+    public StartAndStopLatch expectedStops(int expectedStops) {
+        return startAndStopCounter.expectedStops(expectedStops);
     }
 
     @Override
