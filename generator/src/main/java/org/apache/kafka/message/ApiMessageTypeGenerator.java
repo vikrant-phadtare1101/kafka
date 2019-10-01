@@ -120,9 +120,17 @@ public final class ApiMessageTypeGenerator {
         buffer.printf("%n");
         generateFromApiKey();
         buffer.printf("%n");
+        generateFromName();
+        buffer.printf("%n");
         generateNewApiMessageMethod("request");
         buffer.printf("%n");
         generateNewApiMessageMethod("response");
+        buffer.printf("%n");
+        generateAccessor("description", "String");
+        buffer.printf("%n");
+        generateAccessor("lowestSupportedVersion", "short");
+        buffer.printf("%n");
+        generateAccessor("highestSupportedVersion", "short");
         buffer.printf("%n");
         generateAccessor("apiKey", "short");
         buffer.printf("%n");
@@ -142,32 +150,39 @@ public final class ApiMessageTypeGenerator {
             ApiData apiData = entry.getValue();
             String name = apiData.name();
             numProcessed++;
-            buffer.printf("%s(\"%s\", (short) %d, %s, %s)%s%n",
+            buffer.printf("%s(\"%s\", (short) %d, %s, %s, (short) %d, (short) %d)%s%n",
                 MessageGenerator.toSnakeCase(name).toUpperCase(Locale.ROOT),
                 MessageGenerator.capitalizeFirst(name),
                 entry.getKey(),
                 apiData.requestSchema(),
                 apiData.responseSchema(),
+                apiData.requestSpec.struct().versions().lowest(),
+                apiData.requestSpec.struct().versions().highest(),
                 (numProcessed == apis.size()) ? ";" : ",");
         }
     }
 
     private void generateInstanceVariables() {
-        buffer.printf("private final String name;%n");
+        buffer.printf("private final String description;%n");
         buffer.printf("private final short apiKey;%n");
         buffer.printf("private final Schema[] requestSchemas;%n");
         buffer.printf("private final Schema[] responseSchemas;%n");
+        buffer.printf("private final short lowestSupportedVersion;%n");
+        buffer.printf("private final short highestSupportedVersion;%n");
         headerGenerator.addImport(MessageGenerator.SCHEMA_CLASS);
     }
 
     private void generateEnumConstructor() {
-        buffer.printf("ApiMessageType(String name, short apiKey, " +
-            "Schema[] requestSchemas, Schema[] responseSchemas) {%n");
+        buffer.printf("ApiMessageType(String description, short apiKey, " +
+            "Schema[] requestSchemas, Schema[] responseSchemas, " +
+            "short lowestSupportedVersion, short highestSupportedVersion) {%n");
         buffer.incrementIndent();
-        buffer.printf("this.name = name;%n");
+        buffer.printf("this.description = description;%n");
         buffer.printf("this.apiKey = apiKey;%n");
         buffer.printf("this.requestSchemas = requestSchemas;%n");
         buffer.printf("this.responseSchemas = responseSchemas;%n");
+        buffer.printf("this.lowestSupportedVersion = lowestSupportedVersion;%n");
+        buffer.printf("this.highestSupportedVersion = highestSupportedVersion;%n");
         buffer.decrementIndent();
         buffer.printf("}%n");
     }
@@ -190,6 +205,30 @@ public final class ApiMessageTypeGenerator {
         headerGenerator.addImport(MessageGenerator.UNSUPPORTED_VERSION_EXCEPTION_CLASS);
         buffer.printf("throw new UnsupportedVersionException(\"Unsupported API key \"" +
             " + apiKey);%n");
+        buffer.decrementIndent();
+        buffer.decrementIndent();
+        buffer.printf("}%n");
+        buffer.decrementIndent();
+        buffer.printf("}%n");
+    }
+
+    private void generateFromName() {
+        buffer.printf("public static ApiMessageType fromApiName(String name) {%n");
+        buffer.incrementIndent();
+        buffer.printf("switch (name) {%n");
+        buffer.incrementIndent();
+        for (ApiData apiData : apis.values()) {
+            String enumName = MessageGenerator.toSnakeCase(apiData.name()).toUpperCase(Locale.ROOT);
+            buffer.printf("case \"%s\":%n", enumName);
+            buffer.incrementIndent();
+            buffer.printf("return %s;%n", enumName);
+            buffer.decrementIndent();
+        }
+        buffer.printf("default:%n");
+        buffer.incrementIndent();
+        headerGenerator.addImport(MessageGenerator.UNSUPPORTED_VERSION_EXCEPTION_CLASS);
+        buffer.printf("throw new UnsupportedVersionException(\"Unsupported API key \"" +
+            " + name);%n");
         buffer.decrementIndent();
         buffer.decrementIndent();
         buffer.printf("}%n");
