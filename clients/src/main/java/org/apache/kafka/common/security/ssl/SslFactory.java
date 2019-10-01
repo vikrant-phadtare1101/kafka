@@ -26,7 +26,6 @@ import org.apache.kafka.common.utils.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLEngineResult;
 import javax.net.ssl.SSLException;
@@ -167,11 +166,6 @@ public class SslFactory implements Reconfigurable {
             throw new IllegalStateException("SslFactory has not been configured.");
         }
         return sslEngineBuilder.createSslEngine(mode, peerHost, peerPort, endpointIdentification);
-    }
-
-    @Deprecated
-    public SSLContext sslContext() {
-        return sslEngineBuilder.sslContext();
     }
 
     public SslEngineBuilder sslEngineBuilder() {

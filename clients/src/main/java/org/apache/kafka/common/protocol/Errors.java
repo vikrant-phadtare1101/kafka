@@ -62,8 +62,6 @@ import org.apache.kafka.common.errors.LeaderNotAvailableException;
 import org.apache.kafka.common.errors.LogDirNotFoundException;
 import org.apache.kafka.common.errors.FencedInstanceIdException;
 import org.apache.kafka.common.errors.MemberIdRequiredException;
-import org.apache.kafka.common.errors.ElectionNotNeededException;
-import org.apache.kafka.common.errors.EligibleLeadersNotAvailableException;
 import org.apache.kafka.common.errors.NetworkException;
 import org.apache.kafka.common.errors.NotControllerException;
 import org.apache.kafka.common.errors.NotCoordinatorException;
@@ -308,10 +306,7 @@ public enum Errors {
     GROUP_MAX_SIZE_REACHED(81, "The consumer group has reached its max size.", GroupMaxSizeReachedException::new),
     FENCED_INSTANCE_ID(82, "The broker rejected this static consumer since " +
             "another consumer with the same group.instance.id has registered with a different member.id.",
-            FencedInstanceIdException::new),
-    ELIGIBLE_LEADERS_NOT_AVAILABLE(83, "Eligible topic partition leaders are not available",
-            EligibleLeadersNotAvailableException::new),
-    ELECTION_NOT_NEEDED(84, "Leader election not needed for topic partition", ElectionNotNeededException::new);
+            FencedInstanceIdException::new);
 
     private static final Logger log = LoggerFactory.getLogger(Errors.class);
 

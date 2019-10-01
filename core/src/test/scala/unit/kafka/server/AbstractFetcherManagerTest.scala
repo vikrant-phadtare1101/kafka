@@ -19,7 +19,6 @@ package kafka.server
 import com.yammer.metrics.Metrics
 import com.yammer.metrics.core.Gauge
 import kafka.cluster.BrokerEndPoint
-import kafka.utils.TestUtils
 import org.apache.kafka.common.TopicPartition
 import org.easymock.EasyMock
 import org.junit.{Before, Test}
@@ -31,7 +30,8 @@ class AbstractFetcherManagerTest {
 
   @Before
   def cleanMetricRegistry(): Unit = {
-    TestUtils.clearYammerMetrics()
+    for (metricName <- Metrics.defaultRegistry().allMetrics().keySet().asScala)
+      Metrics.defaultRegistry().removeMetric(metricName)
   }
 
   private def getMetricValue(name: String): Any = {

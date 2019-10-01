@@ -19,6 +19,7 @@
 import java.util.Properties
 
 import joptsimple.{OptionParser, OptionSet, OptionSpec}
+import org.apache.kafka.common.utils.AppInfoParser
 
 import scala.collection.Set
 

@@ -39,17 +39,17 @@ public class ContextualRecord {
         return value;
     }
 
-    long residentMemorySizeEstimate() {
-        return (value == null ? 0 : value.length) + recordContext.residentMemorySizeEstimate();
+    long sizeBytes() {
+        return (value == null ? 0 : value.length) + recordContext.sizeBytes();
     }
 
-    ByteBuffer serialize(final int endPadding) {
+    byte[] serialize() {
         final byte[] serializedContext = recordContext.serialize();
 
         final int sizeOfContext = serializedContext.length;
         final int sizeOfValueLength = Integer.BYTES;
         final int sizeOfValue = value == null ? 0 : value.length;
-        final ByteBuffer buffer = ByteBuffer.allocate(sizeOfContext + sizeOfValueLength + sizeOfValue + endPadding);
+        final ByteBuffer buffer = ByteBuffer.allocate(sizeOfContext + sizeOfValueLength + sizeOfValue);
 
         buffer.put(serializedContext);
         if (value == null) {
@@ -59,7 +59,7 @@ public class ContextualRecord {
             buffer.put(value);
         }
 
-        return buffer;
+        return buffer.array();
     }
 
     static ContextualRecord deserialize(final ByteBuffer buffer) {

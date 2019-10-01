@@ -317,7 +317,8 @@ public class StreamThreadStateStoreProviderTest {
             stateDirectory,
             null,
             new MockTime(),
-            () -> clientSupplier.getProducer(new HashMap<>())) {
+            () -> clientSupplier.getProducer(new HashMap<>()),
+            metrics.sensor("dummy")) {
             @Override
             protected void updateOffsetLimits() {}
         };

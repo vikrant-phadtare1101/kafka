@@ -177,7 +177,7 @@ public class Metadata implements Closeable {
             }
             return true;
         } else {
-            log.debug("Not replacing existing epoch {} with new epoch {} for partition {}", oldEpoch, epoch, topicPartition);
+            log.debug("Not replacing existing epoch {} with new epoch {}", oldEpoch, epoch);
             return false;
         }
     }

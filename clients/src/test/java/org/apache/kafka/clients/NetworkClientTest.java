@@ -272,11 +272,12 @@ public class NetworkClientTest {
 
     // Creates expected ApiVersionsResponse from the specified node, where the max protocol version for the specified
     // key is set to the specified version.
-    private ApiVersionsResponse createExpectedApiVersionsResponse(ApiKeys key, short maxVersion) {
+    private ApiVersionsResponse createExpectedApiVersionsResponse(Node node, ApiKeys key,
+        short apiVersionsMaxProtocolVersion) {
         List<ApiVersionsResponse.ApiVersion> versionList = new ArrayList<>();
         for (ApiKeys apiKey : ApiKeys.values()) {
             if (apiKey == key) {
-                versionList.add(new ApiVersionsResponse.ApiVersion(apiKey, (short) 0, maxVersion));
+                versionList.add(new ApiVersionsResponse.ApiVersion(apiKey.id, (short) 0, apiVersionsMaxProtocolVersion));
             } else {
                 versionList.add(new ApiVersionsResponse.ApiVersion(apiKey));
             }
@@ -288,7 +289,7 @@ public class NetworkClientTest {
     public void testThrottlingNotEnabledForConnectionToOlderBroker() {
         // Instrument the test so that the max protocol version for PRODUCE returned from the node is 5 and thus
         // client-side throttling is not enabled. Also, return a response with a 100ms throttle delay.
-        setExpectedApiVersionsResponse(createExpectedApiVersionsResponse(ApiKeys.PRODUCE, (short) 5));
+        setExpectedApiVersionsResponse(createExpectedApiVersionsResponse(node, ApiKeys.PRODUCE, (short) 5));
         while (!client.ready(node, time.milliseconds()))
             client.poll(1, time.milliseconds());
         selector.clear();

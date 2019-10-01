@@ -47,6 +47,7 @@ import java.io.IOException;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -89,13 +90,16 @@ public class StreamsUpgradeTest {
         final KafkaStreams streams = new KafkaStreams(builder.build(), config, kafkaClientSupplier);
         streams.start();
 
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.out.println("closing Kafka Streams instance");
-            System.out.flush();
-            streams.close();
-            System.out.println("UPGRADE-TEST-CLIENT-CLOSED");
-            System.out.flush();
-        }));
+        Runtime.getRuntime().addShutdownHook(new Thread() {
+            @Override
+            public void run() {
+                System.out.println("closing Kafka Streams instance");
+                System.out.flush();
+                streams.close();
+                System.out.println("UPGRADE-TEST-CLIENT-CLOSED");
+                System.out.flush();
+            }
+        });
     }
 
     private static class FutureKafkaClientSupplier extends DefaultKafkaClientSupplier {
@@ -164,7 +168,7 @@ public class StreamsUpgradeTest {
                 assignment.userData().putInt(0, AssignmentInfo.LATEST_SUPPORTED_VERSION));
 
             final List<TopicPartition> partitions = new ArrayList<>(assignment.partitions());
-            partitions.sort(PARTITION_COMPARATOR);
+            Collections.sort(partitions, PARTITION_COMPARATOR);
 
             // version 1 field
             final Map<TaskId, Set<TopicPartition>> activeTasks = new HashMap<>();

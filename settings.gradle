@@ -37,5 +37,4 @@ include 'clients',
     'streams:upgrade-system-tests-11',
     'streams:upgrade-system-tests-20',
     'streams:upgrade-system-tests-21',
-    'streams:upgrade-system-tests-22',
     'tools'

@@ -38,7 +38,12 @@ public class SystemTime implements Time {
 
     @Override
     public void sleep(long ms) {
-        Utils.sleep(ms);
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            // just wake up early
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Override

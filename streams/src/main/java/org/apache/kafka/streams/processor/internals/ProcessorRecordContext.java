@@ -73,7 +73,7 @@ public class ProcessorRecordContext implements RecordContext {
         return headers;
     }
 
-    public long residentMemorySizeEstimate() {
+    public long sizeBytes() {
         long size = 0;
         size += Long.BYTES; // value.context.timestamp
         size += Long.BYTES; // value.context.offset

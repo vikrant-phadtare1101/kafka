@@ -33,7 +33,6 @@ import org.apache.kafka.streams.kstream.Transformer;
 import org.apache.kafka.streams.kstream.ValueTransformer;
 import org.apache.kafka.streams.processor.internals.RecordCollector;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
-import org.apache.kafka.streams.processor.internals.metrics.ThreadMetrics;
 import org.apache.kafka.streams.state.internals.InMemoryKeyValueStore;
 
 import java.io.File;
@@ -215,9 +214,10 @@ public class MockProcessorContext implements ProcessorContext, RecordCollector.S
         this.stateDir = stateDir;
         final MetricConfig metricConfig = new MetricConfig();
         metricConfig.recordLevel(Sensor.RecordingLevel.DEBUG);
-        final String threadName = "mock-processor-context-virtual-thread";
-        this.metrics = new StreamsMetricsImpl(new Metrics(metricConfig), threadName);
-        ThreadMetrics.skipRecordSensor(metrics);
+        this.metrics = new StreamsMetricsImpl(
+            new Metrics(metricConfig),
+            "mock-processor-context-virtual-thread"
+        );
     }
 
     @Override

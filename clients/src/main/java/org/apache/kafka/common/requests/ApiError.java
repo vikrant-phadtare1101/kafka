@@ -50,10 +50,6 @@ public class ApiError {
         message = struct.getOrElse(ERROR_MESSAGE, null);
     }
 
-    public ApiError(Errors error) {
-        this(error, error.message());
-    }
-
     public ApiError(Errors error, String message) {
         this.error = error;
         this.message = message;

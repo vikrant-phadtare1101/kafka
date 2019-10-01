@@ -20,9 +20,10 @@ package kafka.server
 
 import java.util.concurrent.TimeUnit
 
+import kafka.cluster.Partition
 import kafka.metrics.KafkaMetricsGroup
-import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.protocol.Errors
+import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.requests.DeleteRecordsResponse
 
 import scala.collection._
@@ -73,7 +74,7 @@ class DelayedDeleteRecords(delayMs: Long,
       // skip those partitions that have already been satisfied
       if (status.acksPending) {
         val (lowWatermarkReached, error, lw) = replicaManager.getPartition(topicPartition) match {
-          case HostedPartition.Online(partition) =>
+          case partition: Partition =>
             partition.leaderReplicaIfLocal match {
               case Some(_) =>
                 val leaderLW = partition.lowWatermarkIfLeader

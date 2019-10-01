@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.clients.consumer;
 
-import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.ClientRequest;
 import org.apache.kafka.clients.KafkaClient;
 import org.apache.kafka.clients.MockClient;
@@ -208,16 +207,6 @@ public class KafkaConsumerTest {
         config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9999");
         config.put(ConsumerConfig.RECEIVE_BUFFER_CONFIG, -2);
         new KafkaConsumer<>(config, new ByteArrayDeserializer(), new ByteArrayDeserializer());
-    }
-
-    @Test
-    public void shouldIgnoreGroupInstanceIdForEmptyGroupId() {
-        Map<String, Object> config = new HashMap<>();
-        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9999");
-        config.put(ConsumerConfig.GROUP_INSTANCE_ID_CONFIG, "instance_id");
-        KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(
-                config, new ByteArrayDeserializer(), new ByteArrayDeserializer());
-        consumer.close();
     }
 
     @Test
@@ -1935,8 +1924,7 @@ public class KafkaConsumerTest {
                 time,
                 retryBackoffMs,
                 requestTimeoutMs,
-                IsolationLevel.READ_UNCOMMITTED,
-                new ApiVersions());
+                IsolationLevel.READ_UNCOMMITTED);
 
         return new KafkaConsumer<>(
                 loggerFactory,

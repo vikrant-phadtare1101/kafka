@@ -227,7 +227,6 @@ public class WorkerCoordinator extends AbstractCoordinator implements Closeable 
         return super.rejoinNeededOrPending() || (assignmentSnapshot == null || assignmentSnapshot.failed()) || rejoinRequested;
     }
 
-    @Override
     public String memberId() {
         Generation generation = generation();
         if (generation != null)
