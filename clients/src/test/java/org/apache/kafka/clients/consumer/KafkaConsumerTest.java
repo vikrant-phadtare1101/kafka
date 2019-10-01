@@ -18,8 +18,10 @@ package org.apache.kafka.clients.consumer;
 
 import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.ClientRequest;
+import org.apache.kafka.clients.GroupRebalanceConfig;
 import org.apache.kafka.clients.KafkaClient;
 import org.apache.kafka.clients.MockClient;
+import org.apache.kafka.clients.consumer.internals.AbstractCoordinator;
 import org.apache.kafka.clients.consumer.internals.ConsumerCoordinator;
 import org.apache.kafka.clients.consumer.internals.ConsumerInterceptors;
 import org.apache.kafka.clients.consumer.internals.ConsumerMetadata;
@@ -27,8 +29,6 @@ import org.apache.kafka.clients.consumer.internals.ConsumerMetrics;
 import org.apache.kafka.clients.consumer.internals.ConsumerNetworkClient;
 import org.apache.kafka.clients.consumer.internals.ConsumerProtocol;
 import org.apache.kafka.clients.consumer.internals.Fetcher;
-import org.apache.kafka.clients.consumer.internals.Heartbeat;
-import org.apache.kafka.clients.consumer.internals.PartitionAssignor;
 import org.apache.kafka.clients.consumer.internals.SubscriptionState;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.KafkaException;
@@ -396,12 +396,12 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 1));
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RoundRobinAssignor();
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, true, groupInstanceId);
 
         consumer.subscribe(singleton(topic), getConsumerRebalanceListener(consumer));
-        Node coordinator = prepareRebalance(client, node, assignor, singletonList(tp0), null);
+        AbstractCoordinator.CoordinatorNodes coordinator = prepareRebalance(client, node, assignor, singletonList(tp0), null);
 
         // initial fetch
         client.prepareResponseFrom(fetchResponse(tp0, 0, 0), node);
@@ -409,7 +409,7 @@ public class KafkaConsumerTest {
 
         assertEquals(singleton(tp0), consumer.assignment());
 
-        AtomicBoolean heartbeatReceived = prepareHeartbeatResponse(client, coordinator);
+        AtomicBoolean heartbeatReceived = prepareHeartbeatResponse(client, coordinator.getCoordinatorForApiKey(ApiKeys.HEARTBEAT));
 
         // heartbeat interval is 2 seconds
         time.sleep(heartbeatIntervalMs);
@@ -430,11 +430,11 @@ public class KafkaConsumerTest {
 
         initMetadata(client, Collections.singletonMap(topic, 1));
         Node node = metadata.fetch().nodes().get(0);
-        PartitionAssignor assignor = new RoundRobinAssignor();
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, true, groupInstanceId);
         consumer.subscribe(singleton(topic), getConsumerRebalanceListener(consumer));
-        Node coordinator = prepareRebalance(client, node, assignor, singletonList(tp0), null);
+        AbstractCoordinator.CoordinatorNodes coordinator = prepareRebalance(client, node, assignor, singletonList(tp0), null);
 
         consumer.updateAssignmentMetadataIfNeeded(time.timer(Long.MAX_VALUE));
         consumer.poll(Duration.ZERO);
@@ -444,7 +444,7 @@ public class KafkaConsumerTest {
         client.poll(0, time.milliseconds());
 
         client.prepareResponseFrom(fetchResponse(tp0, 5, 0), node);
-        AtomicBoolean heartbeatReceived = prepareHeartbeatResponse(client, coordinator);
+        AtomicBoolean heartbeatReceived = prepareHeartbeatResponse(client, coordinator.getCoordinatorForApiKey(ApiKeys.HEARTBEAT));
 
         time.sleep(heartbeatIntervalMs);
         Thread.sleep(heartbeatIntervalMs);
@@ -465,7 +465,7 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 1));
         Node node = metadata.fetch().nodes().get(0);
 
-        final PartitionAssignor assignor = new RoundRobinAssignor();
+        final ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         final KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, true, groupInstanceId);
         consumer.subscribe(singleton(topic), getConsumerRebalanceListener(consumer));
@@ -489,7 +489,7 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 1));
         Node node = metadata.fetch().nodes().get(0);
 
-        final PartitionAssignor assignor = new RoundRobinAssignor();
+        final ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         final KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, true, groupInstanceId);
         consumer.subscribe(singleton(topic), getConsumerRebalanceListener(consumer));
@@ -512,7 +512,7 @@ public class KafkaConsumerTest {
         MockClient client = new MockClient(time, metadata);
 
         initMetadata(client, Collections.singletonMap(topic, 1));
-        PartitionAssignor assignor = new RoundRobinAssignor();
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, true, groupInstanceId);
         consumer.assign(singleton(tp0));
@@ -587,17 +587,18 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 1));
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RoundRobinAssignor();
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor,
                 true, groupId, groupInstanceId);
         consumer.assign(singletonList(tp0));
 
         client.prepareResponseFrom(FindCoordinatorResponse.prepareResponse(Errors.NONE, node), node);
-        Node coordinator = new Node(Integer.MAX_VALUE - node.id(), node.host(), node.port());
+        AbstractCoordinator.CoordinatorNodes coordinator = new  AbstractCoordinator.CoordinatorNodes(node.id(), node.host(), node.port());
+        coordinator.getCoordinatorForApiKey(ApiKeys.JOIN_GROUP);
 
         // lookup committed offset and find nothing
-        client.prepareResponseFrom(offsetResponse(Collections.singletonMap(tp0, -1L), Errors.NONE), coordinator);
+        client.prepareResponseFrom(offsetResponse(Collections.singletonMap(tp0, -1L), Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.OFFSET_FETCH));
         consumer.poll(Duration.ZERO);
     }
 
@@ -611,16 +612,17 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 1));
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RoundRobinAssignor();
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor,
                 true, groupId, groupInstanceId);
         consumer.assign(singletonList(tp0));
 
         client.prepareResponseFrom(FindCoordinatorResponse.prepareResponse(Errors.NONE, node), node);
-        Node coordinator = new Node(Integer.MAX_VALUE - node.id(), node.host(), node.port());
+        AbstractCoordinator.CoordinatorNodes coordinator = new AbstractCoordinator.CoordinatorNodes(node.id(), node.host(), node.port());
+        coordinator.getCoordinatorForApiKey(ApiKeys.JOIN_GROUP);
 
-        client.prepareResponseFrom(offsetResponse(Collections.singletonMap(tp0, 539L), Errors.NONE), coordinator);
+        client.prepareResponseFrom(offsetResponse(Collections.singletonMap(tp0, 539L), Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.OFFSET_FETCH));
         consumer.poll(Duration.ZERO);
 
         assertEquals(539L, consumer.position(tp0));
@@ -636,16 +638,17 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 1));
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RoundRobinAssignor();
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor,
                 true, groupId, groupInstanceId);
         consumer.assign(singletonList(tp0));
 
         client.prepareResponseFrom(FindCoordinatorResponse.prepareResponse(Errors.NONE, node), node);
-        Node coordinator = new Node(Integer.MAX_VALUE - node.id(), node.host(), node.port());
+        AbstractCoordinator.CoordinatorNodes coordinator = new AbstractCoordinator.CoordinatorNodes(node.id(), node.host(), node.port());
+        coordinator.getCoordinatorForApiKey(ApiKeys.JOIN_GROUP);
 
-        client.prepareResponseFrom(offsetResponse(Collections.singletonMap(tp0, -1L), Errors.NONE), coordinator);
+        client.prepareResponseFrom(offsetResponse(Collections.singletonMap(tp0, -1L), Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.OFFSET_FETCH));
         client.prepareResponse(listOffsetsResponse(Collections.singletonMap(tp0, 50L)));
 
         consumer.poll(Duration.ZERO);
@@ -663,7 +666,7 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 1));
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RoundRobinAssignor();
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor,
                 true, groupId, Optional.empty());
@@ -686,17 +689,18 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 2));
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RoundRobinAssignor();
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, true, groupInstanceId);
         consumer.assign(singletonList(tp0));
 
         // lookup coordinator
         client.prepareResponseFrom(FindCoordinatorResponse.prepareResponse(Errors.NONE, node), node);
-        Node coordinator = new Node(Integer.MAX_VALUE - node.id(), node.host(), node.port());
+        AbstractCoordinator.CoordinatorNodes coordinator = new AbstractCoordinator.CoordinatorNodes(node.id(), node.host(), node.port());
+        coordinator.getCoordinatorForApiKey(ApiKeys.JOIN_GROUP);
 
         // fetch offset for one topic
-        client.prepareResponseFrom(offsetResponse(Collections.singletonMap(tp0, offset1), Errors.NONE), coordinator);
+        client.prepareResponseFrom(offsetResponse(Collections.singletonMap(tp0, offset1), Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.OFFSET_FETCH));
         assertEquals(offset1, consumer.committed(tp0).offset());
 
         consumer.assign(Arrays.asList(tp0, tp1));
@@ -704,12 +708,12 @@ public class KafkaConsumerTest {
         // fetch offset for two topics
         Map<TopicPartition, Long> offsets = new HashMap<>();
         offsets.put(tp0, offset1);
-        client.prepareResponseFrom(offsetResponse(offsets, Errors.NONE), coordinator);
+        client.prepareResponseFrom(offsetResponse(offsets, Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.OFFSET_FETCH));
         assertEquals(offset1, consumer.committed(tp0).offset());
 
         offsets.remove(tp0);
         offsets.put(tp1, offset2);
-        client.prepareResponseFrom(offsetResponse(offsets, Errors.NONE), coordinator);
+        client.prepareResponseFrom(offsetResponse(offsets, Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.OFFSET_FETCH));
         assertEquals(offset2, consumer.committed(tp1).offset());
         consumer.close(Duration.ofMillis(0));
     }
@@ -724,11 +728,11 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 1));
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RoundRobinAssignor();
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, true, groupInstanceId);
         consumer.subscribe(singleton(topic), getConsumerRebalanceListener(consumer));
-        Node coordinator = prepareRebalance(client, node, assignor, singletonList(tp0), null);
+        AbstractCoordinator.CoordinatorNodes coordinator = prepareRebalance(client, node, assignor, singletonList(tp0), null);
 
         consumer.updateAssignmentMetadataIfNeeded(time.timer(Long.MAX_VALUE));
         consumer.poll(Duration.ZERO);
@@ -742,7 +746,7 @@ public class KafkaConsumerTest {
         client.prepareResponseFrom(fetchResponse(tp0, 5, 0), node);
 
         // no data has been returned to the user yet, so the committed offset should be 0
-        AtomicBoolean commitReceived = prepareOffsetCommitResponse(client, coordinator, tp0, 0);
+        AtomicBoolean commitReceived = prepareOffsetCommitResponse(client, coordinator.getCoordinatorForApiKey(ApiKeys.OFFSET_COMMIT), tp0, 0);
 
         consumer.poll(Duration.ZERO);
 
@@ -764,7 +768,7 @@ public class KafkaConsumerTest {
         initMetadata(client, partitionCounts);
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RoundRobinAssignor();
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, true, groupInstanceId);
         prepareRebalance(client, node, singleton(topic), assignor, singletonList(tp0), null);
@@ -782,7 +786,7 @@ public class KafkaConsumerTest {
 
     @Test
     public void testChangingRegexSubscription() {
-        PartitionAssignor assignor = new RoundRobinAssignor();
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         String otherTopic = "other";
         TopicPartition otherTopicPartition = new TopicPartition(otherTopic, 0);
@@ -800,7 +804,7 @@ public class KafkaConsumerTest {
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, false, groupInstanceId);
 
-        Node coordinator = prepareRebalance(client, node, singleton(topic), assignor, singletonList(tp0), null);
+        AbstractCoordinator.CoordinatorNodes coordinator = prepareRebalance(client, node, singleton(topic), assignor, singletonList(tp0), null);
         consumer.subscribe(Pattern.compile(topic), getConsumerRebalanceListener(consumer));
 
         consumer.updateAssignmentMetadataIfNeeded(time.timer(Long.MAX_VALUE));
@@ -828,7 +832,7 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 1));
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RoundRobinAssignor();
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, true, groupInstanceId);
         consumer.subscribe(singleton(topic), getConsumerRebalanceListener(consumer));
@@ -878,7 +882,7 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 1));
         Node node = metadata.fetch().nodes().get(0);
 
-        final PartitionAssignor assignor = new RoundRobinAssignor();
+        final ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, false, groupInstanceId);
         consumer.subscribe(singleton(topic), getConsumerRebalanceListener(consumer));
@@ -908,7 +912,7 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 1));
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RangeAssignor();
+        ConsumerPartitionAssignor assignor = new RangeAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, true, groupInstanceId);
         consumer.subscribe(singletonList(topic), getConsumerRebalanceListener(consumer));
@@ -948,7 +952,7 @@ public class KafkaConsumerTest {
         initMetadata(client, tpCounts);
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RangeAssignor();
+        ConsumerPartitionAssignor assignor = new RangeAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, true, groupInstanceId);
 
@@ -961,7 +965,7 @@ public class KafkaConsumerTest {
         assertTrue(consumer.assignment().isEmpty());
 
         // mock rebalance responses
-        Node coordinator = prepareRebalance(client, node, assignor, Arrays.asList(tp0, t2p0), null);
+        AbstractCoordinator.CoordinatorNodes coordinator = prepareRebalance(client, node, assignor, Arrays.asList(tp0, t2p0), null);
 
         consumer.updateAssignmentMetadataIfNeeded(time.timer(Long.MAX_VALUE));
         consumer.poll(Duration.ZERO);
@@ -1005,7 +1009,7 @@ public class KafkaConsumerTest {
         Map<TopicPartition, Long> partitionOffsets1 = new HashMap<>();
         partitionOffsets1.put(tp0, 1L);
         partitionOffsets1.put(t2p0, 10L);
-        AtomicBoolean commitReceived = prepareOffsetCommitResponse(client, coordinator, partitionOffsets1);
+        AtomicBoolean commitReceived = prepareOffsetCommitResponse(client, coordinator.getCoordinatorForApiKey(ApiKeys.OFFSET_COMMIT), partitionOffsets1);
 
         // mock rebalance responses
         prepareRebalance(client, node, assignor, Arrays.asList(tp0, t3p0), coordinator);
@@ -1062,7 +1066,7 @@ public class KafkaConsumerTest {
         initMetadata(client, tpCounts);
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RangeAssignor();
+        ConsumerPartitionAssignor assignor = new RangeAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, false, groupInstanceId);
 
@@ -1124,20 +1128,21 @@ public class KafkaConsumerTest {
         initMetadata(client, tpCounts);
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RangeAssignor();
+        ConsumerPartitionAssignor assignor = new RangeAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, true, groupInstanceId);
 
         // lookup coordinator
         client.prepareResponseFrom(FindCoordinatorResponse.prepareResponse(Errors.NONE, node), node);
-        Node coordinator = new Node(Integer.MAX_VALUE - node.id(), node.host(), node.port());
+        AbstractCoordinator.CoordinatorNodes coordinator = new AbstractCoordinator.CoordinatorNodes(node.id(), node.host(), node.port());
+        coordinator.getCoordinatorForApiKey(ApiKeys.JOIN_GROUP); // create the dummy node for join-group requests to avoid index mis-match
 
         // manual assignment
         consumer.assign(singleton(tp0));
         consumer.seekToBeginning(singleton(tp0));
 
         // fetch offset for one topic
-        client.prepareResponseFrom(offsetResponse(Collections.singletonMap(tp0, 0L), Errors.NONE), coordinator);
+        client.prepareResponseFrom(offsetResponse(Collections.singletonMap(tp0, 0L), Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.OFFSET_FETCH));
         assertEquals(0, consumer.committed(tp0).offset());
 
         // verify that assignment immediately changes
@@ -1153,7 +1158,7 @@ public class KafkaConsumerTest {
         assertEquals(11L, consumer.position(tp0));
 
         // mock the offset commit response for to be revoked partitions
-        AtomicBoolean commitReceived = prepareOffsetCommitResponse(client, coordinator, tp0, 11);
+        AtomicBoolean commitReceived = prepareOffsetCommitResponse(client, coordinator.getCoordinatorForApiKey(ApiKeys.OFFSET_COMMIT), tp0, 11);
 
         // new manual assignment
         consumer.assign(singleton(t2p0));
@@ -1180,13 +1185,14 @@ public class KafkaConsumerTest {
         initMetadata(client, tpCounts);
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RangeAssignor();
+        ConsumerPartitionAssignor assignor = new RangeAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, false, groupInstanceId);
 
         // lookup coordinator
         client.prepareResponseFrom(FindCoordinatorResponse.prepareResponse(Errors.NONE, node), node);
-        Node coordinator = new Node(Integer.MAX_VALUE - node.id(), node.host(), node.port());
+        AbstractCoordinator.CoordinatorNodes coordinator = new  AbstractCoordinator.CoordinatorNodes(node.id(), node.host(), node.port());
+        coordinator.getCoordinatorForApiKey(ApiKeys.JOIN_GROUP);
 
         // manual assignment
         consumer.assign(singleton(tp0));
@@ -1195,7 +1201,7 @@ public class KafkaConsumerTest {
         // fetch offset for one topic
         client.prepareResponseFrom(
                 offsetResponse(Collections.singletonMap(tp0, 0L), Errors.NONE),
-                coordinator);
+                coordinator.getCoordinatorForApiKey(ApiKeys.OFFSET_FETCH));
         assertEquals(0, consumer.committed(tp0).offset());
 
         // verify that assignment immediately changes
@@ -1234,13 +1240,14 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 2));
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RangeAssignor();
+        ConsumerPartitionAssignor assignor = new RangeAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, true, groupInstanceId);
 
         // lookup coordinator
         client.prepareResponseFrom(FindCoordinatorResponse.prepareResponse(Errors.NONE, node), node);
-        Node coordinator = new Node(Integer.MAX_VALUE - node.id(), node.host(), node.port());
+        AbstractCoordinator.CoordinatorNodes coordinator = new  AbstractCoordinator.CoordinatorNodes(node.id(), node.host(), node.port());
+        coordinator.getCoordinatorForApiKey(ApiKeys.JOIN_GROUP);
 
         // manual assignment
         Set<TopicPartition> partitions = Utils.mkSet(tp0, tp1);
@@ -1256,12 +1263,12 @@ public class KafkaConsumerTest {
         offsets.put(tp0, 0L);
         offsets.put(tp1, 0L);
 
-        client.prepareResponseFrom(offsetResponse(offsets, Errors.NONE), coordinator);
+        client.prepareResponseFrom(offsetResponse(offsets, Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.OFFSET_FETCH));
         assertEquals(0, consumer.committed(tp0).offset());
 
         offsets.remove(tp0);
         offsets.put(tp1, 0L);
-        client.prepareResponseFrom(offsetResponse(offsets, Errors.NONE), coordinator);
+        client.prepareResponseFrom(offsetResponse(offsets, Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.OFFSET_FETCH));
         assertEquals(0, consumer.committed(tp1).offset());
 
         // fetch and verify consumer's position in the two partitions
@@ -1333,7 +1340,7 @@ public class KafkaConsumerTest {
     }
 
     @Test
-    public void closeShouldBeIdempotent() {
+    public void testCloseShouldBeIdempotent() {
         KafkaConsumer<byte[], byte[]> consumer = newConsumer((String) null);
         consumer.close();
         consumer.close();
@@ -1420,7 +1427,7 @@ public class KafkaConsumerTest {
     }
 
     @Test
-    public void shouldAttemptToRejoinGroupAfterSyncGroupFailed() throws Exception {
+    public void testShouldAttemptToRejoinGroupAfterSyncGroupFailed() throws Exception {
         Time time = new MockTime();
         SubscriptionState subscription = new SubscriptionState(new LogContext(), OffsetResetStrategy.EARLIEST);
         ConsumerMetadata metadata = createMetadata(subscription);
@@ -1429,16 +1436,16 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 1));
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RoundRobinAssignor();
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, false, groupInstanceId);
         consumer.subscribe(singleton(topic), getConsumerRebalanceListener(consumer));
         client.prepareResponseFrom(FindCoordinatorResponse.prepareResponse(Errors.NONE, node), node);
-        Node coordinator = new Node(Integer.MAX_VALUE - node.id(), node.host(), node.port());
+        AbstractCoordinator.CoordinatorNodes coordinator = new AbstractCoordinator.CoordinatorNodes(node.id(), node.host(), node.port());
 
 
-        client.prepareResponseFrom(joinGroupFollowerResponse(assignor, 1, "memberId", "leaderId", Errors.NONE), coordinator);
-        client.prepareResponseFrom(syncGroupResponse(singletonList(tp0), Errors.NONE), coordinator);
+        client.prepareResponseFrom(joinGroupFollowerResponse(assignor, 1, "memberId", "leaderId", Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.JOIN_GROUP));
+        client.prepareResponseFrom(syncGroupResponse(singletonList(tp0), Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.SYNC_GROUP));
 
         client.prepareResponseFrom(fetchResponse(tp0, 0, 1), node);
         client.prepareResponseFrom(fetchResponse(tp0, 1, 0), node);
@@ -1454,10 +1461,10 @@ public class KafkaConsumerTest {
             }
         }, new HeartbeatResponse(
                 new HeartbeatResponseData().setErrorCode(Errors.REBALANCE_IN_PROGRESS.code())),
-                coordinator);
+                coordinator.getCoordinatorForApiKey(ApiKeys.HEARTBEAT));
 
         // join group
-        final ByteBuffer byteBuffer = ConsumerProtocol.serializeSubscription(new PartitionAssignor.Subscription(singletonList(topic)));
+        final ByteBuffer byteBuffer = ConsumerProtocol.serializeSubscription(new ConsumerPartitionAssignor.Subscription(singletonList(topic)));
 
         // This member becomes the leader
         String memberId = "memberId";
@@ -1474,17 +1481,17 @@ public class KafkaConsumerTest {
                         )
         );
 
-        client.prepareResponseFrom(leaderResponse, coordinator);
+        client.prepareResponseFrom(leaderResponse, coordinator.getCoordinatorForApiKey(ApiKeys.LEAVE_GROUP));
 
         // sync group fails due to disconnect
-        client.prepareResponseFrom(syncGroupResponse(singletonList(tp0), Errors.NONE), coordinator, true);
+        client.prepareResponseFrom(syncGroupResponse(singletonList(tp0), Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.SYNC_GROUP), true);
 
         // should try and find the new coordinator
         client.prepareResponseFrom(FindCoordinatorResponse.prepareResponse(Errors.NONE, node), node);
 
         // rejoin group
-        client.prepareResponseFrom(joinGroupFollowerResponse(assignor, 1, "memberId", "leaderId", Errors.NONE), coordinator);
-        client.prepareResponseFrom(syncGroupResponse(singletonList(tp0), Errors.NONE), coordinator);
+        client.prepareResponseFrom(joinGroupFollowerResponse(assignor, 1, "memberId", "leaderId", Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.JOIN_GROUP));
+        client.prepareResponseFrom(syncGroupResponse(singletonList(tp0), Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.SYNC_GROUP));
 
         client.prepareResponseFrom(new MockClient.RequestMatcher() {
             @Override
@@ -1512,11 +1519,11 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 1));
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RoundRobinAssignor();
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         final KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, false, Optional.empty());
         consumer.subscribe(singleton(topic), getConsumerRebalanceListener(consumer));
-        Node coordinator = prepareRebalance(client, node, assignor, singletonList(tp0), null);
+        AbstractCoordinator.CoordinatorNodes coordinator = prepareRebalance(client, node, assignor, singletonList(tp0), null);
 
         client.prepareMetadataUpdate(TestUtils.metadataUpdateWith(1, Collections.singletonMap(topic, 1)));
 
@@ -1640,6 +1647,52 @@ public class KafkaConsumerTest {
         consumer.committed(tp0);
     }
 
+    @Test
+    public void testRebalanceException() {
+        Time time = new MockTime();
+        SubscriptionState subscription = new SubscriptionState(new LogContext(), OffsetResetStrategy.EARLIEST);
+        ConsumerMetadata metadata = createMetadata(subscription);
+        MockClient client = new MockClient(time, metadata);
+
+        initMetadata(client, Collections.singletonMap(topic, 1));
+        Node node = metadata.fetch().nodes().get(0);
+
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
+
+        KafkaConsumer<String, String> consumer = newConsumer(time, client, subscription, metadata, assignor, true, groupInstanceId);
+
+        consumer.subscribe(singleton(topic), getExceptionConsumerRebalanceListener());
+        AbstractCoordinator.CoordinatorNodes coordinator = new AbstractCoordinator.CoordinatorNodes(node.id(), node.host(), node.port());
+
+        client.prepareResponseFrom(FindCoordinatorResponse.prepareResponse(Errors.NONE, node), node);
+        client.prepareResponseFrom(joinGroupFollowerResponse(assignor, 1, "memberId", "leaderId", Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.JOIN_GROUP));
+        client.prepareResponseFrom(syncGroupResponse(singletonList(tp0), Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.SYNC_GROUP));
+
+        // assign throws
+        try {
+            consumer.updateAssignmentMetadataIfNeeded(time.timer(Long.MAX_VALUE));
+            fail("Should throw exception");
+        } catch (Throwable e) {
+            assertEquals("boom!", e.getCause().getMessage());
+        }
+
+        // the assignment is still updated regardless of the exception
+        assertEquals(singleton(tp0), subscription.assignedPartitions());
+
+        // close's revoke throws
+        try {
+            consumer.close(Duration.ofMillis(0));
+            fail("Should throw exception");
+        } catch (Throwable e) {
+            assertEquals("boom!", e.getCause().getCause().getMessage());
+        }
+
+        consumer.close(Duration.ofMillis(0));
+
+        // the assignment is still updated regardless of the exception
+        assertTrue(subscription.assignedPartitions().isEmpty());
+    }
+
     private KafkaConsumer<String, String> consumerWithPendingAuthenticationError() {
         Time time = new MockTime();
         SubscriptionState subscription = new SubscriptionState(new LogContext(), OffsetResetStrategy.EARLIEST);
@@ -1649,7 +1702,7 @@ public class KafkaConsumerTest {
         initMetadata(client, singletonMap(topic, 1));
         Node node = metadata.fetch().nodes().get(0);
 
-        PartitionAssignor assignor = new RangeAssignor();
+        ConsumerPartitionAssignor assignor = new RangeAssignor();
 
         client.createPendingAuthenticationError(node, 0);
         return newConsumer(time, client, subscription, metadata, assignor, false, groupInstanceId);
@@ -1670,16 +1723,30 @@ public class KafkaConsumerTest {
         };
     }
 
+    private ConsumerRebalanceListener getExceptionConsumerRebalanceListener() {
+        return new ConsumerRebalanceListener() {
+            @Override
+            public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+                throw new RuntimeException("boom!");
+            }
+
+            @Override
+            public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+                throw new RuntimeException("boom!");
+            }
+        };
+    }
+
     private ConsumerMetadata createMetadata(SubscriptionState subscription) {
         return new ConsumerMetadata(0, Long.MAX_VALUE, false, false,
                                     subscription, new LogContext(), new ClusterResourceListeners());
     }
 
-    private Node prepareRebalance(MockClient client, Node node, final Set<String> subscribedTopics, PartitionAssignor assignor, List<TopicPartition> partitions, Node coordinator) {
+    private AbstractCoordinator.CoordinatorNodes prepareRebalance(MockClient client, Node node, final Set<String> subscribedTopics, ConsumerPartitionAssignor assignor, List<TopicPartition> partitions, AbstractCoordinator.CoordinatorNodes coordinator) {
         if (coordinator == null) {
             // lookup coordinator
             client.prepareResponseFrom(FindCoordinatorResponse.prepareResponse(Errors.NONE, node), node);
-            coordinator = new Node(Integer.MAX_VALUE - node.id(), node.host(), node.port());
+            coordinator = new AbstractCoordinator.CoordinatorNodes(node.id(), node.host(), node.port());
         }
 
         // join group
@@ -1692,29 +1759,29 @@ public class KafkaConsumerTest {
                 assertTrue(protocolIterator.hasNext());
 
                 ByteBuffer protocolMetadata = ByteBuffer.wrap(protocolIterator.next().metadata());
-                PartitionAssignor.Subscription subscription = ConsumerProtocol.deserializeSubscription(protocolMetadata);
+                ConsumerPartitionAssignor.Subscription subscription = ConsumerProtocol.deserializeSubscription(protocolMetadata);
                 return subscribedTopics.equals(new HashSet<>(subscription.topics()));
             }
-        }, joinGroupFollowerResponse(assignor, 1, "memberId", "leaderId", Errors.NONE), coordinator);
+        }, joinGroupFollowerResponse(assignor, 1, "memberId", "leaderId", Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.JOIN_GROUP));
 
         // sync group
-        client.prepareResponseFrom(syncGroupResponse(partitions, Errors.NONE), coordinator);
+        client.prepareResponseFrom(syncGroupResponse(partitions, Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.SYNC_GROUP));
 
         return coordinator;
     }
 
-    private Node prepareRebalance(MockClient client, Node node, PartitionAssignor assignor, List<TopicPartition> partitions, Node coordinator) {
+    private AbstractCoordinator.CoordinatorNodes prepareRebalance(MockClient client, Node node, ConsumerPartitionAssignor assignor, List<TopicPartition> partitions, AbstractCoordinator.CoordinatorNodes coordinator) {
         if (coordinator == null) {
             // lookup coordinator
             client.prepareResponseFrom(FindCoordinatorResponse.prepareResponse(Errors.NONE, node), node);
-            coordinator = new Node(Integer.MAX_VALUE - node.id(), node.host(), node.port());
+            coordinator = new AbstractCoordinator.CoordinatorNodes(node.id(), node.host(), node.port());
         }
 
         // join group
-        client.prepareResponseFrom(joinGroupFollowerResponse(assignor, 1, "memberId", "leaderId", Errors.NONE), coordinator);
+        client.prepareResponseFrom(joinGroupFollowerResponse(assignor, 1, "memberId", "leaderId", Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.JOIN_GROUP));
 
         // sync group
-        client.prepareResponseFrom(syncGroupResponse(partitions, Errors.NONE), coordinator);
+        client.prepareResponseFrom(syncGroupResponse(partitions, Errors.NONE), coordinator.getCoordinatorForApiKey(ApiKeys.SYNC_GROUP));
 
         return coordinator;
     }
@@ -1764,7 +1831,7 @@ public class KafkaConsumerTest {
         return new OffsetCommitResponse(responseData);
     }
 
-    private JoinGroupResponse joinGroupFollowerResponse(PartitionAssignor assignor, int generationId, String memberId, String leaderId, Errors error) {
+    private JoinGroupResponse joinGroupFollowerResponse(ConsumerPartitionAssignor assignor, int generationId, String memberId, String leaderId, Errors error) {
         return new JoinGroupResponse(
                 new JoinGroupResponseData()
                         .setErrorCode(error.code())
@@ -1777,7 +1844,7 @@ public class KafkaConsumerTest {
     }
 
     private SyncGroupResponse syncGroupResponse(List<TopicPartition> partitions, Errors error) {
-        ByteBuffer buf = ConsumerProtocol.serializeAssignment(new PartitionAssignor.Assignment(partitions));
+        ByteBuffer buf = ConsumerProtocol.serializeAssignment(new ConsumerPartitionAssignor.Assignment(partitions));
         return new SyncGroupResponse(
                 new SyncGroupResponseData()
                         .setErrorCode(error.code())
@@ -1848,7 +1915,7 @@ public class KafkaConsumerTest {
                                                       KafkaClient client,
                                                       SubscriptionState subscription,
                                                       ConsumerMetadata metadata,
-                                                      PartitionAssignor assignor,
+                                                      ConsumerPartitionAssignor assignor,
                                                       boolean autoCommitEnabled,
                                                       Optional<String> groupInstanceId) {
         return newConsumer(time, client, subscription, metadata, assignor, autoCommitEnabled, groupId, groupInstanceId);
@@ -1865,7 +1932,7 @@ public class KafkaConsumerTest {
                                                       KafkaClient client,
                                                       SubscriptionState subscription,
                                                       ConsumerMetadata metadata,
-                                                      PartitionAssignor assignor,
+                                                      ConsumerPartitionAssignor assignor,
                                                       boolean autoCommitEnabled,
                                                       String groupId,
                                                       Optional<String> groupInstanceId) {
@@ -1885,7 +1952,7 @@ public class KafkaConsumerTest {
         Deserializer<String> keyDeserializer = new StringDeserializer();
         Deserializer<String> valueDeserializer = new StringDeserializer();
 
-        List<PartitionAssignor> assignors = singletonList(assignor);
+        List<ConsumerPartitionAssignor> assignors = singletonList(assignor);
         ConsumerInterceptors<String, String> interceptors = new ConsumerInterceptors<>(Collections.emptyList());
 
         Metrics metrics = new Metrics();
@@ -1895,27 +1962,25 @@ public class KafkaConsumerTest {
         ConsumerNetworkClient consumerClient = new ConsumerNetworkClient(loggerFactory, client, metadata, time,
                 retryBackoffMs, requestTimeoutMs, heartbeatIntervalMs);
 
-        Heartbeat heartbeat = new Heartbeat(time, sessionTimeoutMs, heartbeatIntervalMs, rebalanceTimeoutMs, retryBackoffMs);
-        ConsumerCoordinator consumerCoordinator = new ConsumerCoordinator(
-                loggerFactory,
-                consumerClient,
-                groupId,
-                groupInstanceId,
-                rebalanceTimeoutMs,
-                sessionTimeoutMs,
-                heartbeat,
-                assignors,
-                metadata,
-                subscription,
-                metrics,
-                metricGroupPrefix,
-                time,
-                retryBackoffMs,
-                autoCommitEnabled,
-                autoCommitIntervalMs,
-                interceptors,
-                true);
-
+        GroupRebalanceConfig rebalanceConfig = new GroupRebalanceConfig(sessionTimeoutMs,
+                                                                        rebalanceTimeoutMs,
+                                                                        heartbeatIntervalMs,
+                                                                        groupId,
+                                                                        groupInstanceId,
+                                                                        retryBackoffMs,
+                                                                        true);
+        ConsumerCoordinator consumerCoordinator = new ConsumerCoordinator(rebalanceConfig,
+                                                                          loggerFactory,
+                                                                          consumerClient,
+                                                                          assignors,
+                                                                          metadata,
+                                                                          subscription,
+                                                                          metrics,
+                                                                          metricGroupPrefix,
+                                                                          time,
+                                                                          autoCommitEnabled,
+                                                                          autoCommitIntervalMs,
+                                                                          interceptors);
         Fetcher<String, String> fetcher = new Fetcher<>(
                 loggerFactory,
                 consumerClient,
@@ -1987,7 +2052,7 @@ public class KafkaConsumerTest {
         initMetadata(client, Collections.singletonMap(topic, 1));
         Cluster cluster = metadata.fetch();
 
-        PartitionAssignor assignor = new RoundRobinAssignor();
+        ConsumerPartitionAssignor assignor = new RoundRobinAssignor();
 
         String invalidTopicName = "topic abc";  // Invalid topic name due to space
 
